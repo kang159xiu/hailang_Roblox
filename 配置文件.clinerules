@@ -1,0 +1,28 @@
+# Roblox 千宇宙工作室 (Thousand Universes Studio) 开发规范
+
+## 1. 核心工作原则 (Critical Rules)
+* **代码修改与操作界限**：
+  - **文件层**：你只能读取和修改 VSCode 工作区内的源码文件（.luau / .json 等），禁止要求开发者在 Studio 里手动修改脚本。
+  - **逻辑层**：你编写的 Lua 代码**完全可以且应该**在运行时动态创建、修改、操作 Roblox 里的任何 Instance（如 Part, Model, GUI 等）。不要因为“不能修改 Studio 脚本”而拒绝编写操作 3D 场景或物体的代码。
+* **修改前确认**：在对现有的核心系统进行重构、或添加大篇幅代码前，**必须先与用户商量并获得明确同意**。
+* **原生优先**：必须使用 Roblox 原生的 API (如 `Instance.new`, `WaitForChild`) 和正确的 Luau 语法。
+
+## 2. 服务端架构 (单例服务架构)
+* **入口**：`src/server/ServerScriptService/Server.server.luau`。
+* **模块**：业务逻辑在 `src/server/ServerScriptService/Modules/` 下拆分为独立的 ModuleScript，返回一个表，并提供 `.Init()` 方法供入口调用。
+* **网络通信**：服务端不预先在 Studio 创建 Remotes。必须在代码中动态确保 `ReplicatedStorage.Remotes` 下存在对应的 `RemoteEvent`。
+
+## 3. 客户端架构 (单体核心脚本)
+* **入口与核心**：客户端逻辑高度集中在 `src/client/StarterPlayerScripts/Client.client.luau` 中。
+* **数据同步**：客户端主要通过监听 `Player:GetAttributeChangedSignal()` 或接收 `RemoteEvent` 来更新状态。
+
+## 4. UI 交互规范
+* **UI 来源**：UI 界面由开发者在 Roblox Studio 的 `StarterGui` 中手动搭建，节点大多使用中文命名以明确功能。
+* **脚本绑定**：客户端脚本需要通过 `WaitForChild()` / `FindFirstChild()` 找到对应的中文名 UI 节点（如 `row:FindFirstChild("武器名称")`），然后再进行 `.Text` 修改或 `.Activated` 事件绑定。
+* **回退机制 (Fallback)**：在编写 UI 逻辑时，若找不到预设的 UI 节点，可以保留 `Instance.new` 动态生成 UI 的兜底方案。
+
+## 5. 代码风格
+* **类型与注释**：新建脚本使用 `--!strict`，保留清晰的类型推断。复杂逻辑提供简短的中文注释。
+* **简明扼要**：直奔主题，提供解决问题的具体代码，避免冗长的解释。
+
+* **禁止本地执行**：绝对不可以在 VSCode 终端中使用 `lua`、`luau` 或 `node` 等命令来尝试运行或测试项目里的 `.luau` 脚本。Roblox 的代码没有本地运行环境，强行运行会导致 Unknown global 报错。你只需要完成代码的编写和保存即可。

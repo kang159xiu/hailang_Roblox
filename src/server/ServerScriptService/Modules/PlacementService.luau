@@ -1,0 +1,1174 @@
+--!strict
+-- ServerScriptService.Modules.PlacementService
+-- 负责：
+-- 1) 玩家站到自己家的“怪放置区域x”时：
+--    - 若装备了怪物道具(Tool) => 自动放置
+--    - 若已放置怪 => 领取未领取金币
+-- 2) 解锁放置区域（按 0 / 50 / 500 / 5000...）
+-- 3) 放置后的怪提供“卖出/收起”交互
+--
+-- 说明：目前使用 ProximityPrompt 作为交互 UI（靠近出现，长按/点击）。
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
+
+local Util = require(script.Parent:WaitForChild("Util"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local HomeService = require(script.Parent:WaitForChild("HomeService"))
+local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
+
+local PlacementService = {}
+
+export type PersistedPlacedMonster = {
+	MonsterLevel: number,
+	Value: number,
+	GoldPerSec: number,
+	UnclaimedGold: number,
+	LastTickUnix: number,
+}
+
+export type PersistedSlot = {
+	Unlocked: boolean,
+	Placed: PersistedPlacedMonster?,
+}
+
+type SlotState = {
+	Unlocked: boolean,
+	PlacedMonster: BasePart?,
+	PlacedData: PersistedPlacedMonster?,
+}
+
+local slotStatesByUserId: {[number]: {[number]: SlotState}} = {}
+local lastTouchAt: {[string]: number} = {}
+
+-- While placed monsters are producing, UnclaimedGold changes every second.
+-- We pulse dirty marks at a low frequency so periodic saves can happen even if the player doesn't do any actions.
+local lastDirtyPulseUnixByUserId: {[number]: number} = {}
+
+-- 解锁提示：只在玩家站在对应地块上方时才显示
+local function getHRP(player: Player): BasePart?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function isPlayerStandingOnSlot(player: Player, slotPart: BasePart): boolean
+	local hrp = getHRP(player)
+	if not hrp then
+		return false
+	end
+	local hrpPos = hrp.Position
+	local slotPos = slotPart.Position
+	local yDelta = hrpPos.Y - slotPos.Y
+	if yDelta < 0 or yDelta > 8 then
+		return false
+	end
+
+	local planarDistance = Vector2.new(hrpPos.X - slotPos.X, hrpPos.Z - slotPos.Z).Magnitude
+	local maxPlanarDistance = math.max(slotPart.Size.X, slotPart.Size.Z)
+	return planarDistance <= maxPlanarDistance
+end
+
+-- =====================
+-- 怪物收益显示（BillboardGui / SurfaceGui 模板）
+-- =====================
+
+local INCOME_DISPLAY_NAME_PREFIX = "怪物收益显示_"
+
+local warnedMissingIncomeTemplate = false
+type IncomeDisplayGui = BillboardGui | SurfaceGui
+
+local cachedIncomeDisplayTemplate: IncomeDisplayGui? = nil
+
+local function getIncomeDisplayTemplate(): IncomeDisplayGui?
+	if cachedIncomeDisplayTemplate then
+		return cachedIncomeDisplayTemplate
+	end
+
+	local displayPart: Instance? = nil
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc.Name == "收益显示" and (desc:IsA("BasePart") or desc:IsA("Model") or desc:IsA("Folder")) then
+			displayPart = desc
+			break
+		end
+	end
+
+	local template: IncomeDisplayGui? = nil
+	if displayPart then
+		local billboard = displayPart:FindFirstChildWhichIsA("BillboardGui", true)
+		if billboard then
+			template = billboard
+		else
+			local surface = displayPart:FindFirstChildWhichIsA("SurfaceGui", true)
+			if surface then
+				template = surface
+			end
+		end
+	end
+
+	if not template then
+		if not warnedMissingIncomeTemplate then
+			warnedMissingIncomeTemplate = true
+			warn("【致命错误】找不到收益显示模板！请确认：\n1. Workspace 下有一个名叫 '收益显示' 的零件/组。\n2. 该 '收益显示' 内部包含 BillboardGui 或 SurfaceGui。")
+		end
+		return nil
+	end
+
+	cachedIncomeDisplayTemplate = template
+	return cachedIncomeDisplayTemplate
+end
+
+local function findIncomeDisplayTextLabel(gui: IncomeDisplayGui): TextLabel?
+	for _, child in ipairs(gui:GetDescendants()) do
+		if child:IsA("TextLabel") then
+			return child
+		end
+	end
+	return nil
+end
+
+local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?, goldPerSec: number?, unclaimed: number?, value: number?)
+	local labelByName: {[string]: TextLabel} = {}
+	local allLabels = {}
+	for _, child in ipairs(gui:GetDescendants()) do
+		if child:IsA("TextLabel") then
+			labelByName[child.Name] = child
+			table.insert(allLabels, child)
+		end
+	end
+
+	local levelText = monsterLevel == nil and "未放置" or string.format("Lv.%d", monsterLevel)
+	local goldPerSecText = string.format("+%d/s", goldPerSec or 0)
+	local unclaimedText = tostring(unclaimed or 0)
+	local valueText = tostring(value or 0)
+
+	local hasStructuredLabels = false
+	local function setIfExists(labelName: string, text: string)
+		local label = labelByName[labelName]
+		if label then
+			label.Text = text
+			hasStructuredLabels = true
+		end
+	end
+
+	setIfExists("01等级", levelText)
+	setIfExists("02怪每秒收益", goldPerSecText)
+	setIfExists("03当前未领取收益", unclaimedText)
+	setIfExists("04怪的价值", valueText)
+	setIfExists("05怪价值", valueText)
+
+	if hasStructuredLabels then
+		return
+	end
+
+	local textLabel = findIncomeDisplayTextLabel(gui)
+	if not textLabel then
+		return
+	end
+
+	textLabel.Text = table.concat({
+		"怪物等级: " .. levelText,
+		"每秒收益: " .. goldPerSecText,
+		"未领取收益: " .. unclaimedText,
+		"价值: " .. valueText,
+	}, "\n")
+end
+
+local function setIncomeDisplayVisibility(gui: IncomeDisplayGui, visible: boolean)
+	gui.Enabled = visible
+end
+
+local function isSlotCurrentlyVisible(slotPart: BasePart): boolean
+	return slotPart:IsDescendantOf(Workspace)
+end
+
+local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collectorPart: BasePart?): IncomeDisplayGui?
+	local anchorPart = collectorPart or slotPart
+	if anchorPart.Parent == nil then
+		return nil
+	end
+
+	local idx = slotPart:GetAttribute("SlotIndex")
+	local name = INCOME_DISPLAY_NAME_PREFIX .. tostring(idx or slotPart.Name)
+	local existing = anchorPart:FindFirstChild(name)
+	if existing and (existing:IsA("BillboardGui") or existing:IsA("SurfaceGui")) then
+		local gui = existing :: IncomeDisplayGui
+		local owner = gui:GetAttribute("OwnerUserId")
+		if type(owner) == "number" and owner ~= player.UserId then
+			gui:Destroy()
+		elseif findIncomeDisplayTextLabel(gui) then
+			gui:SetAttribute("OwnerUserId", player.UserId)
+			gui:SetAttribute("SlotIndex", idx)
+			return gui
+		else
+			gui:Destroy()
+		end
+	end
+
+	local template = getIncomeDisplayTemplate()
+	if not template then
+		return nil
+	end
+
+	local clone = template:Clone()
+	clone.Name = name
+	clone:SetAttribute("OwnerUserId", player.UserId)
+	clone:SetAttribute("SlotIndex", idx)
+	if clone:IsA("SurfaceGui") then
+		clone.Adornee = anchorPart
+		clone.Face = Enum.NormalId.Top
+	elseif clone:IsA("BillboardGui") then
+		clone.Adornee = anchorPart
+	end
+	clone.Parent = anchorPart
+	setIncomeDisplayText(clone, nil, nil, nil, nil)
+	return clone
+end
+
+local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
+	local gui = ensureIncomeDisplayGui(player, slotPart, collectorPart)
+	if not gui then
+		return
+	end
+
+	setIncomeDisplayVisibility(gui, isSlotCurrentlyVisible(slotPart))
+	if not isSlotCurrentlyVisible(slotPart) then
+		return
+	end
+
+	if not placed or placed.Parent == nil then
+		setIncomeDisplayText(gui, nil, nil, nil, nil)
+		return
+	end
+
+	local lvl = tonumber(placed:GetAttribute("MonsterLevel"))
+	local gps = tonumber(placed:GetAttribute("GoldPerSec"))
+	local un = tonumber(placed:GetAttribute("UnclaimedGold"))
+	local v = tonumber(placed:GetAttribute("Value"))
+
+	setIncomeDisplayText(
+		gui,
+		type(lvl) == "number" and math.floor(lvl) or nil,
+		type(gps) == "number" and math.floor(gps) or 0,
+		type(un) == "number" and math.floor(un) or 0,
+		type(v) == "number" and math.floor(v) or 0
+	)
+end
+
+local function toast(player: Player, text: string)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local ev = remotes and remotes:FindFirstChild("PushClientToast")
+	if ev and ev:IsA("RemoteEvent") then
+		ev:FireClient(player, text)
+	end
+end
+
+local function getMonsterAppearanceTemplate(monsterLevel: number): Instance?
+	local folder = ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	if not folder or not folder:IsA("Folder") then
+		return nil
+	end
+
+	return folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+		or folder:FindFirstChild("怪物形象 " .. tostring(monsterLevel))
+		or folder:FindFirstChild("Lv" .. tostring(monsterLevel))
+end
+
+local function stripJointsAndConstraints(root: Instance)
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("JointInstance") or d:IsA("Constraint") then
+			d:Destroy()
+		end
+	end
+end
+
+local function weldAllToRoot(rootPart: BasePart, root: Instance)
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = false
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CanQuery = false
+			d.Massless = true
+
+			local w = Instance.new("WeldConstraint")
+			w.Part0 = rootPart
+			w.Part1 = d
+			w.Parent = d
+		end
+	end
+end
+
+local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLevel: number)
+	local template = getMonsterAppearanceTemplate(monsterLevel)
+	if not template then
+		return
+	end
+
+	-- 支持 Model / BasePart / Folder（三者都能保留子元件）
+	if not (template:IsA("Model") or template:IsA("BasePart") or template:IsA("Folder")) then
+		return
+	end
+
+	local old = rootPart:FindFirstChild("Appearance")
+	if old then
+		old:Destroy()
+	end
+
+	local appearanceFolder = Instance.new("Folder")
+	appearanceFolder.Name = "Appearance"
+	appearanceFolder.Parent = rootPart
+
+	local clone = template:Clone()
+	clone.Parent = appearanceFolder
+
+	stripJointsAndConstraints(clone)
+
+	local function toModelLike(inst: Instance): (Model?, BasePart?)
+		if inst:IsA("Model") then
+			return inst, nil
+		end
+		if inst:IsA("BasePart") then
+			return nil, inst
+		end
+		if inst:IsA("Folder") then
+			local m = Instance.new("Model")
+			m.Name = inst.Name
+			m.Parent = inst.Parent
+			for _, ch in ipairs(inst:GetChildren()) do
+				ch.Parent = m
+			end
+			inst:Destroy()
+			return m, nil
+		end
+		return nil, nil
+	end
+
+	local model, part = toModelLike(clone)
+	local applied = false
+
+	if model then
+		local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
+		if anyPart then
+			model:PivotTo(rootPart.CFrame)
+			weldAllToRoot(rootPart, model)
+			applied = true
+		end
+	elseif part then
+		-- 如果模板根是 Part 且带子元件：先把整棵层级整体移动到 Root 位置
+		local delta = rootPart.CFrame * part.CFrame:Inverse()
+		for _, d in ipairs(part:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.CFrame = delta * d.CFrame
+			end
+		end
+
+		part.CFrame = rootPart.CFrame
+		part.Anchored = false
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CanQuery = false
+		part.Massless = true
+
+		local w = Instance.new("WeldConstraint")
+		w.Part0 = rootPart
+		w.Part1 = part
+		w.Parent = part
+
+		-- 关键：如果模板根是 Part 且子元件也是 Part/MeshPart，需要把子元件也 Weld 到 Root
+		weldAllToRoot(rootPart, part)
+		applied = true
+	end
+
+	-- 只有成功挂上可见外观时，才隐藏占位 RootPart
+	rootPart.Transparency = if applied then 1 else 0
+end
+
+local function getUnlockCost(slotIndex: number): number
+	-- 规则：
+	-- 01 自动解锁，花费 0
+	-- 02 花费 50
+	-- 03~30：= 上一个区域的 20 倍（跨层同理：11=10*20，21=20*20）
+	if slotIndex <= 1 then
+		return 0
+	end
+	if slotIndex == 2 then
+		return 50
+	end
+
+	local cost = 50
+	for _ = 3, slotIndex do
+		cost *= 20
+	end
+	return cost
+end
+
+local function ensureState(player: Player): {[number]: SlotState}
+	local m = slotStatesByUserId[player.UserId]
+	if m then
+		return m
+	end
+
+	m = {}
+	for i = 1, 30 do
+		m[i] = {
+			Unlocked = (i == 1),
+			PlacedMonster = nil,
+			PlacedData = nil,
+		}
+	end
+	slotStatesByUserId[player.UserId] = m
+	return m
+end
+
+local function canUseSlotByHomeLevel(player: Player, slotIndex: number): boolean
+	local homeLevel = PlayerData.GetHomeLevel(player)
+	return slotIndex <= homeLevel * 10
+end
+
+local function isPrevUnlocked(player: Player, slotIndex: number): boolean
+	if slotIndex <= 1 then
+		return true
+	end
+	local st = ensureState(player)[slotIndex - 1]
+	return st ~= nil and st.Unlocked == true
+end
+
+local function addUnclaimedToPlayer(player: Player, placed: BasePart)
+	local un = placed:GetAttribute("UnclaimedGold")
+	if type(un) ~= "number" or un <= 0 then
+		return
+	end
+	placed:SetAttribute("UnclaimedGold", 0)
+	PlayerData.AddGold(player, math.floor(un))
+	PlayerData.Sync(player)
+
+	local idx = placed:GetAttribute("SlotIndex")
+	if type(idx) == "number" then
+		local states = ensureState(player)
+		local st = states[idx]
+		if st and st.PlacedData then
+			st.PlacedData.UnclaimedGold = 0
+		end
+	end
+
+	DataDirtyService.MarkDirty(player)
+end
+
+local function createPlacedMonsterPart(
+	player: Player,
+	slotPart: BasePart,
+	monsterLevel: number,
+	value: number,
+	goldPerSec: number,
+	unclaimedGold: number?,
+	lastTickUnix: number?
+): BasePart
+	local p = Instance.new("Part")
+	p.Name = "PlacedMonster"
+	p.Anchored = true
+	p.CanCollide = true
+	p.Size = Vector3.new(3, 4, 3)
+	p.Material = Enum.Material.SmoothPlastic
+	p.Color = Color3.fromRGB(60, 60, 60)
+	p.Transparency = 0
+	p.CFrame = slotPart.CFrame + Vector3.new(0, slotPart.Size.Y * 0.5 + 2, 0)
+	p.Parent = slotPart.Parent
+
+	p:SetAttribute("IsPlacedMonster", true)
+	p:SetAttribute("OwnerUserId", player.UserId)
+	p:SetAttribute("SlotIndex", slotPart:GetAttribute("SlotIndex"))
+	p:SetAttribute("MonsterLevel", monsterLevel)
+	p:SetAttribute("Value", value)
+	p:SetAttribute("GoldPerSec", goldPerSec)
+	p:SetAttribute("UnclaimedGold", unclaimedGold or 0)
+	p:SetAttribute("LastTickUnix", lastTickUnix or os.time())
+
+	-- 外观：与背包 Tool/刷怪外观保持一致
+	applyMonsterAppearanceToPlacedPart(p, monsterLevel)
+
+	-- 卖出 prompt
+	local sell = Instance.new("ProximityPrompt")
+	sell.Name = "SellPrompt"
+	sell.ActionText = "卖出"
+	sell.ObjectText = "放置怪"
+	sell.KeyboardKeyCode = Enum.KeyCode.E
+	sell.HoldDuration = 0.2
+	sell.MaxActivationDistance = 10
+	sell.RequiresLineOfSight = false
+	-- 避免和“收起”Prompt UI 重合
+	sell.UIOffset = Vector2.new(0, 0)
+	sell.Parent = p
+
+	sell.Triggered:Connect(function(triggerPlayer: Player)
+		-- Block interactions before data is loaded
+		if player:GetAttribute("__DataLoaded") ~= true then
+			return
+		end
+		if triggerPlayer.UserId ~= player.UserId then
+			return
+		end
+		addUnclaimedToPlayer(player, p)
+
+		local val = p:GetAttribute("Value")
+		if type(val) ~= "number" then
+			val = 0
+		end
+		PlayerData.AddGold(player, val)
+		PlayerData.Sync(player)
+
+		local idx = slotPart:GetAttribute("SlotIndex")
+		if type(idx) == "number" then
+			local st = ensureState(player)[idx]
+			if st then
+				st.PlacedData = nil
+			end
+		end
+
+		DataDirtyService.MarkDirty(player, 5)
+
+		-- 刷新收益显示牌子（怪已移除）
+		local home = HomeService.GetHome(player)
+		if home then
+			local slot = HomeService.GetSlot(player, idx)
+			refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
+		end
+
+		toast(player, string.format("卖出获得 %d 金币", val))
+		p:Destroy()
+	end)
+
+	-- 收起 prompt
+	local store = Instance.new("ProximityPrompt")
+	store.Name = "StorePrompt"
+	store.ActionText = "收起"
+	store.ObjectText = "放置怪"
+	store.KeyboardKeyCode = Enum.KeyCode.R
+	store.HoldDuration = 0.6
+	store.MaxActivationDistance = 10
+	store.RequiresLineOfSight = false
+	-- 避免和“卖出”Prompt UI 重合
+	store.UIOffset = Vector2.new(0, 50)
+	store.Parent = p
+
+	store.Triggered:Connect(function(triggerPlayer: Player)
+		-- Block interactions before data is loaded
+		if player:GetAttribute("__DataLoaded") ~= true then
+			return
+		end
+		if triggerPlayer.UserId ~= player.UserId then
+			return
+		end
+		addUnclaimedToPlayer(player, p)
+
+		local lvl = p:GetAttribute("MonsterLevel")
+		local v = p:GetAttribute("Value")
+		local gps = p:GetAttribute("GoldPerSec")
+		local ok = InventoryService.TryAddMonsterItem(
+			player,
+			type(lvl) == "number" and lvl or 1,
+			type(v) == "number" and v or 0,
+			type(gps) == "number" and gps or 0
+		)
+		if ok then
+			local idx = slotPart:GetAttribute("SlotIndex")
+			if type(idx) == "number" then
+				local st = ensureState(player)[idx]
+				if st then
+					st.PlacedData = nil
+				end
+			end
+
+			DataDirtyService.MarkDirty(player, 5)
+
+			-- 刷新收益显示牌子（怪已收起）
+			local home = HomeService.GetHome(player)
+			if home then
+				local slot = HomeService.GetSlot(player, idx)
+				refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
+			end
+
+			toast(player, "已收起到背包")
+			p:Destroy()
+		end
+	end)
+
+	-- 销毁时清理引用
+	p.Destroying:Connect(function()
+		local m = slotStatesByUserId[player.UserId]
+		if not m then
+			return
+		end
+		local si = slotPart:GetAttribute("SlotIndex")
+		if type(si) ~= "number" then
+			return
+		end
+		local st = m[si]
+		if st and st.PlacedMonster == p then
+			st.PlacedMonster = nil
+		end
+	end)
+
+	return p
+end
+
+local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
+	-- Block interactions before data is loaded (prevents overwriting loaded profile state)
+	if player:GetAttribute("__DataLoaded") ~= true then
+		return
+	end
+
+	local stateMap = ensureState(player)
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) ~= "number" then
+		return
+	end
+
+	-- 超出当前家园等级：不能放置
+	if not canUseSlotByHomeLevel(player, idx) then
+		return
+	end
+
+	local state = stateMap[idx]
+	if not state then
+		return
+	end
+	if not state.Unlocked then
+		return
+	end
+	if state.PlacedMonster and state.PlacedMonster.Parent then
+		return
+	end
+
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	-- 查找装备中的怪 Tool
+	local equipped: Tool? = nil
+	for _, ch in ipairs(character:GetChildren()) do
+		if ch:IsA("Tool") and ch:GetAttribute("IsMonsterItem") == true then
+			equipped = ch
+			break
+		end
+	end
+	if not equipped then
+		return
+	end
+
+	local lvl = equipped:GetAttribute("MonsterLevel")
+	local v = equipped:GetAttribute("Value")
+	local gps = equipped:GetAttribute("GoldPerSec")
+
+	local placed = createPlacedMonsterPart(
+		player,
+		slotPart,
+		type(lvl) == "number" and lvl or 1,
+		type(v) == "number" and v or 0,
+		type(gps) == "number" and gps or 0
+	)
+
+	-- 放置后立即刷新收益显示牌子
+	local home = HomeService.GetHome(player)
+	if home then
+		local slot = HomeService.GetSlot(player, idx)
+		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, placed)
+	end
+
+	local itemId = equipped:GetAttribute("ItemId")
+	if type(itemId) == "string" and itemId ~= "" then
+		InventoryService.ConsumeItem(player, itemId)
+	end
+
+	state.PlacedMonster = placed
+	state.PlacedData = {
+		MonsterLevel = type(lvl) == "number" and lvl or 1,
+		Value = type(v) == "number" and v or 0,
+		GoldPerSec = type(gps) == "number" and gps or 0,
+		UnclaimedGold = 0,
+		LastTickUnix = os.time(),
+	}
+	equipped:Destroy()
+	DataDirtyService.MarkDirty(player, 5)
+	toast(player, string.format("已放置怪到区域%d", idx))
+end
+
+local function payoutIfAny(player: Player, slotPart: BasePart)
+	-- Block interactions before data is loaded
+	if player:GetAttribute("__DataLoaded") ~= true then
+		return
+	end
+
+	local stateMap = ensureState(player)
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) ~= "number" then
+		return
+	end
+
+	-- 超出当前家园等级：不处理
+	if not canUseSlotByHomeLevel(player, idx) then
+		return
+	end
+
+	local state = stateMap[idx]
+	if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then
+		return
+	end
+
+	local placed = state.PlacedMonster
+	local un = placed:GetAttribute("UnclaimedGold")
+	if type(un) ~= "number" or un <= 0 then
+		return
+	end
+
+	addUnclaimedToPlayer(player, placed)
+	toast(player, string.format("领取金币 +%d", math.floor(un)))
+end
+
+-- forward declare（ensureUnlockPrompt 里会用到）
+local updateUnlockPromptEnabled: (Player, BasePart) -> ()
+
+local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
+	local prompt = slotPart:FindFirstChild("UnlockPrompt")
+	if prompt and prompt:IsA("ProximityPrompt") then
+		return
+	end
+
+	prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "UnlockPrompt"
+	prompt.ActionText = "解锁"
+	prompt.ObjectText = slotPart.Name
+	prompt.KeyboardKeyCode = Enum.KeyCode.F
+	prompt.HoldDuration = 0.4
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	-- 避免解锁提示挤掉“升级区域”提示
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OneGlobally
+	prompt.Parent = slotPart
+
+	prompt.Triggered:Connect(function(triggerPlayer: Player)
+		-- Block interactions before data is loaded
+		if player:GetAttribute("__DataLoaded") ~= true then
+			return
+		end
+		if triggerPlayer.UserId ~= player.UserId then
+			return
+		end
+
+		local idx = slotPart:GetAttribute("SlotIndex")
+		if type(idx) ~= "number" then
+			return
+		end
+
+		-- 超出当前家园等级：禁止解锁
+		if not canUseSlotByHomeLevel(player, idx) then
+			toast(player, "需要升级家园才能解锁该区域")
+			updateUnlockPromptEnabled(player, slotPart)
+			return
+		end
+
+		-- 必须按顺序解锁
+		if not isPrevUnlocked(player, idx) then
+			toast(player, "请先解锁上一个放置区域")
+			updateUnlockPromptEnabled(player, slotPart)
+			return
+		end
+
+		local state = ensureState(player)[idx]
+		if state.Unlocked then
+			prompt.Enabled = false
+			return
+		end
+
+		local cost = getUnlockCost(idx)
+		if not PlayerData.TrySpendGold(player, cost) then
+			toast(player, string.format("金币不足，需要 %d", cost))
+			return
+		end
+
+		state.Unlocked = true
+		PlayerData.Sync(player)
+		DataDirtyService.MarkDirty(player, 5)
+		prompt.Enabled = false
+		toast(player, string.format("解锁成功：区域%d", idx))
+
+		-- 解锁后刷新本格与下一格（让下一格可立即解锁）
+		updateUnlockPromptEnabled(player, slotPart)
+		local nextSlot = HomeService.GetSlotPart(player, idx + 1)
+		if nextSlot then
+			updateUnlockPromptEnabled(player, nextSlot)
+		end
+	end)
+end
+
+updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) ~= "number" then
+		return
+	end
+
+	local prompt = slotPart:FindFirstChild("UnlockPrompt")
+	if not (prompt and prompt:IsA("ProximityPrompt")) then
+		return
+	end
+
+	local state = ensureState(player)[idx]
+	if not state then
+		prompt.Enabled = false
+		return
+	end
+
+		-- 玩家必须站在对应地块上方才显示解锁
+	if not isPlayerStandingOnSlot(player, slotPart) then
+		prompt.Enabled = false
+		return
+	end
+
+	-- 超出当前家园等级：不可解锁/不可交互
+	if not canUseSlotByHomeLevel(player, idx) then
+		prompt.Enabled = true
+		prompt.ActionText = "升级家园解锁"
+		return
+	end
+
+	-- 已解锁
+	if state.Unlocked then
+		prompt.Enabled = false
+		return
+	end
+
+	-- 必须按顺序解锁（需要上一个区域已解锁）
+	if not isPrevUnlocked(player, idx) then
+		prompt.Enabled = true
+		prompt.ActionText = "先解锁上一个"
+		return
+	end
+
+	prompt.Enabled = true
+	prompt.ActionText = string.format("解锁(%d)", getUnlockCost(idx))
+end
+
+
+function PlacementService.Init()
+	-- 初始化已有玩家
+	for _, player in ipairs(Players:GetPlayers()) do
+		ensureState(player)
+	end
+
+	Players.PlayerAdded:Connect(function(player)
+		ensureState(player)
+
+		-- 等 Home 建好
+		task.spawn(function()
+			local home
+			while player.Parent do
+				home = HomeService.GetHome(player)
+				if home then
+					break
+				end
+				task.wait(0.1)
+			end
+
+			if not home then
+				warn("[PlacementService] Home not ready for player", player)
+				return
+			end
+
+			local function refreshAllUnlockPrompts()
+				for _, slot in ipairs(home.Slots) do
+					updateUnlockPromptEnabled(player, slot.Part)
+				end
+			end
+
+			for _, slot in ipairs(home.Slots) do
+				ensureUnlockPrompt(player, slot.Part)
+				updateUnlockPromptEnabled(player, slot.Part)
+
+				-- 收益显示牌子：一开始就存在
+				ensureIncomeDisplayGui(player, slot.Part, slot.Collector)
+
+				slot.Part.Touched:Connect(function(hit)
+						-- Block interactions before data is loaded
+						if player:GetAttribute("__DataLoaded") ~= true then
+							return
+						end
+						local character = player.Character
+
+					if not character then
+						return
+					end
+					if not hit:IsDescendantOf(character) then
+						return
+					end
+
+					-- debounce
+					local idx = slot.Part:GetAttribute("SlotIndex")
+					local key = string.format("%d_%s", player.UserId, tostring(idx))
+					local now = os.clock()
+					if (lastTouchAt[key] or 0) + 0.35 > now then
+						return
+					end
+					lastTouchAt[key] = now
+
+					tryPlaceFromEquippedTool(player, slot.Part)
+				end)
+
+				if slot.Collector then
+					slot.Collector.Touched:Connect(function(hit)
+						if player:GetAttribute("__DataLoaded") ~= true then
+							return
+						end
+						local character = player.Character
+
+						if not character then
+							return
+						end
+						if not hit:IsDescendantOf(character) then
+							return
+						end
+
+						local idx = slot.Part:GetAttribute("SlotIndex")
+						local key = string.format("collect_%d_%s", player.UserId, tostring(idx))
+						local now = os.clock()
+						if (lastTouchAt[key] or 0) + 0.35 > now then
+							return
+						end
+						lastTouchAt[key] = now
+
+						payoutIfAny(player, slot.Part)
+					end)
+				end
+			end
+
+			-- 家园升级后需要刷新 UnlockPrompt（哪些格子可用/可解锁）
+			player:GetAttributeChangedSignal("HomeLevel"):Connect(function()
+				refreshAllUnlockPrompts()
+			end)
+		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(_player)
+		-- IMPORTANT:
+		-- Do not clear placement state here.
+		-- DataPersistenceService needs access to the latest in-memory state during PlayerRemoving.
+		-- Call PlacementService.Cleanup(player) after persistence is done.
+	end)
+
+	-- 在线产币（仅玩家在线才跑）
+	local acc = 0
+	local unlockAcc = 0
+	RunService.Heartbeat:Connect(function(dt)
+		acc += dt
+		unlockAcc += dt
+
+		-- 0.25s 刷新一次解锁提示（只在玩家站在对应地块上方时显示）
+		if unlockAcc >= 0.25 then
+			unlockAcc = 0
+			for _, player in ipairs(Players:GetPlayers()) do
+				local home = HomeService.GetHome(player)
+				if not home then
+					continue
+				end
+				for _, slot in ipairs(home.Slots) do
+					updateUnlockPromptEnabled(player, slot.Part)
+				end
+			end
+		end
+
+		if acc < 1.0 then
+			return
+		end
+		acc = 0
+
+		for _, player in ipairs(Players:GetPlayers()) do
+			local home = HomeService.GetHome(player)
+			if not home then
+				continue
+			end
+
+			local states = ensureState(player)
+			for _, slot in ipairs(home.Slots) do
+				local idx = slot.Index
+				local state = states[idx]
+				if state and state.PlacedMonster and state.PlacedMonster.Parent then
+					local pm = state.PlacedMonster
+					local gps = pm:GetAttribute("GoldPerSec")
+					if type(gps) ~= "number" then
+						gps = 0
+					end
+					local un = pm:GetAttribute("UnclaimedGold")
+					if type(un) ~= "number" then
+						un = 0
+					end
+					local newUn = math.min(30000, un + gps)
+					local nowUnix = os.time()
+					pm:SetAttribute("UnclaimedGold", newUn)
+					pm:SetAttribute("LastTickUnix", nowUnix)
+
+					-- mirror back to state.PlacedData for robust saving
+					local st = state
+					if st.PlacedData then
+						st.PlacedData.UnclaimedGold = newUn
+						st.PlacedData.LastTickUnix = nowUnix
+					end
+
+					-- 收益显示牌子刷新
+					refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
+
+					-- pulse dirty marking so periodic saves can capture production progress
+					local lastPulse = lastDirtyPulseUnixByUserId[player.UserId] or 0
+					if nowUnix - lastPulse >= 10 then
+						lastDirtyPulseUnixByUserId[player.UserId] = nowUnix
+						DataDirtyService.MarkDirty(player)
+					end
+				else
+					-- 没放置怪：保持牌子显示“未放置”
+					refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, nil)
+				end
+			end
+		end
+	end)
+end
+
+
+local function rebuildPlacedMonstersWhenHomeReady(player: Player)
+	-- Wait for HomeService to assign a plot
+	local home
+	while player.Parent do
+		home = HomeService.GetHome(player)
+		if home then
+			break
+		end
+		task.wait(0.1)
+	end
+
+	if not home then
+		return
+	end
+
+	local states = ensureState(player)
+	local nowUnix = os.time()
+
+	for _, slot in ipairs(home.Slots) do
+		local idx = slot.Index
+		local st = states[idx]
+		if st and st.PlacedData and (not st.PlacedMonster or not st.PlacedMonster.Parent) then
+			if player:GetAttribute("__DataLoaded") ~= true then
+				return
+			end
+			local d = st.PlacedData
+
+			-- Offline production: offline收益 = 在线收益的 1/20
+			local lastTick = tonumber(d.LastTickUnix) or nowUnix
+			local offlineSec = math.max(0, nowUnix - math.floor(lastTick))
+			local gain = math.floor((offlineSec * (tonumber(d.GoldPerSec) or 0)) / 20)
+
+			local un = math.floor(tonumber(d.UnclaimedGold) or 0)
+			if gain > 0 then
+				un = math.min(30000, un + gain)
+				d.UnclaimedGold = un
+				d.LastTickUnix = nowUnix
+				DataDirtyService.MarkDirty(player, 5)
+			else
+				-- still advance last tick to avoid repeated large offline windows
+				d.LastTickUnix = nowUnix
+			end
+
+			local placed = createPlacedMonsterPart(
+				player,
+				slot.Part,
+				math.max(1, math.floor(tonumber(d.MonsterLevel) or 1)),
+				math.floor(tonumber(d.Value) or 0),
+				math.floor(tonumber(d.GoldPerSec) or 0),
+				un,
+				nowUnix
+			)
+			st.PlacedMonster = placed
+
+			-- 进游戏/加载存档后也立即刷新收益显示牌子
+			refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, placed)
+		end
+	end
+end
+
+function PlacementService.Export(player: Player): {PersistedSlot}
+	local states = ensureState(player)
+	local out: {PersistedSlot} = {}
+
+	for i = 1, 30 do
+		local st = states[i]
+		local placedData: PersistedPlacedMonster? = nil
+
+		if st then
+			-- If a live part exists, read from it (source of truth)
+			if st.PlacedMonster and st.PlacedMonster.Parent then
+				local pm = st.PlacedMonster
+				placedData = {
+					MonsterLevel = math.max(1, math.floor(tonumber(pm:GetAttribute("MonsterLevel")) or 1)),
+					Value = math.floor(tonumber(pm:GetAttribute("Value")) or 0),
+					GoldPerSec = math.floor(tonumber(pm:GetAttribute("GoldPerSec")) or 0),
+					UnclaimedGold = math.floor(tonumber(pm:GetAttribute("UnclaimedGold")) or 0),
+					LastTickUnix = math.floor(tonumber(pm:GetAttribute("LastTickUnix")) or os.time()),
+				}
+				st.PlacedData = placedData
+			elseif st.PlacedData then
+				placedData = st.PlacedData
+			end
+
+			out[i] = {
+				Unlocked = st.Unlocked == true,
+				Placed = placedData,
+			}
+		else
+			out[i] = {
+				Unlocked = (i == 1),
+				Placed = nil,
+			}
+		end
+	end
+
+	return out
+end
+
+function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlot}?)
+	local states = ensureState(player)
+
+	for i = 1, 30 do
+		local loaded = (type(loadedSlots) == "table") and loadedSlots[i] or nil
+		local unlocked = if type(loaded) == "table" then ((loaded :: any).Unlocked == true) else (i == 1)
+		states[i].Unlocked = unlocked or (i == 1)
+		states[i].PlacedMonster = nil
+		states[i].PlacedData = nil
+
+		if type(loaded) == "table" then
+			local placed = (loaded :: any).Placed
+			if type(placed) == "table" then
+				states[i].PlacedData = {
+					MonsterLevel = math.max(1, math.floor(tonumber((placed :: any).MonsterLevel) or 1)),
+					Value = math.floor(tonumber((placed :: any).Value) or 0),
+					GoldPerSec = math.floor(tonumber((placed :: any).GoldPerSec) or 0),
+					UnclaimedGold = math.floor(tonumber((placed :: any).UnclaimedGold) or 0),
+					LastTickUnix = math.floor(tonumber((placed :: any).LastTickUnix) or os.time()),
+				}
+			end
+		end
+	end
+
+	-- Rebuild placed monster parts after Home is assigned
+	task.defer(function()
+		rebuildPlacedMonstersWhenHomeReady(player)
+	end)
+end
+
+function PlacementService.Cleanup(player: Player)
+	slotStatesByUserId[player.UserId] = nil
+end
+
+return PlacementService
