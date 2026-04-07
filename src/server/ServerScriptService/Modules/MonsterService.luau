@@ -231,7 +231,7 @@ end
 
 local function getMonsterTemplate(monsterLevel: number): Instance?
 	-- 按怪物等级去查找对应的外观模板。
-	
+
 	--
 	-- 这里兼容了几种命名方式：
 	-- - 怪物形象1
@@ -257,6 +257,8 @@ end
 
 local function attachAppearanceToRoot(rootPart: BasePart, clone: Instance): boolean
 	-- 把“外观模板”附着到怪物根 Part 上。
+
+	
 	--
 	-- 这里的设计很重要：
 	-- 服务端真正把怪物当成“逻辑根 Part”来管理，
