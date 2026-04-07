@@ -5,28 +5,7 @@
 -- 本服务会创建一个怪物根 Part，再把外观模板（Model/BasePart）克隆后做纯数学 Weld 到根上，
 -- 保证场地实体怪物在解锚/物理参与时不散架、不偏移。
 
---[[
-	==============================
-	给初学者的整体说明
-	==============================
-	MonsterService 是“怪物系统服务端模块”。
-	它主要负责 4 件事：
-	1. 在指定区域里生成怪物
-	2. 维护当前存活怪物列表
-	3. 处理玩家对怪物造成伤害
-	4. 怪物死亡后允许玩家拾取尸体/战利品
 
-	为什么这个模块要放在服务端？
-	- 因为刷怪、扣血、死亡、拾取都属于关键游戏规则
-	- 这些规则如果放在客户端，玩家很容易作弊
-	- 所以客户端只负责“发起请求”，真正判定由这里完成
-
-	你可以把这个模块理解成“怪物总管”：
-	- 它决定怪物什么时候出现
-	- 它记录怪物现在还有多少血
-	- 它决定怪物什么时候死亡
-	- 它还会控制死后是否可以被收起
-]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -59,7 +38,7 @@ local MonsterService = {}
 local monstersFolder: Folder
 local aliveMonsters: {[BasePart]: true} = {}
 
-local monsterAppearances: Folder? = nil
+local monsterAppearances: Instance? = nil
 
 -- monstersFolder：Workspace 里的怪物容器，所有怪物根 Part 都会放在这里。
 -- aliveMonsters：一个“集合表”，key 是怪物根 Part，value 固定写 true。
@@ -115,11 +94,26 @@ local function getAliveCountInZone(zoneKey: string): number
 	-- 还经常需要控制“单个区域最多多少只”。
 	local n = 0
 	for m in pairs(aliveMonsters) do
-		if m.Parent == monstersFolder and m:GetAttribute("ZoneKey") == zoneKey then
+		if m:IsDescendantOf(monstersFolder) and m:GetAttribute("ZoneKey") == zoneKey then
 			n += 1
 		end
 	end
 	return n
+end
+
+local function getMonsterInstanceFromRoot(monsterPart: BasePart): Instance
+	local parent = monsterPart.Parent
+	if parent and parent:IsA("Model") and parent:GetAttribute("IsMonster") == true then
+		return parent
+	end
+	return monsterPart
+end
+
+local function syncMonsterModelAttribute(monsterPart: BasePart, name: string, value: any)
+	local inst = getMonsterInstanceFromRoot(monsterPart)
+	if inst ~= monsterPart then
+		inst:SetAttribute(name, value)
+	end
 end
 
 local function buildBillboard(monsterPart: BasePart)
@@ -209,7 +203,8 @@ local function ensureCollectPrompt(monsterPart: BasePart)
 
 		if ok then
 			aliveMonsters[monsterPart] = nil
-			monsterPart:Destroy()
+			local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
+			monsterInstance:Destroy()
 		else
 			monsterPart:SetAttribute("Collected", false)
 			prompt.Enabled = true
@@ -229,7 +224,21 @@ local function stripJointsAndConstraints(root: Instance)
 	end
 end
 
-local function getMonsterTemplate(monsterLevel: number): Instance?
+local function findMonsterAppearanceRoot(): Instance?
+	local workspaceRoot = workspace:FindFirstChild("Monster image")
+	if workspaceRoot then
+		return workspaceRoot
+	end
+
+	local replicatedRoot = ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	if replicatedRoot then
+		return replicatedRoot
+	end
+
+	return nil
+end
+
+local function getMonsterTemplate(monsterLevel: number): Model?
 	-- 按怪物等级去查找对应的外观模板。
 
 	--
@@ -238,86 +247,101 @@ local function getMonsterTemplate(monsterLevel: number): Instance?
 	-- - 怪物形象 1
 	-- - Lv1
 	--
-	-- 返回值可能是：
-	-- - Model：完整模型
-	-- - BasePart：单个零件怪物
-	-- - nil：没找到模板
-	local folder = monsterAppearances
-	if not folder then
+	-- 返回值必须是完整模板 Model：
+	-- - 外层名字：怪物形象xx
+	-- - 子节点 Model：视觉表现层
+	-- - 子节点 同名 BasePart：逻辑根节点
+	local root = monsterAppearances
+	if not root then
 		return nil
 	end
-	local inst = folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
-		or folder:FindFirstChild("怪物形象 " .. tostring(monsterLevel))
-		or folder:FindFirstChild("Lv" .. tostring(monsterLevel))
-	if inst and (inst:IsA("Model") or inst:IsA("BasePart")) then
+	local level2 = string.format("%02d", monsterLevel)
+	local inst = root:FindFirstChild("怪物形象" .. level2)
+		or root:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+		or root:FindFirstChild("怪物形象 " .. level2)
+		or root:FindFirstChild("怪物形象 " .. tostring(monsterLevel))
+	if inst and inst:IsA("Model") then
 		return inst
 	end
+
+	local fallback = root:FindFirstChild("怪物形象01")
+		or root:FindFirstChild("怪物形象1")
+		or root:FindFirstChild("怪物形象 01")
+		or root:FindFirstChild("怪物形象 1")
+	if fallback and fallback:IsA("Model") then
+		return fallback
+	end
+
 	return nil
 end
 
-local function attachAppearanceToRoot(rootPart: BasePart, clone: Instance): boolean
-	-- 把“外观模板”附着到怪物根 Part 上。
-
-	
-	--
-	-- 这里的设计很重要：
-	-- 服务端真正把怪物当成“逻辑根 Part”来管理，
-	-- 视觉外观只是焊接（Weld）在这个根上。
-	--
-	-- 这样做的好处：
-	-- 1. 逻辑上统一，攻击/查找/属性都挂在根 Part 上
-	-- 2. 外观可以很复杂（Model），但不会影响核心判定结构
-	-- 3. 即使参与物理，也不容易因为模型内部结构混乱而散架
-	--
-	-- 对 Model：
-	-- - 先 PivotTo 到根的位置
-	-- - 再找一个主要 BasePart 作为焊接点
-	--
-	-- 对 BasePart：
-	-- - 直接对齐 CFrame
-	-- - 然后焊到根上
-
-
-	if clone:IsA("Model") then
-		-- 1. 整体移动到生成坐标
-		clone:PivotTo(rootPart.CFrame)
-
-		-- 2. 寻找模型的基准部件
-		local primary = clone.PrimaryPart 
-			or clone:FindFirstChild("HumanoidRootPart") 
-			or clone:FindFirstChildWhichIsA("BasePart")
-
-		if primary then
-			-- 3. 仅建立单个 WeldConstraint 绑定整体，防止物理掉落
-			local w = Instance.new("WeldConstraint")
-			w.Name = "AppearanceWeld"
-			w.Part0 = rootPart
-			w.Part1 = primary
-			w.Parent = rootPart
-		end
-	elseif clone:IsA("BasePart") then
-		clone.CFrame = rootPart.CFrame
-		local w = Instance.new("WeldConstraint")
-		w.Name = "AppearanceWeld"
-		w.Part0 = rootPart
-		w.Part1 = clone
-		w.Parent = rootPart
-	else
-		return false
+local function findTemplateRootPart(monsterTemplate: Model): BasePart?
+	local rootName = monsterTemplate.Name
+	local root = monsterTemplate:FindFirstChild(rootName)
+	if root and root:IsA("BasePart") then
+		return root
 	end
 
-	return true
+	local deepRoot = monsterTemplate:FindFirstChild(rootName, true)
+	if deepRoot and deepRoot:IsA("BasePart") then
+		return deepRoot
+	end
+
+	local primaryPart = monsterTemplate.PrimaryPart
+	if primaryPart then
+		return primaryPart
+	end
+
+	local namedFallback = monsterTemplate:FindFirstChild("Root", true)
+		or monsterTemplate:FindFirstChild("HumanoidRootPart", true)
+		or monsterTemplate:FindFirstChild("MonsterRoot", true)
+	if namedFallback and namedFallback:IsA("BasePart") then
+		return namedFallback
+	end
+
+	return monsterTemplate:FindFirstChildWhichIsA("BasePart", true)
+		:: BasePart?
+	end
+
+local function prepareMonsterTemplateClone(monsterTemplate: Model): (Model?, BasePart?)
+	local clone = monsterTemplate:Clone()
+	local root = findTemplateRootPart(clone)
+	if not root then
+		warn(string.format("[MonsterService] Monster template %s 找不到可用根部件；建议优先在模板内放一个与外层同名的 BasePart", monsterTemplate.Name))
+		clone:Destroy()
+		return nil
+	end
+
+	clone.PrimaryPart = root
+
+	for _, d in ipairs(clone:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.Massless = true
+			if d ~= root then
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
+			end
+		end
+	end
+
+	root.Anchored = true
+	root.CanCollide = true
+	root.CanQuery = true
+	root.CanTouch = true
+
+	return clone, root
 end
 
-local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel: number): BasePart
-	-- 创建一只怪物的“根 Part + 属性 + 外观 + Billboard”。
-	-- 1. 根据怪物等级选择外观模板
-	-- 2. 创建根 Part，作为怪物逻辑载体
-	-- 3. 根据模板尺寸调整根 Part 大小
-	-- 4. 在区域顶部随机一个位置生成
-	-- 5. 写入各种 Attribute（血量、价值、金币产出、出生/过期时间等）
-	-- 6. 克隆外观并焊接到根上
-	-- 7. 给怪物创建头顶 Billboard
+local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel: number): (BasePart?, Instance?)
+	-- 创建一只怪物的“整模板实例 + 逻辑根 Part + Billboard”。
+	-- 1. 根据怪物等级选择完整模板 Model
+	-- 2. 直接 clone 整个模板，而不是运行时重新焊接外观
+	-- 3. 找到与父节点同名的根 Part，作为逻辑根节点
+	-- 4. 整体移动到刷怪区域顶部
+	-- 5. 把各种 Attribute 写到根 Part，并同步必要属性到外层 Model
+	-- 6. 给根 Part 创建头顶 Billboard
 	--
 	-- Attribute 在这里非常重要，因为它让怪物数据直接挂在实例上：
 	-- - IsMonster: 是否是怪物
@@ -326,32 +350,20 @@ local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel
 	-- - Value / GoldPerSec: 价值、持续产金速度
 	-- - SpawnUnix / ExpireUnix: 出生时间、过期时间
 	local template = getMonsterTemplate(monsterLevel)
-
-	local p = Instance.new("Part")
-	p.Size = Vector3.new(3, 4, 3)
-	p.Material = Enum.Material.SmoothPlastic
-	local t = Util.clamp((monsterLevel - 1) / 29, 0, 1)
-	p.Color = Color3.fromRGB(40, 120, 40):Lerp(Color3.fromRGB(160, 30, 160), t)
-
-	if template then
-		if template:IsA("BasePart") then
-			p.Size = template.Size
-		elseif template:IsA("Model") then
-			local _, size = template:GetBoundingBox()
-			p.Size = Vector3.new(math.max(1, size.X), math.max(1, size.Y), math.max(1, size.Z))
-		end
+	if not template then
+		warn(string.format("[MonsterService] Monster template for level %d not found", monsterLevel))
+		return nil
 	end
 
-	p.Name = "Monster"
-	p.Anchored = true
-	p.CanCollide = true
-	p.CanQuery = true
-	p.CanTouch = true
+	local clone, p = prepareMonsterTemplateClone(template)
+	if not clone or not p then
+		return nil
+	end
 
 	local margin = 3
 	local posTop = Util.randomPointOnTop(zone, margin)
 	local newRootCF = CFrame.new(posTop + Vector3.new(0, p.Size.Y * 0.5, 0))
-	p.CFrame = newRootCF
+	clone:PivotTo(newRootCF)
 
 	-- 属性
 	p:SetAttribute("IsMonster", true)
@@ -368,24 +380,17 @@ local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel
 	p:SetAttribute("GoldPerSec", gps)
 	p:SetAttribute("SpawnUnix", os.time())
 	p:SetAttribute("ExpireUnix", os.time() + Config.MONSTER_LIFETIME_SECONDS)
+	p:SetAttribute("Dead", false)
+	p:SetAttribute("Collected", false)
 
-	if template then
-		local appearanceFolder = Instance.new("Folder")
-		appearanceFolder.Name = "Appearance"
-		appearanceFolder.Parent = p
-
-		local clone = template:Clone()
-		clone.Parent = appearanceFolder
-
-		local applied = attachAppearanceToRoot(p, clone)
-		p.Transparency = if applied then 1 else 0
-	else
-		p.Transparency = 0
-	end
+	clone:SetAttribute("IsMonster", true)
+	clone:SetAttribute("Dead", false)
+	clone:SetAttribute("MonsterLevel", monsterLevel)
+	clone:SetAttribute("ZoneLevel", zoneLevel)
 
 	buildBillboard(p)
 
-	return p
+	return p, clone
 end
 
 local function pickMonsterLevelForZone(zoneLevel: number): number?
@@ -423,6 +428,7 @@ local function markDead(monsterPart: BasePart)
 	end
 	-- 不改变外观颜色：保持“死亡前后模型一致”（你要求）
 	monsterPart:SetAttribute("Dead", true)
+	syncMonsterModelAttribute(monsterPart, "Dead", true)
 	ensureCollectPrompt(monsterPart)
 end
 
@@ -464,13 +470,17 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 		return false
 	end
 
-	local monster = createMonsterPart(zonePart, zoneLevel, monsterLevel)
+	local monster, monsterInstance = createMonsterPart(zonePart, zoneLevel, monsterLevel)
+	if not monster or not monsterInstance then
+		return false
+	end
 	monster:SetAttribute("ZoneKey", key)
-	monster.Parent = monstersFolder
+	syncMonsterModelAttribute(monster, "ZoneKey", key)
+	monsterInstance.Parent = monstersFolder
 	aliveMonsters[monster] = true
 
 	-- 统一在 Destroying 中做字典清理 + 触发“保底补怪”（分批 1~3 只，每批间隔 5s）
-	monster.Destroying:Connect(function()
+	monsterInstance.Destroying:Connect(function()
 		aliveMonsters[monster] = nil
 		local z = pickupZonesByKey[key]
 		if z then
@@ -483,8 +493,8 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 	end)
 
 	task.delay(Config.MONSTER_LIFETIME_SECONDS, function()
-		if monster and monster.Parent then
-			monster:Destroy()
+		if monsterInstance and monsterInstance.Parent then
+			monsterInstance:Destroy()
 		end
 	end)
 
@@ -566,7 +576,7 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	--
 	-- 注意这里体现了非常重要的服务端安全思想：
 	-- 即使客户端传来了一个“命中的怪物”，服务端仍然要自己重新验证距离、对象合法性、血量状态。
-	-- 允许点到子元件：向上找到根 Monster Part（直接挂在 Monsters Folder 下的那个）
+	-- 允许点到子元件：向上找到真正带 IsMonster 的根 Part。
 	local monsterPart: BasePart?
 	local cur: Instance? = hit
 	while cur do
@@ -574,16 +584,16 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 			monsterPart = cur
 			break
 		end
-		cur = cur.Parent
 		if cur == monstersFolder then
 			break
 		end
+		cur = cur.Parent
 	end
 
 	if not monsterPart then
 		return
 	end
-	if monsterPart.Parent ~= monstersFolder then
+	if not monsterPart:IsDescendantOf(monstersFolder) then
 		return
 	end
 
@@ -630,7 +640,10 @@ function MonsterService.Init()
 	--
 	-- 也就是说，Init() 负责把整个怪物生态系统“启动起来”。
 	monstersFolder = Util.ensureFolder(workspace, "Monsters")
-	monsterAppearances = ReplicatedStorage:FindFirstChild("MonsterAppearances") :: Folder?
+	monsterAppearances = findMonsterAppearanceRoot()
+	if not monsterAppearances then
+		warn("[MonsterService] 未找到怪物模板目录：优先查找 Workspace.'Monster image'，其次 ReplicatedStorage.MonsterAppearances")
+	end
 
 	local zones = ZoneService.GetPickupZones()
 	if #zones == 0 then

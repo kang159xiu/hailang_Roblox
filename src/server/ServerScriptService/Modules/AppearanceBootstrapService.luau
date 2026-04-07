@@ -37,6 +37,16 @@ local function cloneTemplate(source: Instance): Instance
 	return source:Clone()
 end
 
+local function getMonsterTemplateNames(index: number): {string}
+	local level2 = string.format("%02d", index)
+	return {
+		string.format("怪物形象%s", level2),
+		string.format("怪物形象%d", index),
+		string.format("怪物形象 %s", level2),
+		string.format("怪物形象 %d", index),
+	}
+end
+
 local function scoreTemplate(inst: Instance): number
 	-- 仅用于在同名候选中择优：优先 Model，其次 Folder，其次 BasePart；然后按子孙数量。
 	-- 注意：Folder 仅作为“你明确把模板做成 Folder 并命名为 武器1/怪物形象1”时的兜底。
@@ -175,27 +185,23 @@ end
 
 local function findMonsterTemplate(index: number): Instance?
 	local monsterRoot = workspace:FindFirstChild("Monster image")
+	local names = getMonsterTemplateNames(index)
 	if monsterRoot then
 		-- 优先只取 Monster image 文件夹的“直接子级”，避免误选到其它地方的同名对象
-		local direct = monsterRoot:FindFirstChild(string.format("怪物形象%d", index))
-			or monsterRoot:FindFirstChild(string.format("怪物形象 %d", index))
-		if direct and isAllowedTemplate(direct) then
-			return direct
+		for _, name in ipairs(names) do
+			local direct = monsterRoot:FindFirstChild(name)
+			if direct and isAllowedTemplate(direct) then
+				return direct
+			end
 		end
 
-		local found = findByNames(monsterRoot, {
-			string.format("怪物形象%d", index),
-			string.format("怪物形象 %d", index),
-		})
+		local found = findByNames(monsterRoot, names)
 		if found then
 			return found
 		end
 	end
 
-	return findByNames(workspace, {
-		string.format("怪物形象%d", index),
-		string.format("怪物形象 %d", index),
-	})
+	return findByNames(workspace, names)
 end
 
 local function ensureWeaponAppearances()
@@ -222,7 +228,7 @@ end
 local function ensureMonsterAppearances()
 	local base = findMonsterTemplate(1)
 	if not base or not isAllowedTemplate(base) then
-		warn("[AppearanceBootstrapService] 未找到怪物模板：请在 Workspace 任意位置放置 名称=怪物形象1（Model/Folder/BasePart）")
+		warn("[AppearanceBootstrapService] 未找到怪物模板：请在 Workspace 任意位置放置 名称=怪物形象01/怪物形象1（Model/Folder/BasePart）")
 		return
 	end
 
