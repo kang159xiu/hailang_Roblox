@@ -49,6 +49,17 @@ local lastTouchAt: {[string]: number} = {}
 -- We pulse dirty marks at a low frequency so periodic saves can happen even if the player doesn't do any actions.
 local lastDirtyPulseUnixByUserId: {[number]: number} = {}
 
+local function debugInstancePath(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+	return ok and fullName or instance.Name
+end
+
 -- 解锁提示：只在玩家站在对应地块上方时才显示
 local function getHRP(player: Player): BasePart?
 	local character = player.Character
@@ -80,11 +91,31 @@ end
 -- =====================
 
 local INCOME_DISPLAY_NAME_PREFIX = "怪物收益显示_"
+local PLACED_MONSTER_HEAD_DISPLAY_NAME = "PlacedMonsterHeadBillboard"
 
 local warnedMissingIncomeTemplate = false
 type IncomeDisplayGui = BillboardGui | SurfaceGui
 
 local cachedIncomeDisplayTemplate: IncomeDisplayGui? = nil
+local cachedPlacedMonsterHeadTemplate: BillboardGui? = nil
+
+local function getPlacedMonsterHeadTemplate(): BillboardGui?
+	if cachedPlacedMonsterHeadTemplate then
+		return cachedPlacedMonsterHeadTemplate
+	end
+
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc.Name == "怪数据显示头顶" then
+			local billboard = desc:FindFirstChildWhichIsA("BillboardGui", true)
+			if billboard then
+				cachedPlacedMonsterHeadTemplate = billboard
+				return billboard
+			end
+		end
+	end
+
+	return nil
+end
 
 local function getIncomeDisplayTemplate(): IncomeDisplayGui?
 	if cachedIncomeDisplayTemplate then
@@ -163,6 +194,14 @@ local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?
 	setIfExists("04怪的价值", valueText)
 	setIfExists("05怪价值", valueText)
 
+	-- 新需求：放置后怪物前方的“收益显示”只展示当前未领取收益。
+	-- 因此如果模板中存在结构化标签，则只保留 03当前未领取收益，其他字段清空。
+	for labelName, label in pairs(labelByName) do
+		if labelName ~= "03当前未领取收益" then
+			label.Text = ""
+		end
+	end
+
 	if hasStructuredLabels then
 		return
 	end
@@ -172,12 +211,58 @@ local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?
 		return
 	end
 
-	textLabel.Text = table.concat({
-		"怪物等级: " .. levelText,
-		"每秒收益: " .. goldPerSecText,
-		"未领取收益: " .. unclaimedText,
-		"价值: " .. valueText,
-	}, "\n")
+	textLabel.Text = unclaimedText
+end
+
+local function ensurePlacedMonsterHeadBillboard(rootPart: BasePart): BillboardGui?
+	local existing = rootPart:FindFirstChild(PLACED_MONSTER_HEAD_DISPLAY_NAME)
+	if existing and existing:IsA("BillboardGui") then
+		--已存在的显示距离
+		existing.MaxDistance = 30
+		existing.AlwaysOnTop = true
+		existing.Enabled = true
+		return existing
+	end
+
+	local template = getPlacedMonsterHeadTemplate()
+	if not template then
+		return nil
+	end
+
+	local clone = template:Clone()
+	clone.Adornee = rootPart
+	clone.Name = PLACED_MONSTER_HEAD_DISPLAY_NAME
+	-- 新需求：玩家离放置后的怪超过 15 个单位时，头顶数据显示自动隐藏。
+	-- 这里直接使用 BillboardGui.MaxDistance，让 Roblox 按 3D 距离自动控制显示。
+	--新克隆的 Billboard显示距离
+	clone.MaxDistance = 30
+	clone.AlwaysOnTop = true
+	clone.Enabled = true
+	clone.Parent = rootPart
+	return clone
+end
+
+local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
+	local billboard = ensurePlacedMonsterHeadBillboard(rootPart)
+	if not billboard then
+		return
+	end
+
+	local level = math.floor(tonumber(rootPart:GetAttribute("MonsterLevel")) or 1)
+	local value = math.floor(tonumber(rootPart:GetAttribute("Value")) or 0)
+	local goldPerSec = math.floor(tonumber(rootPart:GetAttribute("GoldPerSec")) or 0)
+
+	for _, child in ipairs(billboard:GetDescendants()) do
+		if child:IsA("TextLabel") then
+			if child.Name == "lv" then
+				child.Text = string.format("Lv.%d", level)
+			elseif child.Name == "cost" then
+				child.Text = tostring(value)
+			elseif child.Name == "gold" then
+				child.Text = string.format("+%d/s", goldPerSec)
+			end
+		end
+	end
 end
 
 local function setIncomeDisplayVisibility(gui: IncomeDisplayGui, visible: boolean)
@@ -461,6 +546,166 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart)
 	DataDirtyService.MarkDirty(player)
 end
 
+local function isPlayerWithinInteractionDistance(player: Player, targetPart: BasePart, maxDistance: number?): boolean
+	local hrp = getHRP(player)
+	if not hrp then
+		return false
+	end
+
+	local allowed = maxDistance or 10
+	return (hrp.Position - targetPart.Position).Magnitude <= (allowed + 2)
+end
+
+local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPart: BasePart): boolean
+	if placedPart.Parent == nil then
+		return false
+	end
+	if placedPart:GetAttribute("IsPlacedMonster") ~= true then
+		return false
+	end
+	if placedPart:GetAttribute("OwnerUserId") ~= player.UserId then
+		return false
+	end
+	if placedPart:GetAttribute("__InteractionLocked") == true then
+		return false
+	end
+
+	placedPart:SetAttribute("__InteractionLocked", true)
+	addUnclaimedToPlayer(player, placedPart)
+
+	local val = placedPart:GetAttribute("Value")
+	if type(val) ~= "number" then
+		val = 0
+	end
+	PlayerData.AddGold(player, val)
+	PlayerData.Sync(player)
+
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) == "number" then
+		local st = ensureState(player)[idx]
+		if st then
+			st.PlacedData = nil
+		end
+	end
+
+	DataDirtyService.MarkDirty(player, 5)
+
+	local home = HomeService.GetHome(player)
+	if home then
+		local slot = HomeService.GetSlot(player, idx)
+		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
+	end
+
+	toast(player, string.format("卖出获得 %d 金币", val))
+	placedPart:Destroy()
+	return true
+end
+
+local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedPart: BasePart): boolean
+	if placedPart.Parent == nil then
+		return false
+	end
+	if placedPart:GetAttribute("IsPlacedMonster") ~= true then
+		return false
+	end
+	if placedPart:GetAttribute("OwnerUserId") ~= player.UserId then
+		return false
+	end
+	if placedPart:GetAttribute("__InteractionLocked") == true then
+		return false
+	end
+
+	placedPart:SetAttribute("__InteractionLocked", true)
+	addUnclaimedToPlayer(player, placedPart)
+
+	local lvl = placedPart:GetAttribute("MonsterLevel")
+	local v = placedPart:GetAttribute("Value")
+	local gps = placedPart:GetAttribute("GoldPerSec")
+	local ok = InventoryService.TryAddMonsterItem(
+		player,
+		type(lvl) == "number" and lvl or 1,
+		type(v) == "number" and v or 0,
+		type(gps) == "number" and gps or 0
+	)
+	if not ok then
+		placedPart:SetAttribute("__InteractionLocked", false)
+		return false
+	end
+
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) == "number" then
+		local st = ensureState(player)[idx]
+		if st then
+			st.PlacedData = nil
+		end
+	end
+
+	DataDirtyService.MarkDirty(player, 5)
+
+	local home = HomeService.GetHome(player)
+	if home then
+		local slot = HomeService.GetSlot(player, idx)
+		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
+	end
+
+	toast(player, "已收起到背包")
+	placedPart:Destroy()
+	return true
+end
+
+local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, prompt: ProximityPrompt): boolean
+	if player:GetAttribute("__DataLoaded") ~= true then
+		return false
+	end
+
+	local idx = slotPart:GetAttribute("SlotIndex")
+	if type(idx) ~= "number" then
+		return false
+	end
+
+	if not isPlayerWithinInteractionDistance(player, slotPart, prompt.MaxActivationDistance) then
+		return false
+	end
+
+	if not canUseSlotByHomeLevel(player, idx) then
+		toast(player, "需要升级家园才能解锁该区域")
+		updateUnlockPromptEnabled(player, slotPart)
+		return false
+	end
+
+	if not isPrevUnlocked(player, idx) then
+		toast(player, "请先解锁上一个放置区域")
+		updateUnlockPromptEnabled(player, slotPart)
+		return false
+	end
+
+	local state = ensureState(player)[idx]
+	if state.Unlocked then
+		prompt.Enabled = false
+		return false
+	end
+
+	local cost = getUnlockCost(idx)
+	if not PlayerData.TrySpendGold(player, cost) then
+		toast(player, string.format("金币不足，需要 %d", cost))
+		return false
+	end
+
+	state.Unlocked = true
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player, 5)
+	prompt.Enabled = false
+	toast(player, string.format("解锁成功：区域%d", idx))
+
+	updateUnlockPromptEnabled(player, slotPart)
+	local nextSlot = HomeService.GetSlotPart(player, idx + 1)
+	if nextSlot then
+		updateUnlockPromptEnabled(player, nextSlot)
+	end
+
+	return true
+end
+
 local function createPlacedMonsterPart(
 	player: Player,
 	slotPart: BasePart,
@@ -492,6 +737,35 @@ local function createPlacedMonsterPart(
 
 	-- 外观：与背包 Tool/刷怪外观保持一致
 	applyMonsterAppearanceToPlacedPart(p, monsterLevel)
+	setPlacedMonsterHeadBillboardText(p)
+
+	local function setPlacedMonsterPromptVisible(visible: boolean)
+		local sellPrompt = p:FindFirstChild("SellPrompt")
+		if sellPrompt and sellPrompt:IsA("ProximityPrompt") then
+			sellPrompt.Enabled = visible
+		end
+
+		local storePrompt = p:FindFirstChild("StorePrompt")
+		if storePrompt and storePrompt:IsA("ProximityPrompt") then
+			storePrompt.Enabled = visible
+		end
+	end
+
+	local function revealPlacedMonsterPrompts(showSeconds: number?)
+		local token = (p:GetAttribute("PromptRevealToken") or 0) + 1
+		p:SetAttribute("PromptRevealToken", token)
+		setPlacedMonsterPromptVisible(true)
+
+		task.delay(showSeconds or 3, function()
+			if p.Parent == nil then
+				return
+			end
+			if p:GetAttribute("PromptRevealToken") ~= token then
+				return
+			end
+			setPlacedMonsterPromptVisible(false)
+		end)
+	end
 
 	-- 卖出 prompt
 	local sell = Instance.new("ProximityPrompt")
@@ -504,44 +778,17 @@ local function createPlacedMonsterPart(
 	sell.RequiresLineOfSight = false
 	-- 避免和“收起”Prompt UI 重合
 	sell.UIOffset = Vector2.new(0, 0)
+	sell.Enabled = false
 	sell.Parent = p
 
 	sell.Triggered:Connect(function(triggerPlayer: Player)
-		-- Block interactions before data is loaded
 		if player:GetAttribute("__DataLoaded") ~= true then
 			return
 		end
 		if triggerPlayer.UserId ~= player.UserId then
 			return
 		end
-		addUnclaimedToPlayer(player, p)
-
-		local val = p:GetAttribute("Value")
-		if type(val) ~= "number" then
-			val = 0
-		end
-		PlayerData.AddGold(player, val)
-		PlayerData.Sync(player)
-
-		local idx = slotPart:GetAttribute("SlotIndex")
-		if type(idx) == "number" then
-			local st = ensureState(player)[idx]
-			if st then
-				st.PlacedData = nil
-			end
-		end
-
-		DataDirtyService.MarkDirty(player, 5)
-
-		-- 刷新收益显示牌子（怪已移除）
-		local home = HomeService.GetHome(player)
-		if home then
-			local slot = HomeService.GetSlot(player, idx)
-			refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
-		end
-
-		toast(player, string.format("卖出获得 %d 金币", val))
-		p:Destroy()
+		trySellPlacedMonster(player, slotPart, p)
 	end)
 
 	-- 收起 prompt
@@ -555,49 +802,74 @@ local function createPlacedMonsterPart(
 	store.RequiresLineOfSight = false
 	-- 避免和“卖出”Prompt UI 重合
 	store.UIOffset = Vector2.new(0, 50)
+	store.Enabled = false
 	store.Parent = p
 
 	store.Triggered:Connect(function(triggerPlayer: Player)
-		-- Block interactions before data is loaded
 		if player:GetAttribute("__DataLoaded") ~= true then
 			return
 		end
 		if triggerPlayer.UserId ~= player.UserId then
 			return
 		end
-		addUnclaimedToPlayer(player, p)
-
-		local lvl = p:GetAttribute("MonsterLevel")
-		local v = p:GetAttribute("Value")
-		local gps = p:GetAttribute("GoldPerSec")
-		local ok = InventoryService.TryAddMonsterItem(
-			player,
-			type(lvl) == "number" and lvl or 1,
-			type(v) == "number" and v or 0,
-			type(gps) == "number" and gps or 0
-		)
-		if ok then
-			local idx = slotPart:GetAttribute("SlotIndex")
-			if type(idx) == "number" then
-				local st = ensureState(player)[idx]
-				if st then
-					st.PlacedData = nil
-				end
-			end
-
-			DataDirtyService.MarkDirty(player, 5)
-
-			-- 刷新收益显示牌子（怪已收起）
-			local home = HomeService.GetHome(player)
-			if home then
-				local slot = HomeService.GetSlot(player, idx)
-				refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
-			end
-
-			toast(player, "已收起到背包")
-			p:Destroy()
-		end
+		tryStorePlacedMonster(player, slotPart, p)
 	end)
+
+	-- 新需求：卖出/收起按钮默认隐藏，只有“碰到放置怪”或“点击放置怪”时才短暂显示。
+	-- 注意：这里仍保留 ProximityPrompt 作为最终交互方式，只改变显示时机。
+	p.Touched:Connect(function(hit)
+		if player:GetAttribute("__DataLoaded") ~= true then
+			return
+		end
+		local character = player.Character
+		if not character then
+			return
+		end
+		if not hit:IsDescendantOf(character) then
+			return
+		end
+
+		local now = os.clock()
+		local idx = slotPart:GetAttribute("SlotIndex")
+		local key = string.format("placed_prompt_touch_%d_%s", player.UserId, tostring(idx))
+		if (lastTouchAt[key] or 0) + 0.35 > now then
+			return
+		end
+		lastTouchAt[key] = now
+		revealPlacedMonsterPrompts(3)
+	end)
+
+	local function attachPromptClickDetector(targetPart: BasePart)
+		local detectorName = "PlacedMonsterPromptClickDetector"
+		local oldDetector = targetPart:FindFirstChild(detectorName)
+		if oldDetector and oldDetector:IsA("ClickDetector") then
+			oldDetector:Destroy()
+		end
+
+		local detector = Instance.new("ClickDetector")
+		detector.Name = detectorName
+		detector.MaxActivationDistance = 20
+		detector.Parent = targetPart
+		detector.MouseClick:Connect(function(clickPlayer: Player)
+			if player:GetAttribute("__DataLoaded") ~= true then
+				return
+			end
+			if clickPlayer.UserId ~= player.UserId then
+				return
+			end
+			revealPlacedMonsterPrompts(3)
+		end)
+	end
+
+	attachPromptClickDetector(p)
+	local appearanceFolder = p:FindFirstChild("Appearance")
+	if appearanceFolder then
+		for _, desc in ipairs(appearanceFolder:GetDescendants()) do
+			if desc:IsA("BasePart") then
+				attachPromptClickDetector(desc)
+			end
+		end
+	end
 
 	-- 销毁时清理引用
 	p.Destroying:Connect(function()
@@ -1169,6 +1441,83 @@ end
 
 function PlacementService.Cleanup(player: Player)
 	slotStatesByUserId[player.UserId] = nil
+end
+
+function PlacementService.TryHandlePromptInteraction(player: Player, promptInstance: Instance): boolean
+	if player:GetAttribute("__DataLoaded") ~= true then
+		print(string.format("[PromptDebug][Placement] reject player=%s reason=data_not_loaded", player.Name))
+		return false
+	end
+	if not promptInstance:IsA("ProximityPrompt") then
+		print(string.format("[PromptDebug][Placement] reject player=%s reason=not_prompt class=%s", player.Name, promptInstance.ClassName))
+		return false
+	end
+
+	local promptParent = promptInstance.Parent
+	if not (promptParent and promptParent:IsA("BasePart")) then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=parent_not_basepart parent=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(promptParent)))
+		return false
+	end
+
+	if promptInstance.Name == "UnlockPrompt" then
+		local slotPart = promptParent
+		if promptInstance.Enabled ~= true then
+			print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=prompt_disabled", player.Name, debugInstancePath(promptInstance)))
+			return false
+		end
+
+		local slotIndex = slotPart:GetAttribute("SlotIndex")
+		print(string.format("[PromptDebug][Placement] attempt action=UnlockPrompt player=%s prompt=%s target=%s slotIndex=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(slotPart), tostring(slotIndex)))
+		local ok = tryUnlockSlotFromPrompt(player, slotPart, promptInstance)
+		print(string.format("[PromptDebug][Placement] result action=UnlockPrompt player=%s success=%s", player.Name, tostring(ok)))
+		return ok
+	end
+
+	local placedPart = promptParent
+	if placedPart:GetAttribute("IsPlacedMonster") ~= true then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=not_placed_monster parent=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(placedPart)))
+		return false
+	end
+	if placedPart:GetAttribute("OwnerUserId") ~= player.UserId then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=owner_mismatch owner=%s expected=%s", player.Name, debugInstancePath(promptInstance), tostring(placedPart:GetAttribute("OwnerUserId")), tostring(player.UserId)))
+		return false
+	end
+	if promptInstance.Enabled ~= true then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=prompt_disabled", player.Name, debugInstancePath(promptInstance)))
+		return false
+	end
+	if not isPlayerWithinInteractionDistance(player, placedPart, promptInstance.MaxActivationDistance) then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=distance_check_failed max=%.2f target=%s", player.Name, debugInstancePath(promptInstance), promptInstance.MaxActivationDistance, debugInstancePath(placedPart)))
+		return false
+	end
+
+	local slotIndex = placedPart:GetAttribute("SlotIndex")
+	if type(slotIndex) ~= "number" then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=invalid_slot_index value=%s", player.Name, debugInstancePath(promptInstance), tostring(slotIndex)))
+		return false
+	end
+	local slotPart = HomeService.GetSlotPart(player, slotIndex)
+	if not slotPart then
+		print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=slot_part_missing slotIndex=%s", player.Name, debugInstancePath(promptInstance), tostring(slotIndex)))
+		return false
+	end
+
+	if promptInstance.Name == "SellPrompt" then
+		print(string.format("[PromptDebug][Placement] attempt action=SellPrompt player=%s prompt=%s target=%s slotIndex=%d", player.Name, debugInstancePath(promptInstance), debugInstancePath(placedPart), slotIndex))
+		local ok = trySellPlacedMonster(player, slotPart, placedPart)
+		print(string.format("[PromptDebug][Placement] result action=SellPrompt player=%s success=%s", player.Name, tostring(ok)))
+		return ok
+	end
+	if promptInstance.Name == "StorePrompt" then
+		print(string.format("[PromptDebug][Placement] attempt action=StorePrompt player=%s prompt=%s target=%s slotIndex=%d", player.Name, debugInstancePath(promptInstance), debugInstancePath(placedPart), slotIndex))
+		local ok = tryStorePlacedMonster(player, slotPart, placedPart)
+		print(string.format("[PromptDebug][Placement] result action=StorePrompt player=%s success=%s", player.Name, tostring(ok)))
+		return ok
+	end
+
+	print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=unsupported_prompt_name name=%s", player.Name, debugInstancePath(promptInstance), promptInstance.Name))
+
+	return false
 end
 
 return PlacementService

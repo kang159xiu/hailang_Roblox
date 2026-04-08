@@ -61,6 +61,17 @@ local pickupZonesByKey: {[string]: PickupZone} = {}
 -- 防止同一 Zone 同时多次补怪导致超刷
 local zoneEnsureRunning: {[string]: true} = {}
 
+local function debugInstancePath(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+	return ok and fullName or instance.Name
+end
+
 -- pickupZonesByKey：把区域唯一标识映射到区域数据本身，方便后续查找
 -- zoneEnsureRunning：防重入锁，避免同一个区域同时开启多个“补怪协程”
 
@@ -121,14 +132,18 @@ local function buildBillboard(monsterPart: BasePart)
 	--
 	-- BillboardGui 是 Roblox 里一种“挂在 3D 物体上的 2D UI”，
 	-- 常用于名字、血条、提示文字等头顶显示。
-	--
+
 	-- 这里先只创建容器和 Label，
 	-- 具体显示什么文字，可以在别的逻辑里继续更新 tl.Text。
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "MonsterBillboard"
 	bb.AlwaysOnTop = true
+	bb.Enabled = true
+	bb.MaxDistance = 30
 	bb.Size = UDim2.fromOffset(260, 90)
-	bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 1.5, 0)
+
+	--设置生成区域怪头顶数据的显示高低 + 2.5
+	bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
 	bb.Parent = monsterPart
 
 	local tl = Instance.new("TextLabel")
@@ -141,6 +156,31 @@ local function buildBillboard(monsterPart: BasePart)
 	tl.Font = Enum.Font.GothamBold
 	tl.Text = ""
 	tl.Parent = bb
+end
+
+local function setMonsterBillboardText(monsterPart: BasePart)
+	local bb = monsterPart:FindFirstChild("MonsterBillboard")
+	if not bb or not bb:IsA("BillboardGui") then
+		return
+	end
+
+	local label = bb:FindFirstChild("Label")
+	if not label or not label:IsA("TextLabel") then
+		return
+	end
+
+	local level = tonumber(monsterPart:GetAttribute("MonsterLevel")) or 1
+	local hp = tonumber(monsterPart:GetAttribute("HP")) or 0
+	local maxHp = tonumber(monsterPart:GetAttribute("MaxHP")) or 0
+	local value = tonumber(monsterPart:GetAttribute("Value")) or 0
+	local gps = tonumber(monsterPart:GetAttribute("GoldPerSec")) or 0
+	local dead = monsterPart:GetAttribute("Dead") == true
+
+	if dead then
+		label.Text = string.format("Lv.%d  HP:%d/%d\n已死亡(可收起)", level, hp, maxHp)
+	else
+		label.Text = string.format("Lv.%d  HP:%d/%d\n价值:%d  +%d/s", level, hp, maxHp, value, gps)
+	end
 end
 
 local function ensureCollectPrompt(monsterPart: BasePart)
@@ -177,39 +217,69 @@ local function ensureCollectPrompt(monsterPart: BasePart)
 	prompt.Parent = monsterPart
 
 	prompt.Triggered:Connect(function(player: Player)
-		if monsterPart.Parent == nil then
-			return
-		end
-		if monsterPart:GetAttribute("Dead") ~= true then
-			return
-		end
-		if monsterPart:GetAttribute("Collected") == true then
-			return
-		end
-
-		monsterPart:SetAttribute("Collected", true)
-		prompt.Enabled = false
-
-		local level = monsterPart:GetAttribute("MonsterLevel")
-		local value = monsterPart:GetAttribute("Value")
-		local gps = monsterPart:GetAttribute("GoldPerSec")
-
-		local ok = InventoryService.PickupCarryMonster(
-			player,
-			type(level) == "number" and level or 1,
-			type(value) == "number" and value or 0,
-			type(gps) == "number" and gps or 0
-		)
-
-		if ok then
-			aliveMonsters[monsterPart] = nil
-			local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
-			monsterInstance:Destroy()
-		else
-			monsterPart:SetAttribute("Collected", false)
-			prompt.Enabled = true
-		end
+		MonsterService.TryHandlePromptInteraction(player, prompt)
 	end)
+end
+
+local function isPlayerWithinInteractionDistance(player: Player, targetPart: BasePart, maxDistance: number?): boolean
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return false
+	end
+
+	local allowed = maxDistance or 10
+	return (hrp.Position - targetPart.Position).Magnitude <= (allowed + 2)
+end
+
+local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prompt: ProximityPrompt?): boolean
+	if monsterPart.Parent == nil then
+		return false
+	end
+	if monsterPart:GetAttribute("IsMonster") ~= true then
+		return false
+	end
+	if monsterPart:GetAttribute("Dead") ~= true then
+		return false
+	end
+	if monsterPart:GetAttribute("Collected") == true then
+		return false
+	end
+	if prompt and prompt.Enabled ~= true then
+		return false
+	end
+	if not isPlayerWithinInteractionDistance(player, monsterPart, prompt and prompt.MaxActivationDistance or 10) then
+		return false
+	end
+
+	monsterPart:SetAttribute("Collected", true)
+	if prompt then
+		prompt.Enabled = false
+	end
+
+	local level = monsterPart:GetAttribute("MonsterLevel")
+	local value = monsterPart:GetAttribute("Value")
+	local gps = monsterPart:GetAttribute("GoldPerSec")
+
+	local ok = InventoryService.PickupCarryMonster(
+		player,
+		type(level) == "number" and level or 1,
+		type(value) == "number" and value or 0,
+		type(gps) == "number" and gps or 0
+	)
+
+	if ok then
+		aliveMonsters[monsterPart] = nil
+		local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
+		monsterInstance:Destroy()
+		return true
+	end
+
+	monsterPart:SetAttribute("Collected", false)
+	if prompt then
+		prompt.Enabled = true
+	end
+	return false
 end
 
 local function stripJointsAndConstraints(root: Instance)
@@ -389,6 +459,7 @@ local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel
 	clone:SetAttribute("ZoneLevel", zoneLevel)
 
 	buildBillboard(p)
+	setMonsterBillboardText(p)
 
 	return p, clone
 end
@@ -430,6 +501,7 @@ local function markDead(monsterPart: BasePart)
 	monsterPart:SetAttribute("Dead", true)
 	syncMonsterModelAttribute(monsterPart, "Dead", true)
 	ensureCollectPrompt(monsterPart)
+	setMonsterBillboardText(monsterPart)
 end
 
 function MonsterService.MarkDead(monsterPart: Instance)
@@ -439,6 +511,28 @@ function MonsterService.MarkDead(monsterPart: Instance)
 	if monsterPart and monsterPart:IsA("BasePart") and monsterPart:GetAttribute("IsMonster") == true then
 		markDead(monsterPart)
 	end
+end
+
+function MonsterService.TryHandlePromptInteraction(player: Player, promptInstance: Instance): boolean
+	if not promptInstance:IsA("ProximityPrompt") then
+		print(string.format("[PromptDebug][Monster] reject player=%s reason=not_prompt class=%s", player.Name, promptInstance.ClassName))
+		return false
+	end
+	if promptInstance.Name ~= "CollectPrompt" then
+		print(string.format("[PromptDebug][Monster] reject player=%s prompt=%s reason=not_collect_prompt name=%s", player.Name, debugInstancePath(promptInstance), promptInstance.Name))
+		return false
+	end
+
+	local promptParent = promptInstance.Parent
+	if not (promptParent and promptParent:IsA("BasePart")) then
+		print(string.format("[PromptDebug][Monster] reject player=%s prompt=%s reason=parent_not_basepart parent=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(promptParent)))
+		return false
+	end
+
+	print(string.format("[PromptDebug][Monster] attempt action=CollectPrompt player=%s prompt=%s target=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(promptParent)))
+	local ok = tryCollectDeadMonster(player, promptParent, promptInstance)
+	print(string.format("[PromptDebug][Monster] result action=CollectPrompt player=%s success=%s", player.Name, tostring(ok)))
+	return ok
 end
 
 local replenishZoneToTarget: (PickupZone, string, number) -> ()
@@ -620,6 +714,7 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	local dmg = CombatService.GetPlayerDamage(player)
 	local newHp = math.max(0, hp - dmg)
 	monsterPart:SetAttribute("HP", newHp)
+	setMonsterBillboardText(monsterPart)
 
 	if newHp <= 0 then
 		markDead(monsterPart)

@@ -95,7 +95,6 @@ local function ensureHandle(tool: Tool): BasePart
 			end
 		end
 		
-		-- [修改内容] 移除了原有的 `h.Size = Vector3.new(1, 1, 1)` 强制重置。
 		-- 保留模板中 Handle 的原始尺寸，防止因尺寸改变导致默认的持握中心点偏移。
 		-- 同时，TouchInterest 和 rootpart 依然会被安全保留（因为只清理 Attachment）。
 		

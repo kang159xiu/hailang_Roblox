@@ -33,6 +33,7 @@ end
 
 local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
 local damageRemote = ensureRemoteEvent(remotesFolder, "RequestDamageMonster")
+local promptInteractionRemote = ensureRemoteEvent(remotesFolder, "RequestPromptInteraction")
 ensureRemoteEvent(remotesFolder, "RequestUseWeaponSkill")
 ensureRemoteEvent(remotesFolder, "RequestPurchaseWeapon")
 ensureRemoteEvent(remotesFolder, "RequestEquipWeapon")
@@ -77,6 +78,19 @@ ensureWeaponToolHasHandle()
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local takeOutRemote = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
 local clearDataRemote = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
+local requestPromptInteractionRemote = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
+
+local function debugPromptPath(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+	return ok and fullName or instance.Name
+end
+
 local DataPersistenceService = require(script.Parent:WaitForChild("Modules"):WaitForChild("DataPersistenceService"))
 local AppearanceBootstrapService = require(script.Parent:WaitForChild("Modules"):WaitForChild("AppearanceBootstrapService"))
 
@@ -126,6 +140,40 @@ end)
 
 damageRemote.OnServerEvent:Connect(function(player: Player, monsterPart: Instance)
 	MonsterService.DamageMonster(player, monsterPart)
+end)
+
+requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, promptInstance: Instance)
+	print(string.format(
+		"[PromptDebug][Server] OnServerEvent player=%s prompt=%s class=%s parent=%s",
+		player.Name,
+		debugPromptPath(promptInstance),
+		promptInstance and promptInstance.ClassName or "nil",
+		promptInstance and debugPromptPath(promptInstance.Parent) or "nil"
+	))
+
+	if PlacementService.TryHandlePromptInteraction(player, promptInstance) then
+		print(string.format(
+			"[PromptDebug][Server] handled_by=PlacementService player=%s prompt=%s",
+			player.Name,
+			debugPromptPath(promptInstance)
+		))
+		return
+	end
+
+	if MonsterService.TryHandlePromptInteraction(player, promptInstance) then
+		print(string.format(
+			"[PromptDebug][Server] handled_by=MonsterService player=%s prompt=%s",
+			player.Name,
+			debugPromptPath(promptInstance)
+		))
+		return
+	end
+
+	print(string.format(
+		"[PromptDebug][Server] rejected_by_all player=%s prompt=%s",
+		player.Name,
+		debugPromptPath(promptInstance)
+	))
 end)
 
 print("[Game] Server initialized")
