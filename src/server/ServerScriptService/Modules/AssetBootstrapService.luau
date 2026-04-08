@@ -16,10 +16,39 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AssetBootstrapService = {}
 
-local function findDescendantByName(root: Instance, name: string): Instance?
+local function getWeaponTemplateNames(index: number): {string}
+	local level2 = string.format("%02d", index)
+	return {
+		string.format("武器%s", level2),
+		string.format("武器%d", index),
+		string.format("武器 %s", level2),
+		string.format("武器 %d", index),
+	}
+end
+
+local function getMonsterTemplateNames(index: number): {string}
+	local level2 = string.format("%02d", index)
+	return {
+		string.format("怪物形象%s", level2),
+		string.format("怪物形象%d", index),
+		string.format("怪物形象 %s", level2),
+		string.format("怪物形象 %d", index),
+	}
+end
+
+local function findDescendantByNames(root: Instance, names: {string}): Instance?
+	for _, name in ipairs(names) do
+		local direct = root:FindFirstChild(name)
+		if direct then
+			return direct
+		end
+	end
+
 	for _, d in ipairs(root:GetDescendants()) do
-		if d.Name == name then
-			return d
+		for _, name in ipairs(names) do
+			if d.Name == name then
+				return d
+			end
 		end
 	end
 	return nil
@@ -60,9 +89,9 @@ local function buildWeaponAppearances()
 		return
 	end
 
-	local base = findDescendantByName(workspace, "武器1")
+	local base = findDescendantByNames(workspace, getWeaponTemplateNames(1))
 	if not base then
-		warn("[AssetBootstrapService] 未找到 Workspace.武器1（无法自动生成武器外观）")
+		warn("[AssetBootstrapService] 未找到 Workspace.weapon/Workspace 中的 武器01/武器1（无法自动生成武器外观）")
 		return
 	end
 
@@ -89,10 +118,10 @@ local function buildMonsterAppearances()
 		monsterAppearances = ensureFolder(ReplicatedStorage, "MonsterAppearances")
 	end
 
-	-- 如果 Lv1..Lv30 都有了，就不重复生成
+	-- 如果 怪物形象1..怪物形象30 都有了，就不重复生成
 	local okCount = 0
 	for i = 1, 30 do
-		if monsterAppearances:FindFirstChild("Lv" .. tostring(i)) then
+		if monsterAppearances:FindFirstChild("怪物形象" .. tostring(i)) then
 			okCount += 1
 		end
 	end
@@ -100,14 +129,14 @@ local function buildMonsterAppearances()
 		return
 	end
 
-	local base = findDescendantByName(workspace, "怪物形象1")
+	local base = findDescendantByNames(workspace, getMonsterTemplateNames(1))
 	if not base then
-		warn("[AssetBootstrapService] 未找到 Workspace.怪物形象1（无法自动生成怪物外观）")
+		warn("[AssetBootstrapService] 未找到 Workspace.'Monster image'/Workspace 中的 怪物形象01/怪物形象1（无法自动生成怪物外观）")
 		return
 	end
 
 	for i = 1, 30 do
-		local name = "Lv" .. tostring(i)
+		local name = "怪物形象" .. tostring(i)
 		if monsterAppearances:FindFirstChild(name) then
 			continue
 		end

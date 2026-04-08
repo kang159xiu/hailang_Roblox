@@ -7,6 +7,7 @@
 -- 3) 如果你后续自己做了 武器2/武器3... 或 怪物形象2...，本服务会优先用对应编号的模板；
 --    如果没做，就用 1 号模板克隆补齐。
 
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AppearanceBootstrapService = {}
@@ -44,6 +45,16 @@ local function getMonsterTemplateNames(index: number): {string}
 		string.format("怪物形象%d", index),
 		string.format("怪物形象 %s", level2),
 		string.format("怪物形象 %d", index),
+	}
+end
+
+local function getWeaponTemplateNames(index: number): {string}
+	local level2 = string.format("%02d", index)
+	return {
+		string.format("武器%s", level2),
+		string.format("武器%d", index),
+		string.format("武器 %s", level2),
+		string.format("武器 %d", index),
 	}
 end
 
@@ -160,27 +171,23 @@ end
 
 local function findWeaponTemplate(index: number): Instance?
 	local weaponRoot = workspace:FindFirstChild("weapon")
+	local names = getWeaponTemplateNames(index)
 	if weaponRoot then
 		-- 优先只取 weapon 文件夹的“直接子级”，避免误选到其它地方的同名对象
-		local direct = weaponRoot:FindFirstChild(string.format("武器%d", index))
-			or weaponRoot:FindFirstChild(string.format("武器 %d", index))
-		if direct and isAllowedTemplate(direct) then
-			return direct
+		for _, name in ipairs(names) do
+			local direct = weaponRoot:FindFirstChild(name)
+			if direct and isAllowedTemplate(direct) then
+				return direct
+			end
 		end
 
-		local found = findByNames(weaponRoot, {
-			string.format("武器%d", index),
-			string.format("武器 %d", index),
-		})
+		local found = findByNames(weaponRoot, names)
 		if found then
 			return found
 		end
 	end
 
-	return findByNames(workspace, {
-		string.format("武器%d", index),
-		string.format("武器 %d", index),
-	})
+	return findByNames(workspace, names)
 end
 
 local function findMonsterTemplate(index: number): Instance?
@@ -207,7 +214,7 @@ end
 local function ensureWeaponAppearances()
 	local base = findWeaponTemplate(1)
 	if not base or not isAllowedTemplate(base) then
-		warn("[AppearanceBootstrapService] 未找到武器模板：请在 Workspace 任意位置放置 名称=武器1（Model/Folder/BasePart）")
+		warn("[AppearanceBootstrapService] 未找到武器模板：请在 Workspace.weapon 或 Workspace 任意位置放置 名称=武器01/武器1（Model/Folder/BasePart）")
 		return
 	end
 

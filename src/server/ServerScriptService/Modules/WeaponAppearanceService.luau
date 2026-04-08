@@ -3,6 +3,8 @@
 -- 根据玩家 WeaponLevel，把对应“武器外观”焊到 Tool.Handle 上，让玩家真正手持武器。
 -- 外观来源：ReplicatedStorage.WeaponAppearances（由 AppearanceBootstrapService 从 Workspace.武器1 复制生成）
 
+--
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -38,13 +40,65 @@ local function getAppearanceTemplate(level: number): Instance?
 		return nil
 	end
 
-	return folder:FindFirstChild(string.format("武器 %d", level))
+	local level2 = string.format("%02d", level)
+	return folder:FindFirstChild(string.format("武器%s", level2))
 		or folder:FindFirstChild(string.format("武器%d", level))
+		or folder:FindFirstChild(string.format("武器 %s", level2))
+		or folder:FindFirstChild(string.format("武器 %d", level))
+		or folder:FindFirstChild("武器01")
+		or folder:FindFirstChild("武器1")
+		or folder:FindFirstChild("武器 01")
+		or folder:FindFirstChild("武器 1")
+end
+
+local function findTemplateRootPart(template: Instance): BasePart?
+	if template:IsA("BasePart") then
+		return template
+	end
+
+	if not template:IsA("Model") and not template:IsA("Folder") then
+		return nil
+	end
+
+	local rootName = template.Name
+	local root = template:FindFirstChild(rootName)
+	if root and root:IsA("BasePart") then
+		return root
+	end
+
+	local deepRoot = template:FindFirstChild(rootName, true)
+	if deepRoot and deepRoot:IsA("BasePart") then
+		return deepRoot
+	end
+
+	if template:IsA("Model") and template.PrimaryPart then
+		return template.PrimaryPart
+	end
+
+	local namedFallback = template:FindFirstChild("Root", true)
+		or template:FindFirstChild("Handle", true)
+		or template:FindFirstChild("WeaponRoot", true)
+	if namedFallback and namedFallback:IsA("BasePart") then
+		return namedFallback
+	end
+
+	return template:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function ensureHandle(tool: Tool): BasePart
 	local h = tool:FindFirstChild("Handle")
 	if h and h:IsA("BasePart") then
+		for _, child in ipairs(h:GetChildren()) do
+			if child:IsA("Attachment") then
+				child:Destroy()
+			end
+		end
+		h.Size = Vector3.new(1, 1, 1)
+		h.Transparency = 1
+		h.CanCollide = false
+		h.CanTouch = false
+		h.CanQuery = false
+		h.Massless = true
 		return h
 	end
 
@@ -53,10 +107,26 @@ local function ensureHandle(tool: Tool): BasePart
 	handle.Size = Vector3.new(1, 1, 1)
 	handle.Transparency = 1
 	handle.CanCollide = false
+	handle.CanTouch = false
+	handle.CanQuery = false
 	handle.Massless = true
 	handle.Parent = tool
 	tool.RequiresHandle = true
 	return handle
+end
+
+local function getToolRootPart(handle: BasePart): BasePart?
+	local root = handle:FindFirstChild("rootpart")
+	if root and root:IsA("BasePart") then
+		return root
+	end
+
+	local deepRoot = handle:FindFirstChild("rootpart", true)
+	if deepRoot and deepRoot:IsA("BasePart") then
+		return deepRoot
+	end
+
+	return nil
 end
 
 local function clearOldAppearance(tool: Tool)
@@ -99,6 +169,9 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 	clearOldAppearance(tool)
 
 	local handle = ensureHandle(tool)
+	local toolRootPart = getToolRootPart(handle)
+	local targetPart = toolRootPart or handle
+	tool.Grip = CFrame.identity
 
 	local template = getAppearanceTemplate(weaponLevel)
 	if not template then
@@ -143,24 +216,38 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 	local model, part = toModelLike(clone)
 	local applied = false
 
-	-- 让外观对齐到 Handle 的位置
-	if model then
-		local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
-		if anyPart then
-			model:PivotTo(handle.CFrame)
-			weldAllToHandle(handle, model)
-			applied = true
-		end
-	elseif part then
-		-- 如果模板根是 Part 且带子元件：先把整棵层级整体移动到 Handle 位置
-		local delta = handle.CFrame * part.CFrame:Inverse()
-		for _, d in ipairs(part:GetDescendants()) do
+	local function moveHierarchyToTarget(rootPart: BasePart, rootInstance: Instance, targetCFrame: CFrame)
+		local delta = targetCFrame * rootPart.CFrame:Inverse()
+		for _, d in ipairs(rootInstance:GetDescendants()) do
 			if d:IsA("BasePart") then
 				d.CFrame = delta * d.CFrame
 			end
 		end
+		rootPart.CFrame = targetCFrame
+	end
 
-		part.CFrame = handle.CFrame
+	-- 让武器模板根 Part 对齐到标准 Tool 的 rootpart；若缺失则回退到 Handle
+	if model then
+		local rootPart = findTemplateRootPart(model)
+		if rootPart then
+			moveHierarchyToTarget(rootPart, model, targetPart.CFrame)
+			rootPart.Anchored = false
+			rootPart.CanCollide = false
+			rootPart.CanTouch = false
+			rootPart.CanQuery = false
+			rootPart.Massless = true
+
+			local rootWeld = Instance.new("WeldConstraint")
+			rootWeld.Part0 = handle
+			rootWeld.Part1 = rootPart
+			rootWeld.Parent = rootPart
+
+			weldAllToHandle(handle, model)
+			applied = true
+		end
+	elseif part then
+		-- 如果模板根是 Part 且带子元件：按该根部件对齐到 Tool.rootpart；若缺失则回退到 Handle
+		moveHierarchyToTarget(part, part, targetPart.CFrame)
 		part.Anchored = false
 		part.CanCollide = false
 		part.CanTouch = false
