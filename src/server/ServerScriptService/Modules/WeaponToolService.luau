@@ -41,11 +41,16 @@ local function getWeaponImageId(level: number): string?
 end
 
 local function getTemplateTool(): Tool?
+	local workspaceTemplate = workspace:FindFirstChild("weaponModle")
+	if workspaceTemplate and workspaceTemplate:IsA("Tool") then
+		return workspaceTemplate
+	end
+
 	local t = StarterPack:FindFirstChild("Weapon")
 	if t and t:IsA("Tool") then
 		return t
 	end
-	warn("[WeaponToolService] StarterPack.Weapon template missing")
+	warn("[WeaponToolService] Tool template missing: 期望 Workspace.weaponModle 或 StarterPack.Weapon")
 	return nil
 end
 
