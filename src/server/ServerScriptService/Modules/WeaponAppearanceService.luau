@@ -23,7 +23,7 @@ local function getEquippedWeaponLevel(player: Player): number
 end
 
 local function isWeaponTool(inst: Instance): boolean
-	return inst:IsA("Tool") and inst:GetAttribute("IsWeaponTool") == true
+	return inst:IsA("Tool") --and inst:GetAttribute("IsWeaponTool") == true
 end
 
 local function getToolWeaponLevel(tool: Tool): number?
@@ -86,6 +86,7 @@ local function findTemplateRootPart(template: Instance): BasePart?
 end
 
 local function ensureHandle(tool: Tool): BasePart
+
 	local h = tool:FindFirstChild("Handle")
 	if h and h:IsA("BasePart") then
 		for _, child in ipairs(h:GetChildren()) do
@@ -93,7 +94,11 @@ local function ensureHandle(tool: Tool): BasePart
 				child:Destroy()
 			end
 		end
-		h.Size = Vector3.new(1, 1, 1)
+		
+		-- [修改内容] 移除了原有的 `h.Size = Vector3.new(1, 1, 1)` 强制重置。
+		-- 保留模板中 Handle 的原始尺寸，防止因尺寸改变导致默认的持握中心点偏移。
+		-- 同时，TouchInterest 和 rootpart 依然会被安全保留（因为只清理 Attachment）。
+		
 		h.Transparency = 1
 		h.CanCollide = false
 		h.CanTouch = false
@@ -129,6 +134,7 @@ local function getToolRootPart(handle: BasePart): BasePart?
 	return nil
 end
 
+--在给武器应用新的外观之前，清理掉（销毁）旧的外观模型
 local function clearOldAppearance(tool: Tool)
 	local old = tool:FindFirstChild("Appearance")
 	if old then
@@ -165,13 +171,18 @@ local function weldAllToHandle(handle: BasePart, root: Instance)
 	end
 end
 
+
 local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 	clearOldAppearance(tool)
 
 	local handle = ensureHandle(tool)
 	local toolRootPart = getToolRootPart(handle)
 	local targetPart = toolRootPart or handle
-	tool.Grip = CFrame.identity
+	
+	-- [修改内容] 注释/移除了 `tool.Grip = CFrame.identity`。
+	-- Tool 从 Workspace.weaponModle 克隆后，自带了你在 Studio 中调试好的 Grip 属性（握持位置）。
+	-- 移除这一行后，系统将严格遵循你模板中的 GripPos、GripRight、GripUp 和 GripForward。
+	-- tool.Grip = CFrame.identity
 
 	local template = getAppearanceTemplate(weaponLevel)
 	if not template then
@@ -268,9 +279,11 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 	handle.Transparency = if applied then 1 else 0
 end
 
-local function tryApplyForPlayerTools(player: Player)
-	local fallbackLevel = getEquippedWeaponLevel(player)
 
+local function tryApplyForPlayerTools(player: Player)
+	--获取兜底武器等级（如果 Tool 上没有 WeaponLevel 属性，就用玩家身上装备的武器等级；如果玩家身上也没有，就默认为 1）
+	local fallbackLevel = getEquippedWeaponLevel(player)
+	--尝试给玩家当前背包和角色里所有 Tool.Apply 外观
 	local function applyInContainer(container: Instance)
 		for _, ch in ipairs(container:GetChildren()) do
 			if isWeaponTool(ch) then
@@ -281,6 +294,7 @@ local function tryApplyForPlayerTools(player: Player)
 		end
 	end
 
+	-- 首先尝试给 Backpack 里的 Tool 应用外观，这样玩家打开背包时就能看到正确的武器外观了
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if backpack then
 		applyInContainer(backpack)
