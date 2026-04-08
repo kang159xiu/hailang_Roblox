@@ -57,3 +57,4 @@ continue开场白
 
 
 
+ipconfig /flushdns
