@@ -57,19 +57,3 @@ continue开场白
 
 
 
-deepseek-reasoner
-https://api.deepseek.com/v1
-
-
- name: DeepSeek
-    provider: deepseek
-    model: deepseek-reasoner
-    apiKey: sk-e74403e8b65b4885a91aec575abf3788
-
-
-
-openai/gpt-5.4
-    sk-bd31d01e298e0b7cc8fa6b487efcab763a1975c484d27aaf91bdca792c524341
-
-OpenRouter
-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
