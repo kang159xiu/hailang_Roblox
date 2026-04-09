@@ -1,44 +1,45 @@
-# Roblox 千宇宙工作室 (Thousand Universes Studio) AI 协作与开发规范
+# 千宇宙工作室 (Thousand Universes Studio) AI 协作与开发规范
 
-## 0. 最高优先级：核心工作流 (先诊断，后开药)
-在接下来的所有对话中，面对报错信息、截图或新需求，你**必须严格**按以下三步执行，**严禁**直接输出大段的最终代码：
+## 0. 最高优先级工作流：策划主导的逻辑推演 (CRITICAL WORKFLOW)
+在处理任何新需求、功能开发或报错时，你**必须**严格按以下三步执行，严禁越过逻辑确认直接输出大段代码：
 
-1. **第一步：只分析原因（诊断）**
-   - 指出根本原因或梳理逻辑架构。
-   - 用精简的语言解释“为什么”和“准备怎么做”。
-   - 此时最多只允许输出少量关键伪代码或核心思路。
-2. **第二步：主动询问（等待确认）**
-   - 必须在回答末尾停下并主动询问，例如：“这是我的分析，你同意按这个思路写代码吗？”
-3. **第三步：执行修改（开药）**
-   - 仅在用户明确回复同意（如“好的”、“写吧”）后，才能输出可直接运行的完整代码。重构核心系统前同样需征得同意。
+## 1. 核心操作界限 (Operational Boundaries)
+* **脚本代码界限**：你只能读取、创建或修改 VSCode 工作区内的源码文件（`.luau` / `.json`）。**绝对禁止**修改或要求用户去手动修改 Roblox Studio 内的脚本。
+* **场景元件界限**：你**可以且被允许**直接操作 Roblox Studio 的编辑器环境。针对 3D 场景或 UI 的搭建，可以直接在编辑界面执行物理操作（创建、移动、修改 Part/Model/GUI 等），不要把所有场景搭建都写成运行时的生成代码。
+* **禁止本地运行**：**绝对禁止**在终端使用 `lua` / `luau` / `node` 尝试运行脚本。Roblox 代码无本地环境，强行运行会报 `Unknown global` 错误。你只负责逻辑推演和文件读写。
 
-## 1. 核心工作原则 (Critical Rules)
-* **修改界限**：你只能读取/修改 VSCode 工作区内的源码文件（`.luau`/`.json`），禁止要求用户在 Studio 里手动改脚本。
-* **动态创建**：你编写的代码**必须**学会在运行时动态创建、修改、操作 3D 场景或物体（Part, Model, GUI），切勿因为“不在 Studio 环境”就拒绝写操作代码。
-* **原生优先**：强制使用 Roblox 原生 API (如 `Instance.new`, `WaitForChild`) 和标准的 Luau 语法。
+## 2. 编码与 API 原则 (Coding Standards)
+* **原生优先**：强制使用 Roblox 原生 API（如 `Instance.new`, `WaitForChild`）和标准的 Luau 语法。
+* **严格类型**：所有新建脚本顶部**必须**包含 `--!strict`，并在代码中保留清晰的类型推断。
+* **注释规范**：
+  - 必须提供精确、精简的中文注释，**绝不啰嗦废话**。
+  - **函数注释**：在每个函数定义的正上方，**必须**添加简明的解释，说明该函数的核心功能。
+  - **逐行/逻辑节点注释**：在输出最终代码时，根据第一步确认的“逻辑步骤”，强制在代码中逐行（或在关键 API/判断语句上方）添加对应注释。
+  - 示例：
+    ```lua
+    -- 初始化怪物生成逻辑
+    local function initSpawners()
+        -- 步骤1：判断是否达到生成条件
+        if currentEnemies < maxEnemies then
+            -- 步骤2：创建怪物模型实例
+            local monster = Instance.new("Model")
+            monster.Parent = workspace
+        end
+    end
+    ```
 
-## 2. 服务端架构 (单例服务架构)
+## 3. 架构规范 (Architecture Patterns)
+
+### 服务端 (Server) - 单例服务架构
 * **入口**：统一为 `src/server/ServerScriptService/Server.server.luau`。
-* **模块化**：业务逻辑在 `src/server/ServerScriptService/Modules/` 下拆分为独立的 ModuleScript，返回一个表，并通过 `.Init()` 供入口调用。
+* **模块化**：业务逻辑存放在 `src/server/ServerScriptService/Modules/` 下，拆分为独立的 ModuleScript，返回一个表，由入口文件调用其 `.Init()` 方法。
 * **网络通信**：服务端不在 Studio 预设 Remotes。必须在代码中动态检测并创建 `ReplicatedStorage.Remotes` 下的 `RemoteEvent`。
 
-## 3. 客户端架构 (单体核心脚本)
+### 客户端 (Client) - 单体核心脚本
 * **入口与核心**：逻辑高度集中在 `src/client/StarterPlayerScripts/Client.client.luau`。
 * **数据同步**：主要通过监听 `Player:GetAttributeChangedSignal()` 或接收 `RemoteEvent` 来更新客户端状态。
 
-## 4. UI 交互规范
+## 4. UI 交互规范 (UI Interaction)
 * **UI 来源**：UI 界面大多由开发者在 `StarterGui` 手动搭建，节点使用中文命名。
-* **节点绑定**：必须通过 `WaitForChild()` / `FindFirstChild()` 匹配中文名 UI 节点后再操作（如 `.Text` 或 `.Activated`）。
-* **兜底方案**：找不到预设 UI 节点时，可编写 `Instance.new` 动态生成 UI 作为 Fallback 逻辑。
-
-## 5. 代码风格与执行禁忌
-* **强制类型**：新建脚本顶部必须添加 `--!strict`，并在代码中保留清晰的类型推断。
-* **注释规范（重要）**：
-  - 必须提供精确、精简的中文注释，**绝不啰嗦废话**。
-  - **调用关键 API 时，必须在 API 的正上方一行添加注释**。
-  - *示例*：
-    ```lua
-    -- 创建怪物模型实例
-    local monster = Instance.new("Model")
-    ```
-* **禁止本地运行**：绝对不可在终端使用 `lua`/`luau`/`node` 尝试运行脚本。Roblox 代码无本地环境，强行运行会报 Unknown global 错。你只需负责逻辑推演和编写保存。
+* **节点绑定**：必须通过 `WaitForChild()` 或 `FindFirstChild()` 匹配**中文名** UI 节点后再进行操作（如 `.Text` 或 `.Activated`）。
+* **兜底方案 (Fallback)**：当代码找不到预设的 UI 节点时，可编写 `Instance.new` 动态生成 UI 作为 Fallback 逻辑。

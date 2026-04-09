@@ -51,6 +51,48 @@ local function getAppearanceTemplate(level: number): Instance?
 		or folder:FindFirstChild("武器 1")
 end
 
+local function findFirstNamedBasePart(root: Instance, names: {string}): BasePart?
+	for _, name in ipairs(names) do
+		local direct = root:FindFirstChild(name)
+		if direct and direct:IsA("BasePart") then
+			return direct
+		end
+
+		local deep = root:FindFirstChild(name, true)
+		if deep and deep:IsA("BasePart") then
+			return deep
+		end
+	end
+
+	return nil
+end
+
+local function buildNameVariants(name: string): {string}
+	local variants = { name }
+	local numberSuffix = string.match(name, "(%d+)$")
+	if not numberSuffix then
+		return variants
+	end
+
+	local asNumber = tonumber(numberSuffix)
+	if not asNumber then
+		return variants
+	end
+
+	local prefix = string.sub(name, 1, #name - #numberSuffix)
+	local padded = prefix .. string.format("%02d", asNumber)
+	local plain = prefix .. tostring(asNumber)
+
+	if padded ~= name then
+		table.insert(variants, padded)
+	end
+	if plain ~= name and plain ~= padded then
+		table.insert(variants, plain)
+	end
+
+	return variants
+end
+
 local function findTemplateRootPart(template: Instance): BasePart?
 	if template:IsA("BasePart") then
 		return template
@@ -60,24 +102,34 @@ local function findTemplateRootPart(template: Instance): BasePart?
 		return nil
 	end
 
-	local rootName = template.Name
-	local root = template:FindFirstChild(rootName)
-	if root and root:IsA("BasePart") then
-		return root
+	-- 模型侧统一规则：优先使用“与模板同名的 Part”作为唯一对齐锚点。
+	-- 但由于外观缓存名可能被规范化成“武器3”，而模板内部零件仍叫“武器03”，
+	-- 因此这里同时兼容同编号的 01 / 1 两种命名。
+	local sameNamePart = findFirstNamedBasePart(template, buildNameVariants(template.Name))
+	if sameNamePart then
+		return sameNamePart
 	end
 
-	local deepRoot = template:FindFirstChild(rootName, true)
-	if deepRoot and deepRoot:IsA("BasePart") then
-		return deepRoot
+	-- 兼容旧模板：如果还没按“同名 Part”规范制作，再尝试 rootpart / PrimaryPart。
+	local explicitRoot = findFirstNamedBasePart(template, {
+		"rootpart",
+		"RootPart",
+		"rootPart",
+	})
+	if explicitRoot then
+		return explicitRoot
 	end
 
 	if template:IsA("Model") and template.PrimaryPart then
 		return template.PrimaryPart
 	end
 
-	local namedFallback = template:FindFirstChild("Root", true)
-		or template:FindFirstChild("Handle", true)
-		or template:FindFirstChild("WeaponRoot", true)
+	-- 最后兼容老命名，避免旧资源立刻失效。
+	local namedFallback = findFirstNamedBasePart(template, {
+		"Root",
+		"Handle",
+		"WeaponRoot",
+	})
 	if namedFallback and namedFallback:IsA("BasePart") then
 		return namedFallback
 	end
@@ -92,11 +144,16 @@ local function ensureHandle(tool: Tool): BasePart
 		for _, child in ipairs(h:GetChildren()) do
 			if child:IsA("Attachment") then
 				child:Destroy()
+			elseif child:IsA("Model") or child:IsA("Folder") then
+				child:Destroy()
+			elseif child:IsA("BasePart") and string.lower(child.Name) ~= "rootpart" then
+				child:Destroy()
 			end
 		end
 		
 		-- 保留模板中 Handle 的原始尺寸，防止因尺寸改变导致默认的持握中心点偏移。
-		-- 同时，TouchInterest 和 rootpart 依然会被安全保留（因为只清理 Attachment）。
+		-- 同时，TouchInterest 和 rootpart 依然会被安全保留；
+		-- 但会清掉 Handle 下残留的旧外观模型，避免“玩家还握着模板武器”的现象。
 		
 		h.Transparency = 1
 		h.CanCollide = false
@@ -175,8 +232,7 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 	clearOldAppearance(tool)
 
 	local handle = ensureHandle(tool)
-	local toolRootPart = getToolRootPart(handle)
-	local targetPart = toolRootPart or handle
+	local targetPart = handle
 	
 	-- [修改内容] 注释/移除了 `tool.Grip = CFrame.identity`。
 	-- Tool 从 Workspace.weaponModle 克隆后，自带了你在 Studio 中调试好的 Grip 属性（握持位置）。
@@ -236,7 +292,8 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 		rootPart.CFrame = targetCFrame
 	end
 
-	-- 让武器模板根 Part 对齐到标准 Tool 的 rootpart；若缺失则回退到 Handle
+	-- 让武器模板中的“同名 Part（或兼容根 Part）”直接对齐到 Tool.Handle；
+	-- 同时通过整体位移/旋转保持模型与该 Part 的相对位置不变。
 	if model then
 		local rootPart = findTemplateRootPart(model)
 		if rootPart then
@@ -256,7 +313,7 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 			applied = true
 		end
 	elseif part then
-		-- 如果模板根是 Part 且带子元件：按该根部件对齐到 Tool.rootpart；若缺失则回退到 Handle
+		-- 如果模板本体就是 Part，则直接把该 Part 对齐到 Tool.Handle。
 		moveHierarchyToTarget(part, part, targetPart.CFrame)
 		part.Anchored = false
 		part.CanCollide = false
@@ -276,6 +333,10 @@ local function applyAppearanceToTool(tool: Tool, weaponLevel: number)
 
 	-- 成功应用外观后，隐藏 Handle
 	handle.Transparency = if applied then 1 else 0
+end
+
+function WeaponAppearanceService.ApplyToTool(tool: Tool, weaponLevel: number)
+	applyAppearanceToTool(tool, weaponLevel)
 end
 
 
@@ -303,6 +364,10 @@ local function tryApplyForPlayerTools(player: Player)
 	if character then
 		applyInContainer(character)
 	end
+end
+
+function WeaponAppearanceService.ApplyForPlayerTools(player: Player)
+	tryApplyForPlayerTools(player)
 end
 
 function WeaponAppearanceService.Init()

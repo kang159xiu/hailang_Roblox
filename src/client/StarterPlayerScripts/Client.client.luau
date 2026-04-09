@@ -230,53 +230,21 @@ end
 
 ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt)
 	visiblePrompts[prompt] = true
-	print(string.format(
-		"[PromptDebug][Client] PromptShown name=%s key=%s enabled=%s parent=%s",
-		prompt.Name,
-		tostring(prompt.KeyboardKeyCode),
-		tostring(prompt.Enabled),
-		prompt.Parent and prompt.Parent:GetFullName() or "nil"
-	))
+
 end)
 
 ProximityPromptService.PromptHidden:Connect(function(prompt: ProximityPrompt)
 	visiblePrompts[prompt] = nil
-	print(string.format(
-		"[PromptDebug][Client] PromptHidden name=%s key=%s parent=%s",
-		prompt.Name,
-		tostring(prompt.KeyboardKeyCode),
-		prompt.Parent and prompt.Parent:GetFullName() or "nil"
-	))
 end)
-
 ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, triggerPlayer: Player)
-	print(string.format(
-		"[PromptDebug][Client] PromptTriggered name=%s key=%s triggerPlayer=%s parent=%s",
-		prompt.Name,
-		tostring(prompt.KeyboardKeyCode),
-		triggerPlayer and triggerPlayer.Name or "nil",
-		prompt.Parent and prompt.Parent:GetFullName() or "nil"
-	))
 end)
 
 ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt: ProximityPrompt, triggerPlayer: Player)
-	print(string.format(
-		"[PromptDebug][Client] PromptButtonHoldBegan name=%s key=%s triggerPlayer=%s parent=%s",
-		prompt.Name,
-		tostring(prompt.KeyboardKeyCode),
-		triggerPlayer and triggerPlayer.Name or "nil",
-		prompt.Parent and prompt.Parent:GetFullName() or "nil"
-	))
+
 end)
 
 ProximityPromptService.PromptButtonHoldEnded:Connect(function(prompt: ProximityPrompt, triggerPlayer: Player)
-	print(string.format(
-		"[PromptDebug][Client] PromptButtonHoldEnded name=%s key=%s triggerPlayer=%s parent=%s",
-		prompt.Name,
-		tostring(prompt.KeyboardKeyCode),
-		triggerPlayer and triggerPlayer.Name or "nil",
-		prompt.Parent and prompt.Parent:GetFullName() or "nil"
-	))
+
 end)
 
 local function promptDebugActionHandler(
@@ -287,15 +255,6 @@ local function promptDebugActionHandler(
 	if inputState ~= Enum.UserInputState.Begin then
 		return Enum.ContextActionResult.Pass
 	end
-
-	print(string.format(
-		"[PromptDebug][Client] ContextAction action=%s key=%s type=%s processed_guess=%s",
-		actionName,
-		tostring(inputObject.KeyCode),
-		tostring(inputObject.UserInputType),
-		tostring(UserInputService:GetFocusedTextBox() ~= nil)
-	))
-
 	return Enum.ContextActionResult.Pass
 end
 
@@ -324,41 +283,26 @@ ContextActionService:BindActionAtPriority(
 )
 
 UserInputService.TextBoxFocused:Connect(function(textBox: TextBox)
-	print(string.format(
-		"[PromptDebug][Client] TextBoxFocused path=%s text=%s",
-		textBox:GetFullName(),
-		textBox.Text
-	))
+
 end)
 
 UserInputService.TextBoxFocusReleased:Connect(function(textBox: TextBox)
-	print(string.format(
-		"[PromptDebug][Client] TextBoxFocusReleased path=%s text=%s",
-		textBox:GetFullName(),
-		textBox.Text
-	))
+
 end)
 
 UserInputService.LastInputTypeChanged:Connect(function(lastInputType: Enum.UserInputType)
-	print(string.format(
-		"[PromptDebug][Client] LastInputTypeChanged type=%s focusedTextBox=%s",
-		tostring(lastInputType),
-		tostring(UserInputService:GetFocusedTextBox() ~= nil)
-	))
+
 end)
 
 UserInputService.WindowFocused:Connect(function()
-	print("[PromptDebug][Client] WindowFocused")
 end)
 
 UserInputService.WindowFocusReleased:Connect(function()
-	print("[PromptDebug][Client] WindowFocusReleased")
 end)
 
 local function findBestVisiblePromptForKey(keyCode: Enum.KeyCode): ProximityPrompt?
 	local hrp = getHRP()
 	if not hrp then
-		print(string.format("[PromptDebug][Client] findBestVisiblePromptForKey key=%s failed: no HRP", tostring(keyCode)))
 		return nil
 	end
 
@@ -369,11 +313,9 @@ local function findBestVisiblePromptForKey(keyCode: Enum.KeyCode): ProximityProm
 	for prompt in pairs(visiblePrompts) do
 		if prompt.Parent == nil then
 			visiblePrompts[prompt] = nil
-			print("[PromptDebug][Client] skip prompt because parent=nil")
 			continue
 		end
 		if not prompt.Enabled then
-			print(string.format("[PromptDebug][Client] skip prompt=%s reason=disabled", debugPromptPath(prompt)))
 			continue
 		end
 		if prompt.KeyboardKeyCode ~= keyCode then
@@ -382,47 +324,16 @@ local function findBestVisiblePromptForKey(keyCode: Enum.KeyCode): ProximityProm
 
 		local parent = prompt.Parent
 		if not (parent and parent:IsA("BasePart")) then
-			print(string.format("[PromptDebug][Client] skip prompt=%s reason=parent_not_basepart", debugPromptPath(prompt)))
 			continue
 		end
 
 		local dist = (hrp.Position - parent.Position).Magnitude
 		candidateCount += 1
-		print(string.format(
-			"[PromptDebug][Client] candidate prompt=%s key=%s dist=%.2f max=%.2f enabled=%s",
-			debugPromptPath(prompt),
-			tostring(keyCode),
-			dist,
-			prompt.MaxActivationDistance,
-			tostring(prompt.Enabled)
-		))
+
 		if dist <= (prompt.MaxActivationDistance + 2) and dist < bestDistance then
 			bestDistance = dist
 			bestPrompt = prompt
 		end
-	end
-
-	if bestPrompt then
-		print(string.format(
-			"[PromptDebug][Client] selected prompt=%s key=%s dist=%.2f candidates=%d",
-			debugPromptPath(bestPrompt),
-			tostring(keyCode),
-			bestDistance,
-			candidateCount
-		))
-	else
-		print(string.format(
-			"[PromptDebug][Client] no prompt selected for key=%s visibleCount=%d candidates=%d",
-			tostring(keyCode),
-			(function()
-				local n = 0
-				for _ in pairs(visiblePrompts) do
-					n += 1
-				end
-				return n
-			end)(),
-			candidateCount
-		))
 	end
 
 	return bestPrompt
@@ -431,29 +342,17 @@ end
 local function tryFirePromptInteractionFromKeyboard(keyCode: Enum.KeyCode, source: string)
 	local prompt = findBestVisiblePromptForKey(keyCode)
 	if prompt then
-		print(string.format(
-			"[PromptDebug][Client] FireServer source=%s key=%s prompt=%s",
-			source,
-			tostring(keyCode),
-			debugPromptPath(prompt)
-		))
-		requestPromptInteraction:FireServer(prompt)
+		-- 不再在按键按下瞬间手动 FireServer。
+		-- 之前这会绕过 Roblox 原生 ProximityPrompt 的 HoldDuration，
+		-- 导致像“收起/卖出/解锁”这类本应长按的交互变成一按就触发。
+		-- 现在改为完全交给 ProximityPrompt 自己处理按住与触发时机。
+		return
 	else
-		print(string.format(
-			"[PromptDebug][Client] FireServer skipped source=%s key=%s reason=no_prompt",
-			source,
-			tostring(keyCode)
-		))
+		return
 	end
 end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
-	print(string.format(
-		"[PromptDebug][Client] InputBegan key=%s type=%s processed=%s",
-		tostring(input.KeyCode),
-		tostring(input.UserInputType),
-		tostring(gameProcessedEvent)
-	))
 	if gameProcessedEvent or input.UserInputType ~= Enum.UserInputType.Keyboard then
 		return
 	end
@@ -472,13 +371,6 @@ UserInputService.InputEnded:Connect(function(input: InputObject, gameProcessedEv
 		return
 	end
 
-	print(string.format(
-		"[PromptDebug][Client] InputEnded key=%s type=%s processed=%s focusedTextBox=%s",
-		tostring(input.KeyCode),
-		tostring(input.UserInputType),
-		tostring(gameProcessedEvent),
-		tostring(UserInputService:GetFocusedTextBox() ~= nil)
-	))
 
 	if gameProcessedEvent then
 		return
@@ -644,15 +536,10 @@ RunService.Heartbeat:Connect(function(dt)
 		local wasDown = keyDownDebugState[keyCode]
 		if isDown ~= wasDown then
 			keyDownDebugState[keyCode] = isDown
-			print(string.format(
-				"[PromptDebug][Client] IsKeyDownChanged key=%s isDown=%s visiblePrompts=%d focusedTextBox=%s",
-				tostring(keyCode),
-				tostring(isDown),
-				visiblePromptCount,
-				tostring(UserInputService:GetFocusedTextBox() ~= nil)
-			))
+
 
 			if isDown then
+				-- 仅保留状态跟踪，不再主动触发 Prompt 交互。
 				tryFirePromptInteractionFromKeyboard(keyCode, "IsKeyDownPoll")
 			end
 		end

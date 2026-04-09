@@ -39,7 +39,7 @@ Config.REPLENISH_BATCH_INTERVAL_SECONDS = 5
 Config.PLAYER_START_GOLD = 100000000
 
 Config.WALK_SPEED_BASE = 16
-Config.WALK_SPEED_PER_UPGRADE = 10
+Config.WALK_SPEED_PER_UPGRADE = 1
 
 -- 速度升级花费：level * (level * 50)
 function Config.GetSpeedUpgradeCost(level: number): number
@@ -53,6 +53,8 @@ end
 
 -- 攻击力每次升级增加多少（你确认：+10/级）
 Config.ATTACK_UPGRADE_ADD = 10
+
+
 
 -- 血量升级（你没给具体数值，这里先给一个常用占位，后期你再改）
 Config.HEALTH_BASE = 100

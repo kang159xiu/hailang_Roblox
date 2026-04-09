@@ -15,6 +15,7 @@ local StarterPack = game:GetService("StarterPack")
 
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local WeaponAppearanceService = require(script.Parent:WaitForChild("WeaponAppearanceService"))
 
 local WeaponToolService = {}
 
@@ -226,6 +227,7 @@ local function ensureSingleWeaponTool(player: Player, desiredWeaponLevel: number
 		ensureToolMeta(newTool, desiredWeaponLevel)
 		connectEquipSync(player, newTool)
 		newTool.Parent = backpack
+		WeaponAppearanceService.ApplyToTool(newTool, desiredWeaponLevel)
 		return newTool
 	end
 
@@ -240,6 +242,7 @@ local function ensureSingleWeaponTool(player: Player, desiredWeaponLevel: number
 	-- Normalize meta to desired level (so appearance/skills follow EquippedWeaponLevel)
 	ensureToolMeta(keep, desiredWeaponLevel)
 	connectEquipSync(player, keep)
+	WeaponAppearanceService.ApplyToTool(keep, desiredWeaponLevel)
 
 	-- UI: only show one hotbar slot, and keep the name stable
 	keep.Name = getWeaponName(desiredWeaponLevel)
@@ -262,7 +265,12 @@ function WeaponToolService.Sync(player: Player, forceEquip: boolean?)
 	local desiredLevel = stats.EquippedWeaponLevel or stats.WeaponLevel
 
 	-- Ensure the single weapon tool exists and has correct level meta
-	ensureSingleWeaponTool(player, desiredLevel)
+	local weaponTool = ensureSingleWeaponTool(player, desiredLevel)
+	if weaponTool then
+		WeaponAppearanceService.ApplyToTool(weaponTool, desiredLevel)
+	else
+		WeaponAppearanceService.ApplyForPlayerTools(player)
+	end
 
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	local character = player.Character

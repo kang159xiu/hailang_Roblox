@@ -113,10 +113,19 @@ local function getAliveCountInZone(zoneKey: string): number
 end
 
 local function getMonsterInstanceFromRoot(monsterPart: BasePart): Instance
-	local parent = monsterPart.Parent
-	if parent and parent:IsA("Model") and parent:GetAttribute("IsMonster") == true then
-		return parent
+	local current: Instance? = monsterPart
+	while current do
+		if current ~= monsterPart and current:GetAttribute("IsMonster") == true then
+			return current
+		end
+
+		if monstersFolder and current == monstersFolder then
+			break
+		end
+
+		current = current.Parent
 	end
+
 	return monsterPart
 end
 
@@ -211,7 +220,7 @@ local function ensureCollectPrompt(monsterPart: BasePart)
 	prompt.ActionText = "收起"
 	prompt.ObjectText = "怪尸体"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.HoldDuration = 1.25
+	prompt.HoldDuration = 1
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = monsterPart
@@ -382,8 +391,6 @@ local function prepareMonsterTemplateClone(monsterTemplate: Model): (Model?, Bas
 		return nil
 	end
 
-	clone.PrimaryPart = root
-
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
 			d.Anchored = true
@@ -432,8 +439,11 @@ local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel
 
 	local margin = 3
 	local posTop = Util.randomPointOnTop(zone, margin)
-	local newRootCF = CFrame.new(posTop + Vector3.new(0, p.Size.Y * 0.5, 0))
+	-- 按你的最新要求：拿取区域生成怪物时，继续直接复制模板，
+	-- 但整体位置在原有落地基础上额外上移 2 个单位。
+	local newRootCF = CFrame.new(posTop + Vector3.new(0, p.Size.Y * 0.5 + 1, 0))
 	clone:PivotTo(newRootCF)
+	clone.PrimaryPart = p
 
 	-- 属性
 	p:SetAttribute("IsMonster", true)

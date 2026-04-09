@@ -6,6 +6,7 @@
 -- 2) 模板可以放在 Workspace 任意层级（支持 FindFirstChild(..., true) 递归查找）
 -- 3) 如果你后续自己做了 武器2/武器3... 或 怪物形象2...，本服务会优先用对应编号的模板；
 --    如果没做，就用 1 号模板克隆补齐。
+--
 
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

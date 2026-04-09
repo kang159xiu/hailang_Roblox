@@ -205,16 +205,9 @@ local function buildToolTemplates()
 
 			local clone = template:Clone()
 
-			-- 【核心优化：打组模型中心对齐】
-			-- 优先寻找明确的根节点，如果没有，则自动计算整个组的几何中心作为把手位置
-			local centerCFrame, _ = clone:GetBoundingBox()
-			local root = clone.PrimaryPart
-				or clone:FindFirstChild("HumanoidRootPart", true)
-				or clone:FindFirstChild("Torso", true)
-			if root and not root:IsA("BasePart") then
-				root = nil
-			end
-			handle.CFrame = (root and (root :: BasePart).CFrame) or centerCFrame
+			-- 统一第二套对齐方式：Handle 直接以模板 Model 的 Pivot 为准。
+			-- 这样 Tool / 放置 / 刷怪三条链路都尽量使用同一套整体对齐基准。
+			handle.CFrame = clone:GetPivot()
 
 			handle.Parent = tool
 

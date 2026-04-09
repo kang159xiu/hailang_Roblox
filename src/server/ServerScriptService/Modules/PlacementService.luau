@@ -373,7 +373,7 @@ local function stripJointsAndConstraints(root: Instance)
 	end
 end
 
-local function weldAllToRoot(rootPart: BasePart, root: Instance)
+local function prepareAppearanceParts(root: Instance)
 	for _, d in ipairs(root:GetDescendants()) do
 		if d:IsA("BasePart") then
 			d.Anchored = false
@@ -381,13 +381,201 @@ local function weldAllToRoot(rootPart: BasePart, root: Instance)
 			d.CanTouch = false
 			d.CanQuery = false
 			d.Massless = true
+		end
+	end
+end
 
-			local w = Instance.new("WeldConstraint")
-			w.Part0 = rootPart
+local function weldPartsToAnchor(anchorPart: BasePart, root: Instance)
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("BasePart") and d ~= anchorPart then
+			local w = Instance.new("Weld")
+			w.Part0 = anchorPart
 			w.Part1 = d
+			w.C0 = anchorPart.CFrame:Inverse() * d.CFrame
 			w.Parent = d
 		end
 	end
+end
+
+local function weldAnchorToRoot(rootPart: BasePart, anchorPart: BasePart)
+	anchorPart.Anchored = false
+	anchorPart.CanCollide = false
+	anchorPart.CanTouch = false
+	anchorPart.CanQuery = false
+	anchorPart.Massless = true
+
+	local w = Instance.new("Weld")
+	w.Part0 = rootPart
+	w.Part1 = anchorPart
+	w.C0 = rootPart.CFrame:Inverse() * anchorPart.CFrame
+	w.Parent = anchorPart
+end
+
+--清理放置位置
+local function sanitizePlacementRoot(inst: Instance): BasePart?
+	if inst:IsA("Model") then
+		local root = inst.PrimaryPart
+			or (inst:FindFirstChild("HumanoidRootPart", true) :: BasePart?)
+			or (inst:FindFirstChild("UpperTorso", true) :: BasePart?)
+			or (inst:FindFirstChild("Torso", true) :: BasePart?)
+			or inst:FindFirstChildWhichIsA("BasePart", true)
+		if root then
+			inst.PrimaryPart = root
+		end
+		return root
+	elseif inst:IsA("BasePart") then
+		return inst
+	end
+
+	return nil
+end
+
+local function findPlacementTemplateRootPart(inst: Instance): BasePart?
+	if inst:IsA("BasePart") then
+		return inst
+	end
+
+	if inst:IsA("Model") then
+		local sameName = inst:FindFirstChild(inst.Name)
+		if sameName and sameName:IsA("BasePart") then
+			return sameName
+		end
+
+		local deepSameName = inst:FindFirstChild(inst.Name, true)
+		if deepSameName and deepSameName:IsA("BasePart") then
+			return deepSameName
+		end
+
+		return inst.PrimaryPart
+			or (inst:FindFirstChild("HumanoidRootPart", true) :: BasePart?)
+			or (inst:FindFirstChild("UpperTorso", true) :: BasePart?)
+			or (inst:FindFirstChild("Torso", true) :: BasePart?)
+			or inst:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	if inst:IsA("Folder") then
+		local sameName = inst:FindFirstChild(inst.Name)
+		if sameName and sameName:IsA("BasePart") then
+			return sameName
+		end
+
+		local deepSameName = inst:FindFirstChild(inst.Name, true)
+		if deepSameName and deepSameName:IsA("BasePart") then
+			return deepSameName
+		end
+
+		return inst:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return nil
+end
+
+local function moveHierarchyToTarget(root: BasePart, rootInstance: Instance, targetCFrame: CFrame)
+	local delta = targetCFrame * root.CFrame:Inverse()
+	for _, d in ipairs(rootInstance:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.CFrame = delta * d.CFrame
+		end
+	end
+	root.CFrame = targetCFrame
+end
+
+local function getPlatformAlignedPlacementCFrame(slotPart: BasePart, yOffset: number): CFrame
+	local pos = slotPart.Position + Vector3.new(0, yOffset, 0)
+	return CFrame.fromMatrix(pos, slotPart.CFrame.XVector, slotPart.CFrame.YVector, slotPart.CFrame.ZVector)
+end
+
+local function getPlacementTemplateRootInfo(monsterLevel: number): (Instance?, BasePart?)
+	local template = getMonsterAppearanceTemplate(monsterLevel)
+	if not template then
+		return nil, nil
+	end
+
+	return template, findPlacementTemplateRootPart(template)
+end
+
+local function toModelLike(inst: Instance): (Model?, BasePart?)
+	if inst:IsA("Model") then
+		return inst, nil
+	end
+	if inst:IsA("BasePart") then
+		return nil, inst
+	end
+	if inst:IsA("Folder") then
+		local m = Instance.new("Model")
+		m.Name = inst.Name
+		m.Parent = inst.Parent
+		for _, ch in ipairs(inst:GetChildren()) do
+			ch.Parent = m
+		end
+		inst:Destroy()
+		return m, nil
+	end
+	return nil, nil
+end
+
+local function getPlacedMonsterContainer(rootPart: BasePart): Instance
+	local current: Instance? = rootPart
+	while current do
+		if current ~= rootPart and current:GetAttribute("IsPlacedMonsterContainer") == true then
+			return current
+		end
+		current = current.Parent
+	end
+
+	return rootPart
+end
+
+local function destroyPlacedMonster(rootPart: BasePart)
+	getPlacedMonsterContainer(rootPart):Destroy()
+end
+
+local function createPlacedMonsterFromTemplate(slotPart: BasePart, monsterLevel: number): BasePart?
+	local template = getMonsterAppearanceTemplate(monsterLevel)
+	if not template then
+		return nil
+	end
+
+	-- 新要求：模板中“与 Model 同名的根 Part”朝向必须与 Platform 完全一致，
+	-- 这样就能直接通过 Platform 的朝向控制怪物头朝向。
+	local targetCFrame = getPlatformAlignedPlacementCFrame(slotPart, 2)
+
+	local clone = template:Clone()
+	local model, part = toModelLike(clone)
+	local rootPart: BasePart? = nil
+	local container: Instance = clone
+
+	if model then
+		rootPart = findPlacementTemplateRootPart(model)
+		if not rootPart then
+			clone:Destroy()
+			return nil
+		end
+
+		model.PrimaryPart = rootPart
+
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.Anchored = true
+			end
+		end
+
+		model:PivotTo(targetCFrame)
+		moveHierarchyToTarget(rootPart, model, targetCFrame)
+		container = model
+	elseif part then
+		rootPart = part
+		rootPart.Anchored = true
+		rootPart.CFrame = targetCFrame
+		container = part
+	else
+		clone:Destroy()
+		return nil
+	end
+
+	container:SetAttribute("IsPlacedMonsterContainer", true)
+	container.Parent = slotPart.Parent
+	return rootPart
 end
 
 local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLevel: number)
@@ -414,46 +602,21 @@ local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLev
 	clone.Parent = appearanceFolder
 
 	stripJointsAndConstraints(clone)
-
-	local function toModelLike(inst: Instance): (Model?, BasePart?)
-		if inst:IsA("Model") then
-			return inst, nil
-		end
-		if inst:IsA("BasePart") then
-			return nil, inst
-		end
-		if inst:IsA("Folder") then
-			local m = Instance.new("Model")
-			m.Name = inst.Name
-			m.Parent = inst.Parent
-			for _, ch in ipairs(inst:GetChildren()) do
-				ch.Parent = m
-			end
-			inst:Destroy()
-			return m, nil
-		end
-		return nil, nil
-	end
+	prepareAppearanceParts(clone)
 
 	local model, part = toModelLike(clone)
 	local applied = false
 
 	if model then
-		local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
-		if anyPart then
-			model:PivotTo(rootPart.CFrame)
-			weldAllToRoot(rootPart, model)
+		local anchorPart = sanitizePlacementRoot(model)
+		if anchorPart then
+			moveHierarchyToTarget(anchorPart, model, rootPart.CFrame)
+			weldPartsToAnchor(anchorPart, model)
+			weldAnchorToRoot(rootPart, anchorPart)
 			applied = true
 		end
 	elseif part then
-		-- 如果模板根是 Part 且带子元件：先把整棵层级整体移动到 Root 位置
-		local delta = rootPart.CFrame * part.CFrame:Inverse()
-		for _, d in ipairs(part:GetDescendants()) do
-			if d:IsA("BasePart") then
-				d.CFrame = delta * d.CFrame
-			end
-		end
-
+		-- 与拿取区域/Tool 的附加方式保持一致：根 Part 直接对齐占位 Part
 		part.CFrame = rootPart.CFrame
 		part.Anchored = false
 		part.CanCollide = false
@@ -461,13 +624,8 @@ local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLev
 		part.CanQuery = false
 		part.Massless = true
 
-		local w = Instance.new("WeldConstraint")
-		w.Part0 = rootPart
-		w.Part1 = part
-		w.Parent = part
-
-		-- 关键：如果模板根是 Part 且子元件也是 Part/MeshPart，需要把子元件也 Weld 到 Root
-		weldAllToRoot(rootPart, part)
+		weldPartsToAnchor(part, part)
+		weldAnchorToRoot(rootPart, part)
 		applied = true
 	end
 
@@ -597,7 +755,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 	end
 
 	toast(player, string.format("卖出获得 %d 金币", val))
-	placedPart:Destroy()
+	destroyPlacedMonster(placedPart)
 	return true
 end
 
@@ -649,7 +807,7 @@ local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedP
 	end
 
 	toast(player, "已收起到背包")
-	placedPart:Destroy()
+	destroyPlacedMonster(placedPart)
 	return true
 end
 
@@ -715,15 +873,175 @@ local function createPlacedMonsterPart(
 	unclaimedGold: number?,
 	lastTickUnix: number?
 ): BasePart
+	local placedFromTemplate = createPlacedMonsterFromTemplate(slotPart, monsterLevel)
+	if placedFromTemplate then
+		local p = placedFromTemplate
+		p:SetAttribute("IsPlacedMonster", true)
+		p:SetAttribute("OwnerUserId", player.UserId)
+		p:SetAttribute("SlotIndex", slotPart:GetAttribute("SlotIndex"))
+		p:SetAttribute("MonsterLevel", monsterLevel)
+		p:SetAttribute("Value", value)
+		p:SetAttribute("GoldPerSec", goldPerSec)
+		p:SetAttribute("UnclaimedGold", unclaimedGold or 0)
+		p:SetAttribute("LastTickUnix", lastTickUnix or os.time())
+
+		setPlacedMonsterHeadBillboardText(p)
+
+		local function setPlacedMonsterPromptVisible(visible: boolean)
+			local sellPrompt = p:FindFirstChild("SellPrompt")
+			if sellPrompt and sellPrompt:IsA("ProximityPrompt") then
+				sellPrompt.Enabled = visible
+			end
+
+			local storePrompt = p:FindFirstChild("StorePrompt")
+			if storePrompt and storePrompt:IsA("ProximityPrompt") then
+				storePrompt.Enabled = visible
+			end
+		end
+
+		local function revealPlacedMonsterPrompts(showSeconds: number?)
+			local token = (p:GetAttribute("PromptRevealToken") or 0) + 1
+			p:SetAttribute("PromptRevealToken", token)
+			setPlacedMonsterPromptVisible(true)
+
+			task.delay(showSeconds or 3, function()
+				if p.Parent == nil then
+					return
+				end
+				if p:GetAttribute("PromptRevealToken") ~= token then
+					return
+				end
+				setPlacedMonsterPromptVisible(false)
+			end)
+		end
+
+		local sell = Instance.new("ProximityPrompt")
+		sell.Name = "SellPrompt"
+		sell.ActionText = "卖出"
+		sell.ObjectText = "放置怪"
+		sell.KeyboardKeyCode = Enum.KeyCode.E
+		sell.HoldDuration = 0.2
+		sell.MaxActivationDistance = 10
+		sell.RequiresLineOfSight = false
+		sell.UIOffset = Vector2.new(0, 0)
+		sell.Enabled = false
+		sell.Parent = p
+
+		sell.Triggered:Connect(function(triggerPlayer: Player)
+			if player:GetAttribute("__DataLoaded") ~= true then
+				return
+			end
+			if triggerPlayer.UserId ~= player.UserId then
+				return
+			end
+			trySellPlacedMonster(player, slotPart, p)
+		end)
+
+		local store = Instance.new("ProximityPrompt")
+		store.Name = "StorePrompt"
+		store.ActionText = "收起"
+		store.ObjectText = "放置怪"
+		store.KeyboardKeyCode = Enum.KeyCode.R
+		store.HoldDuration = 0.6
+		store.MaxActivationDistance = 10
+		store.RequiresLineOfSight = false
+		store.UIOffset = Vector2.new(0, 50)
+		store.Enabled = false
+		store.Parent = p
+
+		store.Triggered:Connect(function(triggerPlayer: Player)
+			if player:GetAttribute("__DataLoaded") ~= true then
+				return
+			end
+			if triggerPlayer.UserId ~= player.UserId then
+				return
+			end
+			tryStorePlacedMonster(player, slotPart, p)
+		end)
+
+		p.Touched:Connect(function(hit)
+			if player:GetAttribute("__DataLoaded") ~= true then
+				return
+			end
+			local character = player.Character
+			if not character then
+				return
+			end
+			if not hit:IsDescendantOf(character) then
+				return
+			end
+
+			local now = os.clock()
+			local idx = slotPart:GetAttribute("SlotIndex")
+			local key = string.format("placed_prompt_touch_%d_%s", player.UserId, tostring(idx))
+			if (lastTouchAt[key] or 0) + 0.35 > now then
+				return
+			end
+			lastTouchAt[key] = now
+			revealPlacedMonsterPrompts(3)
+		end)
+
+		local function attachPromptClickDetector(targetPart: BasePart)
+			local detectorName = "PlacedMonsterPromptClickDetector"
+			local oldDetector = targetPart:FindFirstChild(detectorName)
+			if oldDetector and oldDetector:IsA("ClickDetector") then
+				oldDetector:Destroy()
+			end
+
+			local detector = Instance.new("ClickDetector")
+			detector.Name = detectorName
+			detector.MaxActivationDistance = 20
+			detector.Parent = targetPart
+			detector.MouseClick:Connect(function(clickPlayer: Player)
+				if player:GetAttribute("__DataLoaded") ~= true then
+					return
+				end
+				if clickPlayer.UserId ~= player.UserId then
+					return
+				end
+				revealPlacedMonsterPrompts(3)
+			end)
+		end
+
+		attachPromptClickDetector(p)
+		local container = getPlacedMonsterContainer(p)
+		for _, desc in ipairs(container:GetDescendants()) do
+			if desc:IsA("BasePart") then
+				attachPromptClickDetector(desc)
+			end
+		end
+
+		container.Destroying:Connect(function()
+			local m = slotStatesByUserId[player.UserId]
+			if not m then
+				return
+			end
+			local si = slotPart:GetAttribute("SlotIndex")
+			if type(si) ~= "number" then
+				return
+			end
+			local st = m[si]
+			if st and st.PlacedMonster == p then
+				st.PlacedMonster = nil
+			end
+		end)
+
+		return p
+	end
+
+	local _, templateRoot = getPlacementTemplateRootInfo(monsterLevel)
+	local rootSize = templateRoot and templateRoot.Size or Vector3.new(3, 4, 3)
+	local rootCFrame = getPlatformAlignedPlacementCFrame(slotPart, slotPart.Size.Y * 0.5 + rootSize.Y * 0.5 + 2)
+
 	local p = Instance.new("Part")
 	p.Name = "PlacedMonster"
 	p.Anchored = true
 	p.CanCollide = true
-	p.Size = Vector3.new(3, 4, 3)
+	p.Size = rootSize
 	p.Material = Enum.Material.SmoothPlastic
 	p.Color = Color3.fromRGB(60, 60, 60)
 	p.Transparency = 0
-	p.CFrame = slotPart.CFrame + Vector3.new(0, slotPart.Size.Y * 0.5 + 2, 0)
+	p.CFrame = rootCFrame
 	p.Parent = slotPart.Parent
 
 	p:SetAttribute("IsPlacedMonster", true)
