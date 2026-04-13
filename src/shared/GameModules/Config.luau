@@ -13,7 +13,7 @@ local Config = {}
 Config.GRID_STUDS = 4
 
 -- 怪生成最大同时数量（注意：若希望每个区域允许到 10 只怪，请保证该上限 >= 区域数 * 10）
-Config.MAX_ALIVE_MONSTERS = 120
+Config.MAX_ALIVE_MONSTERS = 300
 
 -- 每个怪生成后存在时间（秒），到点消失（即使没人打/拿）
 Config.MONSTER_LIFETIME_SECONDS = 60
@@ -23,7 +23,7 @@ Config.SPAWN_INTERVAL_MIN = 10
 Config.SPAWN_INTERVAL_MAX = 60
 
 -- 每个区域数量范围：至少多少只怪 / 最多允许增长到多少只怪
-Config.MIN_MONSTERS_PER_ZONE = 2
+Config.MIN_MONSTERS_PER_ZONE = 5
 Config.MAX_MONSTERS_PER_ZONE = 10
 
 -- 补怪参数：每次补 1~3 只，每批间隔 5 秒

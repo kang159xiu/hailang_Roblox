@@ -411,6 +411,13 @@ local function prepareMonsterTemplateClone(monsterTemplate: Model): (Model?, Bas
 	return clone, root
 end
 
+
+local function getZoneAlignedSpawnCFrame(zone: BasePart, rootPart: BasePart, margin: number): CFrame
+	local posTop = Util.randomPointOnTop(zone, margin)
+	local pos = posTop + Vector3.new(0, rootPart.Size.Y * 0.5 + 1, 0)
+	return CFrame.fromMatrix(pos, zone.CFrame.XVector, zone.CFrame.YVector, zone.CFrame.ZVector)
+end
+
 local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel: number): (BasePart?, Instance?)
 	-- 创建一只怪物的“整模板实例 + 逻辑根 Part + Billboard”。
 	-- 1. 根据怪物等级选择完整模板 Model
@@ -438,10 +445,9 @@ local function createMonsterPart(zone: BasePart, zoneLevel: number, monsterLevel
 	end
 
 	local margin = 3
-	local posTop = Util.randomPointOnTop(zone, margin)
-	-- 按你的最新要求：拿取区域生成怪物时，继续直接复制模板，
-	-- 但整体位置在原有落地基础上额外上移 2 个单位。
-	local newRootCF = CFrame.new(posTop + Vector3.new(0, p.Size.Y * 0.5 + 1, 0))
+	-- 新需求：拿取区域刷出来的怪物朝向也要与区域 Part 完全一致。
+	-- 因此这里不再只用 CFrame.new(位置)，而是复用区域的 X/Y/Z 轴重建目标 CFrame。
+	local newRootCF = getZoneAlignedSpawnCFrame(zone, p, margin)
 	clone:PivotTo(newRootCF)
 	clone.PrimaryPart = p
 

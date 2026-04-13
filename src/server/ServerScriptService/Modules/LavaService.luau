@@ -14,8 +14,8 @@ local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local LavaService = {}
 
 -- 可调：每个区域多久来一次岩浆事件（秒）
-local LAVA_EVENT_INTERVAL_MIN = 12
-local LAVA_EVENT_INTERVAL_MAX = 22
+local LAVA_EVENT_INTERVAL_MIN = 2
+local LAVA_EVENT_INTERVAL_MAX = 5
 
 -- 岩浆“落点”大小（studs）
 local LAVA_PATCH_SIZE = Vector3.new(10, 1, 10)

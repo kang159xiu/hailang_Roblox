@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 --!strict
 -- StarterPack.Weapon.WeaponClient
 -- 使用官方默认背包/热键栏来装备/卸下 Tool（不自建装备按钮）。

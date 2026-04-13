@@ -49,6 +49,7 @@ local lastTouchAt: {[string]: number} = {}
 -- We pulse dirty marks at a low frequency so periodic saves can happen even if the player doesn't do any actions.
 local lastDirtyPulseUnixByUserId: {[number]: number} = {}
 
+-- 这个函数用于把实例转换成便于日志输出的完整路径字符串，方便排查交互问题。
 local function debugInstancePath(instance: Instance?): string
 	if not instance then
 		return "nil"
@@ -61,6 +62,7 @@ local function debugInstancePath(instance: Instance?): string
 end
 
 -- 解锁提示：只在玩家站在对应地块上方时才显示
+-- 这个函数用于获取玩家角色上的 HumanoidRootPart，供距离和站位判定复用。
 local function getHRP(player: Player): BasePart?
 	local character = player.Character
 	if not character then
@@ -69,6 +71,7 @@ local function getHRP(player: Player): BasePart?
 	return character:FindFirstChild("HumanoidRootPart") :: BasePart?
 end
 
+-- 这个函数用于判断玩家是否真的站在某个放置区域上方，从而控制解锁提示是否显示。
 local function isPlayerStandingOnSlot(player: Player, slotPart: BasePart): boolean
 	local hrp = getHRP(player)
 	if not hrp then
@@ -99,6 +102,7 @@ type IncomeDisplayGui = BillboardGui | SurfaceGui
 local cachedIncomeDisplayTemplate: IncomeDisplayGui? = nil
 local cachedPlacedMonsterHeadTemplate: BillboardGui? = nil
 
+-- 这个函数用于从场景里缓存并返回“怪数据显示头顶”的 BillboardGui 模板。
 local function getPlacedMonsterHeadTemplate(): BillboardGui?
 	if cachedPlacedMonsterHeadTemplate then
 		return cachedPlacedMonsterHeadTemplate
@@ -117,6 +121,7 @@ local function getPlacedMonsterHeadTemplate(): BillboardGui?
 	return nil
 end
 
+-- 这个函数用于从场景里找到收益显示模板，并缓存起来供所有放置区域复用。
 local function getIncomeDisplayTemplate(): IncomeDisplayGui?
 	if cachedIncomeDisplayTemplate then
 		return cachedIncomeDisplayTemplate
@@ -155,6 +160,7 @@ local function getIncomeDisplayTemplate(): IncomeDisplayGui?
 	return cachedIncomeDisplayTemplate
 end
 
+-- 这个函数用于在一个收益显示 GUI 里找到可写入文本的 TextLabel。
 local function findIncomeDisplayTextLabel(gui: IncomeDisplayGui): TextLabel?
 	for _, child in ipairs(gui:GetDescendants()) do
 		if child:IsA("TextLabel") then
@@ -164,6 +170,7 @@ local function findIncomeDisplayTextLabel(gui: IncomeDisplayGui): TextLabel?
 	return nil
 end
 
+-- 这个函数用于把怪物等级、收益和未领取金币等数据写进收益显示 GUI。
 local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?, goldPerSec: number?, unclaimed: number?, value: number?)
 	local labelByName: {[string]: TextLabel} = {}
 	local allLabels = {}
@@ -214,6 +221,7 @@ local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?
 	textLabel.Text = unclaimedText
 end
 
+-- 这个函数用于确保放置怪头顶一定挂有 BillboardGui，没有就按模板创建一个。
 local function ensurePlacedMonsterHeadBillboard(rootPart: BasePart): BillboardGui?
 	local existing = rootPart:FindFirstChild(PLACED_MONSTER_HEAD_DISPLAY_NAME)
 	if existing and existing:IsA("BillboardGui") then
@@ -242,6 +250,7 @@ local function ensurePlacedMonsterHeadBillboard(rootPart: BasePart): BillboardGu
 	return clone
 end
 
+-- 这个函数用于刷新放置怪头顶显示的等级、价值和每秒收益文本。
 local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 	local billboard = ensurePlacedMonsterHeadBillboard(rootPart)
 	if not billboard then
@@ -265,14 +274,17 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 	end
 end
 
+-- 这个函数用于统一控制收益显示 GUI 的显隐状态。
 local function setIncomeDisplayVisibility(gui: IncomeDisplayGui, visible: boolean)
 	gui.Enabled = visible
 end
 
+-- 这个函数用于判断某个放置槽当前是否仍在 Workspace 中可见。
 local function isSlotCurrentlyVisible(slotPart: BasePart): boolean
 	return slotPart:IsDescendantOf(Workspace)
 end
 
+-- 这个函数用于确保某个放置槽前方存在收益显示 GUI，没有就克隆模板创建。
 local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collectorPart: BasePart?): IncomeDisplayGui?
 	local anchorPart = collectorPart or slotPart
 	if anchorPart.Parent == nil then
@@ -316,6 +328,7 @@ local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collec
 	return clone
 end
 
+-- 这个函数用于按当前放置怪数据刷新某个槽位对应的收益显示内容。
 local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	local gui = ensureIncomeDisplayGui(player, slotPart, collectorPart)
 	if not gui then
@@ -346,6 +359,7 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 	)
 end
 
+-- 这个函数用于向客户端发送一条简短提示文本。
 local function toast(player: Player, text: string)
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local ev = remotes and remotes:FindFirstChild("PushClientToast")
@@ -354,6 +368,7 @@ local function toast(player: Player, text: string)
 	end
 end
 
+-- 这个函数用于按怪物等级，从 ReplicatedStorage 中找到对应的外观模板。
 local function getMonsterAppearanceTemplate(monsterLevel: number): Instance?
 	local folder = ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	if not folder or not folder:IsA("Folder") then
@@ -365,6 +380,7 @@ local function getMonsterAppearanceTemplate(monsterLevel: number): Instance?
 		or folder:FindFirstChild("Lv" .. tostring(monsterLevel))
 end
 
+-- 这个函数用于清理模板里的旧焊接和约束，避免影响新的挂接逻辑。
 local function stripJointsAndConstraints(root: Instance)
 	for _, d in ipairs(root:GetDescendants()) do
 		if d:IsA("JointInstance") or d:IsA("Constraint") then
@@ -373,6 +389,7 @@ local function stripJointsAndConstraints(root: Instance)
 	end
 end
 
+-- 这个函数用于把外观模板里的所有 BasePart 调整成适合附加显示的物理状态。
 local function prepareAppearanceParts(root: Instance)
 	for _, d in ipairs(root:GetDescendants()) do
 		if d:IsA("BasePart") then
@@ -385,6 +402,7 @@ local function prepareAppearanceParts(root: Instance)
 	end
 end
 
+-- 这个函数用于把一个外观容器内的所有零件焊到指定锚点零件上。
 local function weldPartsToAnchor(anchorPart: BasePart, root: Instance)
 	for _, d in ipairs(root:GetDescendants()) do
 		if d:IsA("BasePart") and d ~= anchorPart then
@@ -397,6 +415,7 @@ local function weldPartsToAnchor(anchorPart: BasePart, root: Instance)
 	end
 end
 
+-- 这个函数用于把外观锚点再焊接到最终的放置根 Part 上。
 local function weldAnchorToRoot(rootPart: BasePart, anchorPart: BasePart)
 	anchorPart.Anchored = false
 	anchorPart.CanCollide = false
@@ -412,6 +431,7 @@ local function weldAnchorToRoot(rootPart: BasePart, anchorPart: BasePart)
 end
 
 --清理放置位置
+-- 这个函数用于为放置外观选择一个可靠的根 Part，并在需要时设置为 PrimaryPart。
 local function sanitizePlacementRoot(inst: Instance): BasePart?
 	if inst:IsA("Model") then
 		local root = inst.PrimaryPart
@@ -430,6 +450,7 @@ local function sanitizePlacementRoot(inst: Instance): BasePart?
 	return nil
 end
 
+-- 这个函数用于优先查找“与 Model 同名的 Part”，作为放置模板的逻辑根。
 local function findPlacementTemplateRootPart(inst: Instance): BasePart?
 	if inst:IsA("BasePart") then
 		return inst
@@ -470,6 +491,7 @@ local function findPlacementTemplateRootPart(inst: Instance): BasePart?
 	return nil
 end
 
+-- 这个函数用于把整个层级按根 Part 的目标 CFrame 一次性整体平移/旋转过去。
 local function moveHierarchyToTarget(root: BasePart, rootInstance: Instance, targetCFrame: CFrame)
 	local delta = targetCFrame * root.CFrame:Inverse()
 	for _, d in ipairs(rootInstance:GetDescendants()) do
@@ -480,11 +502,16 @@ local function moveHierarchyToTarget(root: BasePart, rootInstance: Instance, tar
 	root.CFrame = targetCFrame
 end
 
+-- 这个函数专门根据 Platform 当前的朝向，生成一个“位置上移但朝向不变”的目标 CFrame。
+-- 这样模板里与 Model 同名的根 Part 就会严格跟随 Platform 的朝向。
 local function getPlatformAlignedPlacementCFrame(slotPart: BasePart, yOffset: number): CFrame
+	-- 先基于 Platform 的世界坐标，计算出向上偏移后的最终位置。
 	local pos = slotPart.Position + Vector3.new(0, yOffset, 0)
+	-- 再用 Platform 自己的 X/Y/Z 轴方向重建 CFrame，确保旋转完全一致。
 	return CFrame.fromMatrix(pos, slotPart.CFrame.XVector, slotPart.CFrame.YVector, slotPart.CFrame.ZVector)
 end
 
+-- 这个函数用于读取某个怪物模板以及它对应的根 Part 信息，供回退逻辑复用。
 local function getPlacementTemplateRootInfo(monsterLevel: number): (Instance?, BasePart?)
 	local template = getMonsterAppearanceTemplate(monsterLevel)
 	if not template then
@@ -494,6 +521,7 @@ local function getPlacementTemplateRootInfo(monsterLevel: number): (Instance?, B
 	return template, findPlacementTemplateRootPart(template)
 end
 
+-- 这个函数用于把 Model / BasePart / Folder 统一转换成便于后续处理的结构形式。
 local function toModelLike(inst: Instance): (Model?, BasePart?)
 	if inst:IsA("Model") then
 		return inst, nil
@@ -514,6 +542,7 @@ local function toModelLike(inst: Instance): (Model?, BasePart?)
 	return nil, nil
 end
 
+-- 这个函数用于从放置怪根 Part 向上找到整份已放置怪模板容器。
 local function getPlacedMonsterContainer(rootPart: BasePart): Instance
 	local current: Instance? = rootPart
 	while current do
@@ -526,18 +555,20 @@ local function getPlacedMonsterContainer(rootPart: BasePart): Instance
 	return rootPart
 end
 
+-- 这个函数用于销毁一只已放置怪对应的整个模板容器，而不只是根 Part。
 local function destroyPlacedMonster(rootPart: BasePart)
 	getPlacedMonsterContainer(rootPart):Destroy()
 end
 
+-- 这个函数用于直接复制怪物模板并放到指定 Platform 上，返回最终根 Part。
 local function createPlacedMonsterFromTemplate(slotPart: BasePart, monsterLevel: number): BasePart?
 	local template = getMonsterAppearanceTemplate(monsterLevel)
 	if not template then
 		return nil
 	end
 
-	-- 新要求：模板中“与 Model 同名的根 Part”朝向必须与 Platform 完全一致，
-	-- 这样就能直接通过 Platform 的朝向控制怪物头朝向。
+	-- 新要求：模板中“与 Model 同名的根 Part”朝向必须与 Platform 完全一致。
+	-- 这里统一通过专用函数生成目标 CFrame，避免只对位置生效、旋转却偏掉。
 	local targetCFrame = getPlatformAlignedPlacementCFrame(slotPart, 2)
 
 	local clone = template:Clone()
@@ -546,26 +577,34 @@ local function createPlacedMonsterFromTemplate(slotPart: BasePart, monsterLevel:
 	local container: Instance = clone
 
 	if model then
+		-- 如果模板是 Model，就优先找到“与 Model 同名的根 Part”作为真正的放置基准。
 		rootPart = findPlacementTemplateRootPart(model)
 		if not rootPart then
 			clone:Destroy()
 			return nil
 		end
 
+		-- 显式把这个根 Part 设为 PrimaryPart，后续 PivotTo 就会以它为参考。
 		model.PrimaryPart = rootPart
 
+		-- 放置区里的整套模板都保持锚定，避免刚放下时被物理系统打散。
 		for _, d in ipairs(model:GetDescendants()) do
 			if d:IsA("BasePart") then
 				d.Anchored = true
 			end
 		end
 
+		-- 先用 PivotTo 把整份模型整体移动到目标位置与朝向。
 		model:PivotTo(targetCFrame)
+		-- 再用一次根 Part 精确对齐，确保最终“同名根 Part = Platform 的 CFrame 朝向”。
 		moveHierarchyToTarget(rootPart, model, targetCFrame)
 		container = model
 	elseif part then
+		-- 如果模板本身就是单个 Part，那它自己就是根。
 		rootPart = part
+		-- 单 Part 情况同样保持锚定。
 		rootPart.Anchored = true
+		-- 直接把单 Part 放到与 Platform 朝向一致的目标 CFrame。
 		rootPart.CFrame = targetCFrame
 		container = part
 	else
@@ -578,6 +617,7 @@ local function createPlacedMonsterFromTemplate(slotPart: BasePart, monsterLevel:
 	return rootPart
 end
 
+-- 这个函数用于把怪物外观附加到占位根 Part 上，作为模板直放失败时的备用显示方案。
 local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLevel: number)
 	local template = getMonsterAppearanceTemplate(monsterLevel)
 	if not template then
@@ -633,6 +673,7 @@ local function applyMonsterAppearanceToPlacedPart(rootPart: BasePart, monsterLev
 	rootPart.Transparency = if applied then 1 else 0
 end
 
+-- 这个函数用于按照区域序号计算对应放置区域的解锁价格。
 local function getUnlockCost(slotIndex: number): number
 	-- 规则：
 	-- 01 自动解锁，花费 0
@@ -652,6 +693,7 @@ local function getUnlockCost(slotIndex: number): number
 	return cost
 end
 
+-- 这个函数用于为玩家创建或读取放置区域运行时状态表。
 local function ensureState(player: Player): {[number]: SlotState}
 	local m = slotStatesByUserId[player.UserId]
 	if m then
@@ -670,11 +712,13 @@ local function ensureState(player: Player): {[number]: SlotState}
 	return m
 end
 
+-- 这个函数用于判断当前家园等级是否允许玩家使用某个槽位。
 local function canUseSlotByHomeLevel(player: Player, slotIndex: number): boolean
 	local homeLevel = PlayerData.GetHomeLevel(player)
 	return slotIndex <= homeLevel * 10
 end
 
+-- 这个函数用于检查某个放置区域的前一个区域是否已经解锁。
 local function isPrevUnlocked(player: Player, slotIndex: number): boolean
 	if slotIndex <= 1 then
 		return true
@@ -683,6 +727,7 @@ local function isPrevUnlocked(player: Player, slotIndex: number): boolean
 	return st ~= nil and st.Unlocked == true
 end
 
+-- 这个函数用于把放置怪累计但未领取的金币结算给玩家。
 local function addUnclaimedToPlayer(player: Player, placed: BasePart)
 	local un = placed:GetAttribute("UnclaimedGold")
 	if type(un) ~= "number" or un <= 0 then
@@ -704,6 +749,7 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart)
 	DataDirtyService.MarkDirty(player)
 end
 
+-- 这个函数用于做服务端距离校验，判断玩家是否在允许的交互范围内。
 local function isPlayerWithinInteractionDistance(player: Player, targetPart: BasePart, maxDistance: number?): boolean
 	local hrp = getHRP(player)
 	if not hrp then
@@ -714,6 +760,7 @@ local function isPlayerWithinInteractionDistance(player: Player, targetPart: Bas
 	return (hrp.Position - targetPart.Position).Magnitude <= (allowed + 2)
 end
 
+-- 这个函数用于处理玩家卖出已放置怪的完整流程。
 local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPart: BasePart): boolean
 	if placedPart.Parent == nil then
 		return false
@@ -759,6 +806,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 	return true
 end
 
+-- 这个函数用于处理玩家把已放置怪收回背包的完整流程。
 local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedPart: BasePart): boolean
 	if placedPart.Parent == nil then
 		return false
@@ -811,6 +859,7 @@ local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedP
 	return true
 end
 
+-- 这个函数用于响应解锁提示交互，并在满足条件时解锁对应槽位。
 local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, prompt: ProximityPrompt): boolean
 	if player:GetAttribute("__DataLoaded") ~= true then
 		return false
@@ -864,6 +913,7 @@ local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, promp
 	return true
 end
 
+-- 这个函数用于创建一只真正放置到家园里的怪，并挂上属性、头顶显示和交互提示。
 local function createPlacedMonsterPart(
 	player: Player,
 	slotPart: BasePart,
@@ -1029,8 +1079,11 @@ local function createPlacedMonsterPart(
 		return p
 	end
 
+	-- 如果没法直接复制模板，就回退到占位 Part 方案。
 	local _, templateRoot = getPlacementTemplateRootInfo(monsterLevel)
+	-- 占位 Part 的尺寸优先参考模板根 Part，拿不到就用默认大小。
 	local rootSize = templateRoot and templateRoot.Size or Vector3.new(3, 4, 3)
+	-- 即使走回退分支，也继续使用 Platform 朝向作为最终朝向基准。
 	local rootCFrame = getPlatformAlignedPlacementCFrame(slotPart, slotPart.Size.Y * 0.5 + rootSize.Y * 0.5 + 2)
 
 	local p = Instance.new("Part")
@@ -1208,6 +1261,7 @@ local function createPlacedMonsterPart(
 	return p
 end
 
+-- 这个函数用于检测玩家当前装备的怪物 Tool，并尝试放到指定槽位。
 local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	-- Block interactions before data is loaded (prevents overwriting loaded profile state)
 	if player:GetAttribute("__DataLoaded") ~= true then
@@ -1290,6 +1344,7 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	toast(player, string.format("已放置怪到区域%d", idx))
 end
 
+-- 这个函数用于在玩家触碰 Collector 时领取该槽位已积累的金币。
 local function payoutIfAny(player: Player, slotPart: BasePart)
 	-- Block interactions before data is loaded
 	if player:GetAttribute("__DataLoaded") ~= true then
@@ -1325,6 +1380,7 @@ end
 -- forward declare（ensureUnlockPrompt 里会用到）
 local updateUnlockPromptEnabled: (Player, BasePart) -> ()
 
+-- 这个函数用于给某个放置区域创建“解锁”用的 ProximityPrompt。
 local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 	local prompt = slotPart:FindFirstChild("UnlockPrompt")
 	if prompt and prompt:IsA("ProximityPrompt") then
@@ -1398,6 +1454,7 @@ local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 	end)
 end
 
+-- 这个函数用于根据玩家当前状态，实时刷新解锁提示的文案和启用状态。
 updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
 	local idx = slotPart:GetAttribute("SlotIndex")
 	if type(idx) ~= "number" then
@@ -1446,6 +1503,7 @@ updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
 end
 
 
+-- 这个函数是 PlacementService 的初始化入口，用来挂接所有玩家、槽位和心跳逻辑。
 function PlacementService.Init()
 	-- 初始化已有玩家
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -1628,6 +1686,7 @@ function PlacementService.Init()
 end
 
 
+-- 这个函数用于在家园分配完成后，按存档数据重新生成玩家已放置的怪物。
 local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 	-- Wait for HomeService to assign a plot
 	local home
@@ -1688,6 +1747,7 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 	end
 end
 
+-- 这个函数用于把玩家当前所有放置槽位状态导出成可持久化的数据结构。
 function PlacementService.Export(player: Player): {PersistedSlot}
 	local states = ensureState(player)
 	local out: {PersistedSlot} = {}
@@ -1727,6 +1787,7 @@ function PlacementService.Export(player: Player): {PersistedSlot}
 	return out
 end
 
+-- 这个函数用于把存档中的放置数据重新应用到玩家当前运行时状态中。
 function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlot}?)
 	local states = ensureState(player)
 
@@ -1757,10 +1818,12 @@ function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlo
 	end)
 end
 
+-- 这个函数用于在玩家彻底清理时移除 PlacementService 的运行时缓存。
 function PlacementService.Cleanup(player: Player)
 	slotStatesByUserId[player.UserId] = nil
 end
 
+-- 这个函数用于统一处理 PlacementService 负责的各种 ProximityPrompt 服务端交互。
 function PlacementService.TryHandlePromptInteraction(player: Player, promptInstance: Instance): boolean
 	if player:GetAttribute("__DataLoaded") ~= true then
 		print(string.format("[PromptDebug][Placement] reject player=%s reason=data_not_loaded", player.Name))
