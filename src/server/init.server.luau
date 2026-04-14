@@ -1,8 +1,38 @@
 --!strict
 -- ServerScriptService.Server
 -- 入口脚本：初始化各个服务，并绑定 RemoteEvents
+--
 
+
+--
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local function ensureFolder(parent: Instance, name: string): Folder
+	local existing = parent:FindFirstChild(name)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+
+	local folder = Instance.new("Folder")
+	folder.Name = name
+	folder.Parent = parent
+	return folder
+end
+
+local function ensureRemoteEvent(folder: Folder, name: string): RemoteEvent
+	local existing = folder:FindFirstChild(name)
+	if existing and existing:IsA("RemoteEvent") then
+		return existing
+	end
+
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = folder
+	return remote
+end
+
+local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
+ensureRemoteEvent(remotesFolder, "PlayWeaponHitVFX")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local damageRemote = remotes:WaitForChild("RequestDamageMonster") :: RemoteEvent

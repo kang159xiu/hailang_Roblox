@@ -23,6 +23,7 @@ local Util = require(script.Parent:WaitForChild("Util"))
 local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local CombatService = require(script.Parent:WaitForChild("CombatService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 -- require(...)：加载 ModuleScript 并拿到它导出的 table/函数。
 --
@@ -34,6 +35,9 @@ local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 -- InventoryService：处理玩家拾取怪物尸体后的入背包/携带逻辑
 
 local MonsterService = {}
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local playWeaponHitVFXRemote = remotes:WaitForChild("PlayWeaponHitVFX") :: RemoteEvent
 
 local monstersFolder: Folder
 local aliveMonsters: {[BasePart]: true} = {}
@@ -713,6 +717,8 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 		return
 	end
 
+	local hitPart = if hit:IsA("BasePart") then hit else monsterPart
+
 	local dist = (hrp.Position - monsterPart.Position).Magnitude
 	if dist > 16 then
 		return
@@ -731,6 +737,10 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	local newHp = math.max(0, hp - dmg)
 	monsterPart:SetAttribute("HP", newHp)
 	setMonsterBillboardText(monsterPart)
+
+	local stats = PlayerData.Get(player)
+	local weaponLevel = stats.EquippedWeaponLevel or stats.WeaponLevel or 1
+	playWeaponHitVFXRemote:FireAllClients(hitPart, weaponLevel)
 
 	if newHp <= 0 then
 		markDead(monsterPart)

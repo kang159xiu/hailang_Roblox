@@ -34,6 +34,7 @@ end
 local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
 local damageRemote = ensureRemoteEvent(remotesFolder, "RequestDamageMonster")
 local promptInteractionRemote = ensureRemoteEvent(remotesFolder, "RequestPromptInteraction")
+ensureRemoteEvent(remotesFolder, "PlayWeaponHitVFX")
 ensureRemoteEvent(remotesFolder, "RequestUseWeaponSkill")
 ensureRemoteEvent(remotesFolder, "RequestPurchaseWeapon")
 ensureRemoteEvent(remotesFolder, "RequestEquipWeapon")
