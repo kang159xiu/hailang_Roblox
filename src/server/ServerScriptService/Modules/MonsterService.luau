@@ -142,59 +142,88 @@ local function syncMonsterModelAttribute(monsterPart: BasePart, name: string, va
 	end
 end
 
+-- [修改内容] 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
 local function buildBillboard(monsterPart: BasePart)
-	-- 给怪物头顶创建一个 BillboardGui（看板 UI）。
-	--
-	-- BillboardGui 是 Roblox 里一种“挂在 3D 物体上的 2D UI”，
-	-- 常用于名字、血条、提示文字等头顶显示。
+	-- [修改内容] 按照你提供的路径查找模板：Workspace.区域.场景怪数据头顶显示.BillboardGui
+	local areaFolder = workspace:FindFirstChild("区域")
+	local uiContainer = areaFolder and areaFolder:FindFirstChild("场景怪数据头顶显示")
+	local template = uiContainer and uiContainer:FindFirstChild("BillboardGui")
 
-	-- 这里先只创建容器和 Label，
-	-- 具体显示什么文字，可以在别的逻辑里继续更新 tl.Text。
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "MonsterBillboard"
+	local bb: BillboardGui
+	if template then
+		-- [修改内容] 找到模板后进行克隆，并命名为 MonsterBillboard 方便后续查找
+		bb = template:Clone()
+		bb.Name = "MonsterBillboard"
+	else
+		-- [修改内容] 兜底逻辑：如果找不到模板，打印警告并创建一个基础 UI，防止脚本报错
+		warn("[MonsterService] 找不到 UI 模板，路径应为: Workspace.区域.场景怪数据头顶显示.BillboardGui")
+		bb = Instance.new("BillboardGui")
+		bb.Name = "MonsterBillboard"
+		bb.Size = UDim2.fromOffset(260, 90)
+		
+		local tl = Instance.new("TextLabel")
+		tl.Name = "Label"
+		tl.Size = UDim2.fromScale(1, 1)
+		tl.Parent = bb
+	end
+
 	bb.AlwaysOnTop = true
 	bb.Enabled = true
 	bb.MaxDistance = 30
-	bb.Size = UDim2.fromOffset(260, 90)
-
-	--设置生成区域怪头顶数据的显示高低 + 2.5
+	-- [修改内容] 保持原有的高度偏移设置
 	bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
 	bb.Parent = monsterPart
-
-	local tl = Instance.new("TextLabel")
-	tl.Name = "Label"
-	tl.BackgroundTransparency = 1
-	tl.Size = UDim2.fromScale(1, 1)
-	tl.TextColor3 = Color3.fromRGB(255, 255, 255)
-	tl.TextStrokeTransparency = 0.2
-	tl.TextScaled = true
-	tl.Font = Enum.Font.GothamBold
-	tl.Text = ""
-	tl.Parent = bb
 end
 
+
 local function setMonsterBillboardText(monsterPart: BasePart)
+	-- 修改 setMonsterBillboardText 函数，根据模板结构填充数据
 	local bb = monsterPart:FindFirstChild("MonsterBillboard")
 	if not bb or not bb:IsA("BillboardGui") then
 		return
 	end
 
-	local label = bb:FindFirstChild("Label")
-	if not label or not label:IsA("TextLabel") then
-		return
-	end
-
+	-- 获取怪物相关属性
 	local level = tonumber(monsterPart:GetAttribute("MonsterLevel")) or 1
 	local hp = tonumber(monsterPart:GetAttribute("HP")) or 0
 	local maxHp = tonumber(monsterPart:GetAttribute("MaxHP")) or 0
 	local value = tonumber(monsterPart:GetAttribute("Value")) or 0
 	local gps = tonumber(monsterPart:GetAttribute("GoldPerSec")) or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
+	-- [修改内容] 获取过期时间用于计算剩余秒数
+	local expireUnix = tonumber(monsterPart:GetAttribute("ExpireUnix")) or 0
+	local timeLeft = math.max(0, expireUnix - os.time())
 
-	if dead then
-		label.Text = string.format("Lv.%d  HP:%d/%d\n已死亡(可收起)", level, hp, maxHp)
-	else
-		label.Text = string.format("Lv.%d  HP:%d/%d\n价值:%d  +%d/s", level, hp, maxHp, value, gps)
+	-- [修改内容] 更新“等级+血量”部分
+	local statsLabel = bb:FindFirstChild("等级+血量")
+	if statsLabel and (statsLabel:IsA("TextLabel") or statsLabel:IsA("TextBox")) then
+		statsLabel.Text = string.format("Lv.%d  HP:%d/%d", level, hp, maxHp)
+	end
+
+	-- [修改内容] 更新“价值+每秒+x金币”部分
+	local valueLabel = bb:FindFirstChild("价值+每秒+x")
+	if valueLabel and (valueLabel:IsA("TextLabel") or valueLabel:IsA("TextBox")) then
+		if dead then
+			valueLabel.Text = "已死亡(可收起)"
+		else
+			valueLabel.Text = string.format("价值:%d  +%d/s", value, gps)
+		end
+	end
+
+	-- [修改内容] 更新“剩余时间”部分
+	local timeLabel = bb:FindFirstChild("剩余时间")
+	if timeLabel and (timeLabel:IsA("TextLabel") or timeLabel:IsA("TextBox")) then
+		timeLabel.Text = string.format("剩余时间: %ds", timeLeft)
+	end
+
+	-- [修改内容] 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示
+	local oldLabel = bb:FindFirstChild("Label")
+	if oldLabel and oldLabel:IsA("TextLabel") then
+		if dead then
+			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n已死亡(可收起)", level, hp, maxHp)
+		else
+			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n价值:%d  +%d/s", level, hp, maxHp, value, gps)
+		end
 	end
 end
 
@@ -594,6 +623,15 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 	syncMonsterModelAttribute(monster, "ZoneKey", key)
 	monsterInstance.Parent = monstersFolder
 	aliveMonsters[monster] = true
+
+	-- 找到 spawnMonsterInZone 函数，在 aliveMonsters[monster] = true 之后添加：
+	-- [修改内容] 开启一个循环任务，每秒更新一次头顶 UI 的倒计时
+	task.spawn(function()
+		while monster and monster.Parent and monster:GetAttribute("Dead") ~= true do
+			setMonsterBillboardText(monster)
+			task.wait(1)
+		end
+	end)
 
 	-- 统一在 Destroying 中做字典清理 + 触发“保底补怪”（分批 1~3 只，每批间隔 5s）
 	monsterInstance.Destroying:Connect(function()
