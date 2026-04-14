@@ -416,8 +416,8 @@ local function updateMonsterText(monsterPart: BasePart)
 		-- 你要求：靠近变大、离远变小；并且整体大小缩小一半
 		local baseW, baseH = 130, 45 -- 原来 260x90 的一半
 		local t = math.clamp(dist / showDist, 0, 1)
-		local maxScale = 1.2
-		local minScale = 0.55
+		local maxScale = 3
+		local minScale = 1.5
 		local scale = maxScale + (minScale - maxScale) * t
 		bb.Size = UDim2.fromOffset(math.floor(baseW * scale), math.floor(baseH * scale))
 	end

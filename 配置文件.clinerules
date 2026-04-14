@@ -50,8 +50,3 @@
 ### 客户端 (Client) - 单体核心脚本
 * **入口与核心**：逻辑高度集中在 `src/client/StarterPlayerScripts/Client.client.luau`。
 * **数据同步**：主要通过监听 `Player:GetAttributeChangedSignal()` 或接收 `RemoteEvent` 来更新客户端状态。
-
-## 4. UI 交互规范 (UI Interaction)
-* **UI 来源**：UI 界面大多由开发者在 `StarterGui` 手动搭建，节点使用中文命名。
-* **节点绑定**：必须通过 `WaitForChild()` 或 `FindFirstChild()` 匹配**中文名** UI 节点后再进行操作（如 `.Text` 或 `.Activated`）。
-* **兜底方案 (Fallback)**：当代码找不到预设的 UI 节点时，可编写 `Instance.new` 动态生成 UI 作为 Fallback 逻辑。
