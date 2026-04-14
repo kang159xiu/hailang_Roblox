@@ -142,8 +142,9 @@ local function syncMonsterModelAttribute(monsterPart: BasePart, name: string, va
 	end
 end
 
--- [修改内容] 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
+
 local function buildBillboard(monsterPart: BasePart)
+	-- [修改内容] 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
 	-- [修改内容] 按照你提供的路径查找模板：Workspace.区域.场景怪数据头顶显示.BillboardGui
 	local areaFolder = workspace:FindFirstChild("区域")
 	local uiContainer = areaFolder and areaFolder:FindFirstChild("场景怪数据头顶显示")
@@ -171,7 +172,7 @@ local function buildBillboard(monsterPart: BasePart)
 	bb.Enabled = true
 	bb.MaxDistance = 30
 	-- [修改内容] 保持原有的高度偏移设置
-	bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
+	--bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
 	bb.Parent = monsterPart
 end
 

@@ -384,9 +384,9 @@ local keyDownDebugState = {
 }
 
 
+
 local function updateMonsterText(monsterPart: BasePart)
-	-- [修改内容] 重写客户端的更新函数，适配自定义 UI 模板的三个独立节点
-	-- 直接查找 BillboardGui
+	-- [修改内容] 最终版本：包含文字独立分配 + 距离隐藏 + 实时动态计算 UI 大小
 	local bb = monsterPart:FindFirstChild("MonsterBillboard")
 	if not bb or not bb:IsA("BillboardGui") then
 		return
@@ -413,8 +413,23 @@ local function updateMonsterText(monsterPart: BasePart)
 		return
 	end
 
-	-- (注：如果你已经按照我之前的建议，去掉了 bb.Size 的强制覆盖代码，这里就不需要再写了)
-	-- 如果你没删，你想保留代码控制缩放，就把那几行计算 scale 的代码留在这里。
+	-- ==========================================
+	-- 【核心修复：恢复并强化根据距离实时刷新的逻辑】
+	-- ==========================================
+	-- 1. 恢复原始的完整尺寸（不再除以 2！）你可以根据需要调大这两个数字
+	local baseW, baseH = 260, 90 
+	
+	-- 2. 计算距离比例 (t: 0代表完全贴脸，1代表达到最远可视距离)
+	local t = math.clamp(dist / showDist, 0, 1)
+	
+	-- 3. 调整缩放倍率！
+	local maxScale = 1.5  -- 贴脸时放大到 1.5 倍（之前是 1.2）
+	local minScale = 0.8  -- 离远时缩小到 0.8 倍（之前是 0.55，太小了）
+	
+	-- 4. 实时计算当前帧的最终比例，并强制刷新大小
+	local scale = maxScale + (minScale - maxScale) * t
+	bb.Size = UDim2.fromOffset(math.floor(baseW * scale), math.floor(baseH * scale))
+	-- ==========================================
 
 	local level = monsterPart:GetAttribute("MonsterLevel") or 1
 	local hp = monsterPart:GetAttribute("HP") or 0
@@ -437,7 +452,7 @@ local function updateMonsterText(monsterPart: BasePart)
 		timeLabel.Text = remainText
 	end
 
-	-- 3. 更新【价值】节点，并加入距离判断控制
+	-- 3. 更新【价值】节点
 	local valueLabel = bb:FindFirstChild("价值+每秒+x金币")
 	if valueLabel and valueLabel:IsA("TextLabel") then
 		if dead then
@@ -445,12 +460,11 @@ local function updateMonsterText(monsterPart: BasePart)
 			valueLabel.Visible = true
 		else
 			if dist > detailDist then
-				-- [核心逻辑] 玩家离得远时，隐藏价值信息，使界面更干净
+				-- 距离较远时隐藏
 				valueLabel.Visible = false
 			else
-				-- 玩家靠近时，显示并更新价值信息
+				-- 靠近时显示
 				valueLabel.Visible = true
-				-- 注意这里使用了 formatNumberShort 来格式化金币数字 (例如 1w, 1M)
 				valueLabel.Text = string.format("价值:%s  +%s/s", formatNumberShort(value), formatNumberShort(gps))
 			end
 		end
