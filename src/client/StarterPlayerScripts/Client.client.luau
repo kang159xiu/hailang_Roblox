@@ -1111,6 +1111,201 @@ hookRefreshOnAttr("HealthLevel")
 hookRefreshOnAttr("SpeedLevel")
 hookRefreshOnAttr("CarryLevel")
 
+-- =====================
+-- Home 头像显示：离开出生点 20 单位后显示，回到范围内隐藏
+-- 仅本地创建，因此只有玩家自己可见
+-- 模板来源：Workspace.区域.HOME头像name.part.BillboardGui
+-- =====================
+
+local HEAD_DISPLAY_DISTANCE = 40
+local HEAD_TEMPLATE_FOLDER_NAME = "区域"
+local HEAD_TEMPLATE_ROOT_NAME = "HOME头像name"
+local HEAD_TEMPLATE_GUI_NAME = "BillboardGui"
+local HEAD_CLONE_GUI_NAME = "Head"
+
+local currentHeadGui: BillboardGui? = nil
+local currentHeadSpawnPoint: BasePart? = nil
+local currentHeadHomeRoot: Instance? = nil
+local currentHeadCharacter: Model? = nil
+local currentHeadHumanoidRootPart: BasePart? = nil
+
+local function getHeadAvatarThumbnail(): string
+	local ok, content = pcall(function()
+		return Players:GetUserThumbnailAsync(
+			player.UserId,
+			Enum.ThumbnailType.HeadShot,
+			Enum.ThumbnailSize.Size420x420
+		)
+	end)
+
+	if ok then
+		return content
+	end
+
+	return ""
+end
+
+local headAvatarImage = getHeadAvatarThumbnail()
+local headDisplayPlayerName = player.DisplayName ~= "" and player.DisplayName or player.Name
+
+local function findHeadTemplateBillboardGui(): BillboardGui?
+	local regionFolder = workspace:FindFirstChild(HEAD_TEMPLATE_FOLDER_NAME)
+	if regionFolder then
+		local root = regionFolder:FindFirstChild(HEAD_TEMPLATE_ROOT_NAME, true)
+		if root then
+			local gui = root:FindFirstChild(HEAD_TEMPLATE_GUI_NAME, true)
+			if gui and gui:IsA("BillboardGui") then
+				return gui
+			end
+		end
+	end
+
+	for _, descendant in ipairs(workspace:GetDescendants()) do
+		if descendant:IsA("BillboardGui") and descendant.Name == HEAD_TEMPLATE_GUI_NAME then
+			local parentInstance = descendant.Parent
+			if parentInstance and parentInstance.Name == HEAD_TEMPLATE_ROOT_NAME then
+				return descendant
+			end
+		end
+	end
+
+	return nil
+end
+
+local function findOwnedHomeForHead(): Instance?
+	local homeFolder = workspace:FindFirstChild("HOME")
+	if not homeFolder then
+		return nil
+	end
+
+	for _, child in ipairs(homeFolder:GetChildren()) do
+		if child:GetAttribute("OwnerUserId") == player.UserId then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function findHeadSpawnPoint(homeRoot: Instance?): BasePart?
+	if not homeRoot then
+		return nil
+	end
+
+	local spawnPoint = homeRoot:FindFirstChild("出生点", true)
+	if spawnPoint and spawnPoint:IsA("BasePart") then
+		return spawnPoint
+	end
+
+	return nil
+end
+
+local function destroyHeadGui()
+	if currentHeadGui then
+		currentHeadGui:Destroy()
+		currentHeadGui = nil
+	end
+end
+
+local function setHeadGuiVisible(isVisible: boolean)
+	if currentHeadGui then
+		currentHeadGui.Enabled = isVisible
+	end
+end
+
+local function ensureHeadGui(spawnPoint: BasePart): BillboardGui?
+	if currentHeadGui and currentHeadGui.Parent == spawnPoint then
+		return currentHeadGui
+	end
+
+	destroyHeadGui()
+
+	local templateGui = findHeadTemplateBillboardGui()
+	if not templateGui then
+		warn("[HeadDisplay] 未找到头像模板 BillboardGui，请检查 Workspace.区域.HOME头像name.part.BillboardGui")
+		return nil
+	end
+
+	local clonedGui = templateGui:Clone()
+	clonedGui.Name = HEAD_CLONE_GUI_NAME
+	clonedGui.Adornee = spawnPoint
+	clonedGui.Parent = spawnPoint
+	clonedGui.Enabled = false
+
+	local imageLabel = clonedGui:FindFirstChild("ImageLabel", true)
+	if imageLabel and imageLabel:IsA("ImageLabel") then
+		imageLabel.Image = headAvatarImage
+	end
+
+	local textLabel = clonedGui:FindFirstChild("TextLabel", true)
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = headDisplayPlayerName
+	end
+
+	currentHeadGui = clonedGui
+	return clonedGui
+end
+
+local function refreshHeadCharacterReferences(character: Model?)
+	currentHeadCharacter = character
+	currentHeadHumanoidRootPart = nil
+
+	if not character then
+		return
+	end
+
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		currentHeadHumanoidRootPart = hrp
+		return
+	end
+
+	task.spawn(function()
+		local found = character:WaitForChild("HumanoidRootPart", 5)
+		if found and found:IsA("BasePart") and currentHeadCharacter == character then
+			currentHeadHumanoidRootPart = found
+		end
+	end)
+end
+
+local function refreshHeadHomeReferences()
+	local homeRoot = findOwnedHomeForHead()
+	currentHeadHomeRoot = homeRoot
+	currentHeadSpawnPoint = findHeadSpawnPoint(homeRoot)
+
+	if currentHeadSpawnPoint then
+		ensureHeadGui(currentHeadSpawnPoint)
+	else
+		destroyHeadGui()
+	end
+end
+
+refreshHeadCharacterReferences(player.Character)
+refreshHeadHomeReferences()
+
+player.CharacterAdded:Connect(function(character)
+	refreshHeadCharacterReferences(character)
+	setHeadGuiVisible(false)
+end)
+
+player.CharacterRemoving:Connect(function()
+	refreshHeadCharacterReferences(nil)
+	setHeadGuiVisible(false)
+end)
+
+RunService.Heartbeat:Connect(function()
+	if not currentHeadHomeRoot or currentHeadHomeRoot:GetAttribute("OwnerUserId") ~= player.UserId then
+		refreshHeadHomeReferences()
+	end
+
+	if currentHeadGui and currentHeadSpawnPoint and currentHeadHumanoidRootPart then
+		local distance = (currentHeadHumanoidRootPart.Position - currentHeadSpawnPoint.Position).Magnitude
+		setHeadGuiVisible(distance > HEAD_DISPLAY_DISTANCE)
+	else
+		setHeadGuiVisible(false)
+	end
+end)
+
 
 -- =====================
 -- 背包按钮：显示/隐藏“怪物背包”窗口（MainUI.MonsterInventoryWindow）

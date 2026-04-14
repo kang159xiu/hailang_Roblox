@@ -1,12 +1,4 @@
 --!strict
--- ServerScriptService.Modules.DataPersistenceService
--- Cloud saving using ProfileService.
--- Responsibilities:
--- - Load profile on join / reconnect / teleport
--- - Periodic dirty save: mark-dirty + 30s save interval
--- - SaveSoon debounce (trailing): after important operations -> save 5s after last operation
--- - Force save on leaving / server close (ProfileService BindToClose handles close)
--- - Offline monster production is handled by PlacementService.ApplyLoaded (offline收益 = 在线收益的 1/20)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")

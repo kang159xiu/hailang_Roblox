@@ -19,6 +19,11 @@ local UserInputService 	= game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local tool = script.Parent :: Tool
 
+-- 自定义攻击动画 ID。
+-- 可填写纯数字（例如：1234567890）或 rbxassetid://1234567890
+-- 留空、格式不正确、或加载失败时，会自动回退到默认攻击动画，并打印“默认攻击动画”。
+local CUSTOM_ATTACK_ANIMATION_ID = "97542205785892"
+
 -- Players.LocalPlayer 只在本地脚本（LocalScript）里可用，表示“当前这个玩家自己”。
 -- script.Parent 一般就是当前脚本挂着的对象，这里它挂在 Tool 下面，所以把它当成 Tool 使用。
 
@@ -39,9 +44,7 @@ local Config = {
 	GRID_STUDS = 4,
 }
 
--- WaitForChild("GameModules", 10) 的意思是：
--- 最多等待 10 秒去找 ReplicatedStorage 里的 GameModules。
--- 如果不写超时，极端情况下可能会一直等待下去。
+-- WaitForChild("GameModules", 10) 的意思是：最多等待 10 秒去找 ReplicatedStorage 里的 GameModules。
 --
 -- Config 是默认配置表。
 -- GRID_STUDS 可以理解为“1 格等于多少 studs（Roblox 世界单位）”。
@@ -83,13 +86,23 @@ local function isEquipped(): boolean
 	return tool.Parent == (player.Character or nil)
 end
 
--- 判断武器是否“已装备”。
--- Tool 被装备后，通常会被放到 player.Character 下面；
--- 没装备时，一般在 Backpack 里。
---
--- 返回 boolean，只有 true / false 两种结果。
+local function normalizeAnimationId(rawId: string): string?
+	local trimmed = string.gsub(rawId, "^%s*(.-)%s*$", "%1")
+	if trimmed == "" then
+		return nil
+	end
 
-local function playAttackAnimation()
+	local numericId = string.match(trimmed, "^rbxassetid://(%d+)$") or string.match(trimmed, "^(%d+)$")
+	if not numericId then
+		return nil
+	end
+
+	return "rbxassetid://" .. numericId
+end
+
+local function playDefaultAttackAnimation()
+	print("默认攻击动画")
+
 	local v = Instance.new("StringValue")
 	v.Name = "toolanim"
 	v.Value = "Slash"
@@ -106,12 +119,46 @@ local function playAttackAnimation()
 		local animator = hum and hum:FindFirstChildOfClass("Animator")
 		if animator then
 			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-				-- 【修复点1】过滤跑动与待机，只加速攻击（Action 及以上）
+				--只加速攻击动作（Action 及以上）
 				if track.Priority ~= Enum.AnimationPriority.Core and track.Priority ~= Enum.AnimationPriority.Idle and track.Priority ~= Enum.AnimationPriority.Movement then
 					track:AdjustSpeed(2.0)
 				end
 			end
 		end
+	end)
+end
+
+local function playAttackAnimation()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	local animationId = normalizeAnimationId(CUSTOM_ATTACK_ANIMATION_ID)
+
+	if not hum or not animator or not animationId then
+		playDefaultAttackAnimation()
+		return
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationId
+
+	local ok, trackOrError = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if not ok or not trackOrError then
+		animation:Destroy()
+		warn("[WeaponClient] 自定义攻击动画加载失败，切回默认攻击动画：", trackOrError)
+		playDefaultAttackAnimation()
+		return
+	end
+
+	local track = trackOrError :: AnimationTrack
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play(0.05, 1, 2.0)
+
+	task.delay(2, function()
+		animation:Destroy()
 	end)
 end
 
