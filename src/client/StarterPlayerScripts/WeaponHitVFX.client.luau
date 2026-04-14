@@ -6,7 +6,7 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local playWeaponHitVFXRemote = remotes:WaitForChild("PlayWeaponHitVFX") :: RemoteEvent
 
 local VFX_FOLDER_NAME = "武器VFX"
-local VFX_LIFETIME = 0.2
+local VFX_LIFETIME = 0.6
 
 local function getEffectNameForWeaponLevel(weaponLevel: number): string
 	return string.format("武器命中特效%02d", weaponLevel)

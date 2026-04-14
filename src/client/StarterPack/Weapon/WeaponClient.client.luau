@@ -264,7 +264,7 @@ local function tryAttack()
 	playAttackAnimation()
 
 	-- 延迟 0.15s 执行伤害判定，完美对齐挥刀动作中段
-	task.delay(0.15, function()
+	task.delay(0.2, function()
 		if not isEquipped() then return end
 		
 		local character = player.Character
