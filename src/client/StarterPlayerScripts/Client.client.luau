@@ -383,9 +383,12 @@ local keyDownDebugState = {
 	[Enum.KeyCode.F] = false,
 }
 
+
 local function updateMonsterText(monsterPart: BasePart)
-	local label = findMonsterLabel(monsterPart)
-	if not label then
+	-- [修改内容] 重写客户端的更新函数，适配自定义 UI 模板的三个独立节点
+	-- 直接查找 BillboardGui
+	local bb = monsterPart:FindFirstChild("MonsterBillboard")
+	if not bb or not bb:IsA("BillboardGui") then
 		return
 	end
 
@@ -401,26 +404,17 @@ local function updateMonsterText(monsterPart: BasePart)
 		dist = (hrp.Position - monsterPart.Position).Magnitude
 	end
 
-	-- 显示距离
+	-- 显示/隐藏的总距离控制
 	local showDist = 30
 	local detailDist = (Config.MONSTER_DETAIL_SHOW_DISTANCE or 6)
 
-	local bb = label.Parent
-	if bb and bb:IsA("BillboardGui") then
-		-- 显示距离
-		bb.Enabled = dist <= showDist
-		if not bb.Enabled then
-			return
-		end
-
-		-- 你要求：靠近变大、离远变小；并且整体大小缩小一半
-		local baseW, baseH = 130, 45 -- 原来 260x90 的一半
-		local t = math.clamp(dist / showDist, 0, 1)
-		local maxScale = 3
-		local minScale = 1.5
-		local scale = maxScale + (minScale - maxScale) * t
-		bb.Size = UDim2.fromOffset(math.floor(baseW * scale), math.floor(baseH * scale))
+	bb.Enabled = dist <= showDist
+	if not bb.Enabled then
+		return
 	end
+
+	-- (注：如果你已经按照我之前的建议，去掉了 bb.Size 的强制覆盖代码，这里就不需要再写了)
+	-- 如果你没删，你想保留代码控制缩放，就把那几行计算 scale 的代码留在这里。
 
 	local level = monsterPart:GetAttribute("MonsterLevel") or 1
 	local hp = monsterPart:GetAttribute("HP") or 0
@@ -429,30 +423,43 @@ local function updateMonsterText(monsterPart: BasePart)
 	local gps = monsterPart:GetAttribute("GoldPerSec") or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
 
-	local remainText = string.format("%ds", remain)
+	local remainText = string.format("剩余时间: %ds", remain)
 
-	if dead then
-		label.Text = string.format(
-			"Lv.%d  HP:%d/%d\n剩余:%s\n已死亡(可收起)",
-			level,
-			hp,
-			maxHp,
-			remainText
-		)
-	else
-		if dist > detailDist then
-			label.Text = string.format("Lv.%d  HP:%d/%d\n剩余:%s", level, hp, maxHp, remainText)
+	-- 1. 更新【等级+血量】节点
+	local statsLabel = bb:FindFirstChild("等级+血量")
+	if statsLabel and statsLabel:IsA("TextLabel") then
+		statsLabel.Text = string.format("Lv.%d  HP:%d/%d", level, hp, maxHp)
+	end
+
+	-- 2. 更新【剩余时间】节点
+	local timeLabel = bb:FindFirstChild("剩余时间")
+	if timeLabel and timeLabel:IsA("TextLabel") then
+		timeLabel.Text = remainText
+	end
+
+	-- 3. 更新【价值】节点，并加入距离判断控制
+	local valueLabel = bb:FindFirstChild("价值+每秒+x金币")
+	if valueLabel and valueLabel:IsA("TextLabel") then
+		if dead then
+			valueLabel.Text = "已死亡(可收起)"
+			valueLabel.Visible = true
 		else
-			label.Text = string.format(
-				"Lv.%d  HP:%d/%d\n剩余:%s\n价值:%s  +%s/s",
-				level,
-				hp,
-				maxHp,
-				remainText,
-				formatNumberShort(value),
-				formatNumberShort(gps)
-			)
+			if dist > detailDist then
+				-- [核心逻辑] 玩家离得远时，隐藏价值信息，使界面更干净
+				valueLabel.Visible = false
+			else
+				-- 玩家靠近时，显示并更新价值信息
+				valueLabel.Visible = true
+				-- 注意这里使用了 formatNumberShort 来格式化金币数字 (例如 1w, 1M)
+				valueLabel.Text = string.format("价值:%s  +%s/s", formatNumberShort(value), formatNumberShort(gps))
+			end
 		end
+	end
+
+	-- [兜底逻辑] 如果模板里依然有旧的 "Label"，直接隐藏它，防止干扰
+	local oldLabel = bb:FindFirstChild("Label")
+	if oldLabel and oldLabel:IsA("TextLabel") then
+		oldLabel.Visible = false
 	end
 end
 
@@ -506,7 +513,7 @@ initMonsterBillboards()
 local acc = 0
 RunService.Heartbeat:Connect(function(dt)
 	acc += dt
-	if acc < 0.15 then
+	if acc < 0.2 then
 		-- continue below for per-frame key polling while prompts are visible
 	else
 		acc = 0
