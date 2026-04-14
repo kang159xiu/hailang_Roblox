@@ -9,6 +9,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+-- TweenService，用于后续实现怪物受击时的平滑跳跃动画
+local TweenService = game:GetService("TweenService")
 
 -- ReplicatedStorage：客户端和服务端共享的数据仓库
 -- 这里主要用来读取配置和怪物外观模板
@@ -674,6 +676,51 @@ replenishZoneToTarget = function(z: PickupZone, key: string, target: number)
 	end)
 end
 
+-- [修改内容] 新增函数：处理怪物受击时的向上跳跃表现
+local function playMonsterJumpEffect(monsterPart: BasePart, monsterModel: Model)
+	-- [修改内容] 添加状态锁（防抖）。如果怪物已经在跳跃中，则忽略新的跳跃请求，防止连续受击导致怪物“上天”
+	if monsterPart:GetAttribute("IsJumping") == true then
+		return
+	end
+	monsterPart:SetAttribute("IsJumping", true)
+
+	-- [修改内容] 记录怪物当前初始位置，并计算跳跃的最高点 CFrame（在此基础向上移动 2 个 Studs）
+	local originalCFrame = monsterModel:GetPivot()
+	local targetCFrame = originalCFrame * CFrame.new(0, 2, 0)
+
+	-- [修改内容] 创建一个临时 CFrameValue 作为 Tween 的承载体，因为 Model 自身无法直接运行 Tween
+	local cframeValue = Instance.new("CFrameValue")
+	cframeValue.Value = originalCFrame
+
+	-- [修改内容] 监听 CFrameValue 的实时变化，并将其同步应用到怪物的整体模型上
+	local connection = cframeValue.Changed:Connect(function(newCFrame)
+		if monsterModel and monsterModel.Parent then
+			monsterModel:PivotTo(newCFrame)
+		end
+	end)
+
+	-- [修改内容] 配置动画参数：时长 0.15 秒，二次方缓出；Reverses = true 代表跳到最高点后会自动返回原位
+	local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+	local jumpTween = TweenService:Create(cframeValue, tweenInfo, {Value = targetCFrame})
+
+	jumpTween.Completed:Connect(function()
+		-- [修改内容] 动画完成后，断开事件监听并清理垃圾对象
+		connection:Disconnect()
+		cframeValue:Destroy()
+		
+		if monsterPart and monsterPart.Parent then
+			-- [修改内容] 解除跳跃锁定状态
+			monsterPart:SetAttribute("IsJumping", false)
+			-- [修改内容] 强制重置回初始位置，防止因为浮点数精度误差导致怪物最终没踩到地上
+			if monsterModel and monsterModel.Parent then
+				monsterModel:PivotTo(originalCFrame)
+			end
+		end
+	end)
+
+	jumpTween:Play()
+end
+
 function MonsterService.DamageMonster(player: Player, hit: Instance)
 	-- 处理玩家对怪物造成伤害。
 	--
@@ -698,7 +745,7 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 			monsterPart = cur
 			break
 		end
-		if cur == monstersFolder then
+		if monstersFolder and cur == monstersFolder then
 			break
 		end
 		cur = cur.Parent
@@ -737,6 +784,12 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	local newHp = math.max(0, hp - dmg)
 	monsterPart:SetAttribute("HP", newHp)
 	setMonsterBillboardText(monsterPart)
+
+	-- 若扣血后怪物仍然存活，则获取怪物模型并播放跳跃受击特效
+	local monsterModel = getMonsterInstanceFromRoot(monsterPart)
+	if monsterModel and monsterModel:IsA("Model") and newHp > 0 then
+		playMonsterJumpEffect(monsterPart, monsterModel)
+	end
 
 	local stats = PlayerData.Get(player)
 	local weaponLevel = stats.EquippedWeaponLevel or stats.WeaponLevel or 1

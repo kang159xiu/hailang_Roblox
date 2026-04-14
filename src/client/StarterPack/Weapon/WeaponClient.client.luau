@@ -23,6 +23,14 @@ local tool = script.Parent :: Tool
 -- 可填写纯数字（例如：1234567890）或 rbxassetid://1234567890
 -- 留空、格式不正确、或加载失败时，会自动回退到默认攻击动画，并打印“默认攻击动画”。
 local CUSTOM_ATTACK_ANIMATION_ID = "97542205785892"
+-- 自定义待机动作（握持姿势）的动画 ID
+local CUSTOM_IDLE_ANIMATION_ID = "135075227978653" -- 手持武器待机动画ID
+
+-- [修改内容] 新增：用于存储正在播放的待机动画轨道，以便在切换武器时正确关闭
+local idleTrack: AnimationTrack? = nil
+
+-- [修改内容] 其他变量...
+local isAttacking = false
 
 -- Players.LocalPlayer 只在本地脚本（LocalScript）里可用，表示“当前这个玩家自己”。
 -- script.Parent 一般就是当前脚本挂着的对象，这里它挂在 Tool 下面，所以把它当成 Tool 使用。
@@ -100,6 +108,53 @@ local function normalizeAnimationId(rawId: string): string?
 	return "rbxassetid://" .. numericId
 end
 
+-- [修改内容] 新增函数：播放待机动画
+local function playIdleAnimation()
+	-- [修改内容] 先停止旧的待机动画，防止重复叠加
+	if idleTrack then
+		idleTrack:Stop()
+		idleTrack = nil
+	end
+
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	local animationId = normalizeAnimationId(CUSTOM_IDLE_ANIMATION_ID)
+
+	if not hum or not animator or not animationId then
+		return
+	end
+
+	-- [修改内容] 创建并配置动画对象
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationId
+
+	local ok, trackOrError = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	if ok and trackOrError then
+		idleTrack = trackOrError :: AnimationTrack
+		-- [修改内容] 非常关键：优先级必须设为 Action 或更高，才能覆盖默认的握持动作
+		idleTrack.Priority = Enum.AnimationPriority.Action 
+		-- [修改内容] 必须设置为循环播放
+		idleTrack.Looped = true 
+		idleTrack:Play(0.3) -- [修改内容] 0.3 秒淡入时间，让姿势切换更平滑
+	end
+	
+	animation:Destroy() -- [修改内容] 加载完成后可销毁实例，轨道已保留在内存中
+end
+
+-- [修改内容] 新增函数：停止待机动画
+local function stopIdleAnimation()
+	if idleTrack then
+		idleTrack:Stop(0.3) -- [修改内容] 0.3 秒淡出
+		idleTrack = nil
+	end
+end
+
+local atktime , playSpeed ,cdTime = 0.2 , 1.5 , 0.5 --伤害生效时间，播放速度，攻击动作的 CD 时间
+
 local function playDefaultAttackAnimation()
 	print("默认攻击动画")
 
@@ -108,7 +163,8 @@ local function playDefaultAttackAnimation()
 	v.Value = "Slash"
 	v.Parent = tool
 
-	task.delay(0.15, function()
+	--延迟伤害生效时间 atktime
+	task.delay(atktime, function()
 		if v.Parent then v:Destroy() end
 	end)
 
@@ -121,12 +177,15 @@ local function playDefaultAttackAnimation()
 			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
 				--只加速攻击动作（Action 及以上）
 				if track.Priority ~= Enum.AnimationPriority.Core and track.Priority ~= Enum.AnimationPriority.Idle and track.Priority ~= Enum.AnimationPriority.Movement then
-					track:AdjustSpeed(2.0)
+					track:AdjustSpeed(playSpeed)
 				end
 			end
 		end
 	end)
 end
+
+
+
 
 local function playAttackAnimation()
 	local char = player.Character
@@ -155,7 +214,8 @@ local function playAttackAnimation()
 
 	local track = trackOrError :: AnimationTrack
 	track.Priority = Enum.AnimationPriority.Action
-	track:Play(0.05, 1, 2.0)
+	--track:Play(淡入时间, 权重, 播放速度)
+	track:Play(0.05, 1, playSpeed)
 
 	task.delay(2, function()
 		animation:Destroy()
@@ -166,8 +226,7 @@ end
 -- 在 Tool 下临时创建一个名为 toolanim 的 StringValue 来触发挥砍动作。
 --
 -- 这次和之前不同的地方有两个：
--- 1. toolanim 保留 0.15 秒，保证动作已被稳定触发
--- 2. 在动作开始后，只把攻击类动画轨道速度调到 2.0 倍
+
 --
 -- 这样做的目标是：
 -- - 默认挥刀动作大约 0.6 秒
@@ -255,6 +314,31 @@ end
 
 
 local function tryAttack()
+	-- 这是本脚本最核心的函数：尝试进行一次普通攻击。
+--
+-- 现在的攻击流程被重构成“动作先开始，伤害后触发”的节奏：
+-- 1. 先确认武器已装备
+-- 2. 再检查是否已经处于一次攻击周期中（Debounce 锁）
+-- 3. 立刻播放一次本地挥剑动作
+-- 4. 延迟 0.15 秒，等挥剑进入中段时再做伤害判定
+-- 5. 优先用“前方 2 格、180 度”的扇形范围检测怪物
+-- 6. 如果范围检测不可用，再退回到鼠标目标/屏幕中心射线兜底
+-- 7. 0.3 秒完整攻击周期结束后，再解除锁，允许下一次攻击
+--
+-- 关键点说明：
+-- isAttacking：严格的攻击锁，true 时表示这 0.3 秒攻击周期还没结束。
+-- task.delay(0.15, ...)：把真正的命中检测延后 0.15 秒。
+-- task.delay(0.3, ...)：在完整攻击周期结束后统一解锁。
+-- monstersFolder：怪物集合，优先用于近战范围判定。
+-- forward = hrp.CFrame.LookVector：玩家当前朝向。
+-- forward:Dot(dir) >= 0：判断目标是否位于角色前方半圆。
+-- getMouseTarget() / getTargetFromScreenCenter()：兜底获取瞄准目标。
+-- damageRemote:FireServer(target)：通知服务端处理这次伤害请求。
+--
+-- 注意：
+-- 这里只做“客户端时机控制 + 基础范围过滤”。
+-- 真正是否命中、是否可以扣血，仍然应该由服务端最终校验。
+
 	if not isEquipped() then return end
 
 	-- 【防连点核心】如果当前正在攻击（处于0.3秒的周期内），则无视玩家的点击
@@ -313,41 +397,26 @@ local function tryAttack()
 	end)
 
 	-- 【冷却解锁】强制等待 0.3 秒后，才允许进行下一次攻击
-	task.delay(0.3, function()
+	task.delay(cdTime, function()
 		isAttacking = false
 	end)
 end
 
--- 这是本脚本最核心的函数：尝试进行一次普通攻击。
---
--- 现在的攻击流程被重构成“动作先开始，伤害后触发”的节奏：
--- 1. 先确认武器已装备
--- 2. 再检查是否已经处于一次攻击周期中（Debounce 锁）
--- 3. 立刻播放一次本地挥剑动作
--- 4. 延迟 0.15 秒，等挥剑进入中段时再做伤害判定
--- 5. 优先用“前方 2 格、180 度”的扇形范围检测怪物
--- 6. 如果范围检测不可用，再退回到鼠标目标/屏幕中心射线兜底
--- 7. 0.3 秒完整攻击周期结束后，再解除锁，允许下一次攻击
---
--- 这能解决一个常见手感问题：
--- 之前是“点击后几乎立刻造成伤害”，看起来像伤害跑在动画前面。
--- 现在则变成“先看到挥剑，再在挥到中段时命中”，视觉和手感会更统一。
--- 同时也修复了“为了提速攻击动作，结果把跑步动画也一起加速”的问题。
--- 另外，本次还修复了“连续点击屏幕会穿透冷却、导致连续扣血”的问题。
---
--- 关键点说明：
--- isAttacking：严格的攻击锁，true 时表示这 0.3 秒攻击周期还没结束。
--- task.delay(0.15, ...)：把真正的命中检测延后 0.15 秒。
--- task.delay(0.3, ...)：在完整攻击周期结束后统一解锁。
--- monstersFolder：怪物集合，优先用于近战范围判定。
--- forward = hrp.CFrame.LookVector：玩家当前朝向。
--- forward:Dot(dir) >= 0：判断目标是否位于角色前方半圆。
--- getMouseTarget() / getTargetFromScreenCenter()：兜底获取瞄准目标。
--- damageRemote:FireServer(target)：通知服务端处理这次伤害请求。
---
--- 注意：
--- 这里只做“客户端时机控制 + 基础范围过滤”。
--- 真正是否命中、是否可以扣血，仍然应该由服务端最终校验。
+
+-- [修改内容] 修改事件绑定部分：增加装备与卸下的监听
+tool.Activated:Connect(tryAttack)
+
+-- [修改内容] 当玩家穿戴上武器时，触发待机动作
+tool.Equipped:Connect(function()
+	playIdleAnimation()
+end)
+
+-- [修改内容] 当玩家收回武器时，停止待机动作，恢复正常走路姿势
+tool.Unequipped:Connect(function()
+	stopIdleAnimation()
+end)
+
+
 
 tool.Activated:Connect(tryAttack)
 
