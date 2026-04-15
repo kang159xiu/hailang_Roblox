@@ -211,10 +211,10 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 		end
 	end
 
-	-- [修改内容] 更新“剩余时间”部分
+	-- [修改内容] 更新“剩余”部分
 	local timeLabel = bb:FindFirstChild("剩余时间")
 	if timeLabel and (timeLabel:IsA("TextLabel") or timeLabel:IsA("TextBox")) then
-		timeLabel.Text = string.format("剩余时间: %ds", timeLeft)
+		timeLabel.Text = string.format("剩余: %ds", timeLeft)
 	end
 
 	-- [修改内容] 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示

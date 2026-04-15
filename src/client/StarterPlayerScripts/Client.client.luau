@@ -424,7 +424,7 @@ local function updateMonsterText(monsterPart: BasePart)
 	
 	-- 3. 调整缩放倍率！
 	local maxScale = 1.5  -- 贴脸时放大到 1.5 倍（之前是 1.2）
-	local minScale = 0.8  -- 离远时缩小到 0.8 倍（之前是 0.55，太小了）
+	local minScale = 1  -- 离远时缩小到 0.8 倍（之前是 0.55，太小了）
 	
 	-- 4. 实时计算当前帧的最终比例，并强制刷新大小
 	local scale = maxScale + (minScale - maxScale) * t
@@ -438,7 +438,7 @@ local function updateMonsterText(monsterPart: BasePart)
 	local gps = monsterPart:GetAttribute("GoldPerSec") or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
 
-	local remainText = string.format("剩余时间: %ds", remain)
+	local remainText = string.format("剩余: %ds", remain)
 
 	-- 1. 更新【等级+血量】节点
 	local statsLabel = bb:FindFirstChild("等级+血量")
@@ -446,8 +446,8 @@ local function updateMonsterText(monsterPart: BasePart)
 		statsLabel.Text = string.format("Lv.%d  HP:%d/%d", level, hp, maxHp)
 	end
 
-	-- 2. 更新【剩余时间】节点
-	local timeLabel = bb:FindFirstChild("剩余时间")
+	-- 2. 更新【剩余】节点
+	local timeLabel = bb:FindFirstChild("剩余")
 	if timeLabel and timeLabel:IsA("TextLabel") then
 		timeLabel.Text = remainText
 	end
@@ -647,20 +647,30 @@ syncMonsterInventory.OnClientEvent:Connect(function(payload: any)
 end)
 
 -- 测试：清空玩家数据按钮
+
 local clearBtn = monsterInventoryWindow:FindFirstChild("ClearDataButton")
 if not (clearBtn and clearBtn:IsA("TextButton")) then
 	clearBtn = Instance.new("TextButton")
 	clearBtn.Name = "ClearDataButton"
-	clearBtn.AnchorPoint = Vector2.new(1, 0)
+	
+	-- [修改内容] 设置UI的对齐锚点。Vector2.new(1, 0) 代表将按钮的“右上角”作为定位的参考点。
+	clearBtn.AnchorPoint = Vector2.new(0, 1)
+	
+	-- [修改内容] 设置UI的实际坐标。UDim2.new(X比例, X偏移, Y比例, Y偏移)
+	-- 这里的 (1, -10, 0, 8) 意味着：
+	-- X轴：父级窗口宽度 100% 的位置，向左偏移 10 个像素（即紧贴右边缘）
+	-- Y轴：父级窗口高度 0% 的位置，向下偏移 8 个像素（即紧贴上边缘）
 	clearBtn.Position = UDim2.new(1, -10, 0, 8)
+	
 	clearBtn.Size = UDim2.fromOffset(92, 24)
-	clearBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
+	clearBtn.BackgroundColor3 = Color3.fromRGB(75, 87, 255)
 	clearBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 	clearBtn.Font = Enum.Font.GothamBold
 	clearBtn.TextScaled = true
-	clearBtn.Text = "清空数据"
+	clearBtn.Text = "清空数据测试"
 	clearBtn.Parent = monsterInventoryWindow
 end
+
 
 (clearBtn :: TextButton).Activated:Connect(function()
 	requestClearPlayerData:FireServer()
@@ -997,11 +1007,19 @@ if not (upgradeList and upgradeList:IsA("Frame")) then
 	upgradeList.Parent = upgradeWindow
 end
 
+--升级商店布局
+
 local upgradeLayout = upgradeList:FindFirstChildOfClass("UIListLayout")
 if not upgradeLayout then
 	upgradeLayout = Instance.new("UIListLayout")
 	upgradeLayout.Padding = UDim.new(0, 10)
 	upgradeLayout.Parent = upgradeList
+end
+
+-- [修改内容] 1. 尝试获取你在 UI 里做好的模板，并在初始化时将其隐藏，避免它作为实体显示在列表中
+local upgradeTemplate = upgradeWindow:FindFirstChild("RowTemplate") :: GuiObject?
+if upgradeTemplate then
+	upgradeTemplate.Visible = false
 end
 
 local function getLevelAttr(name: string, default: number): number
@@ -1012,7 +1030,47 @@ local function getLevelAttr(name: string, default: number): number
 	return v
 end
 
+-- [修改内容] 2. 修改升级行的生成逻辑
 local function buildUpgradeRow(titleText: string, infoText: string, onBuy: () -> ())
+	-- 如果找到了你的自定义模板，就优先使用模板逻辑
+	if upgradeTemplate and upgradeTemplate:IsA("GuiObject") then
+		local row = upgradeTemplate:Clone()
+		row.Name = "UpgradeRow_" .. titleText
+		row.Visible = true
+		row.Parent = upgradeList
+
+		-- 绑定标题（如：升级攻击力）
+		local titleLabel = row:FindFirstChild("升级目标")
+		if titleLabel and titleLabel:IsA("TextLabel") then
+			titleLabel.Text = titleText
+		end
+
+		-- 绑定花费与增加数值（如：花费:10w  +10 攻击力）
+		local infoLabel = row:FindFirstChild("花费+增加数值")
+		if infoLabel and infoLabel:IsA("TextLabel") then
+			infoLabel.Text = infoText
+		end
+
+		-- 绑定升级按钮的点击事件
+		local btn = row:FindFirstChild("升级按钮")
+		if btn then
+			local actionBtn = btn
+			if not btn:IsA("GuiButton") then
+				-- 如果“升级按钮”是个Frame，尝试找里面的真正的Button
+				actionBtn = btn:FindFirstChildWhichIsA("GuiButton")
+			end
+			
+			if actionBtn and actionBtn:IsA("GuiButton") then
+				actionBtn.Activated:Connect(function()
+					onBuy()
+				end)
+			end
+		end
+
+		return -- 模板生成完毕后直接返回，跳过下方的旧版代码
+	end
+
+	-- [兜底逻辑] 如果没有找到模板，继续使用原版代码动态生成 Frame
 	local row = Instance.new("Frame")
 	row.Size = UDim2.fromOffset(588, 96)
 	row.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
