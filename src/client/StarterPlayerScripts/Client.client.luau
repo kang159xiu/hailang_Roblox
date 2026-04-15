@@ -864,30 +864,30 @@ local function buildWeaponRow(level: number)
 		end
 
 
+	-- 1. 获取容器
+	local buyFrame = row:FindFirstChild("购买UIFrame")
+	if buyFrame then
+		-- 2. [修改内容] 直接在容器内寻找真正的按钮组件 (如 TextButton 或 ImageButton)
+		local actionBtn = buyFrame:FindFirstChildWhichIsA("GuiButton")
 
--- 绑定自定义的 购买UIFrame
-		local buyFrame = row:FindFirstChild("购买UIFrame")
-		if buyFrame then
-			local actionBtn = buyFrame
-			if not buyFrame:IsA("GuiButton") then
-				actionBtn = buyFrame:FindFirstChildWhichIsA("GuiButton")
-			end
-
-			if actionBtn then
-				-- 更新按钮文字状态 (购买/装备/卸下)
-				if actionBtn:IsA("TextButton") then
-					actionBtn.Text = buttonText
-				else
-					local textLabel = buyFrame:FindFirstChildWhichIsA("TextLabel")
-					if textLabel then textLabel.Text = buttonText end
+		if actionBtn then
+			-- 3. 更新按钮上的文字状态 (显示：购买 / 装备 / 卸下)
+			if actionBtn:IsA("TextButton") then
+				actionBtn.Text = buttonText
+			else
+				-- [修改内容] 如果按钮是图片按钮，则尝试寻找容器内的 TextLabel 来显示文字
+				local textLabel = buyFrame:FindFirstChildWhichIsA("TextLabel")
+				if textLabel then 
+					textLabel.Text = buttonText 
 				end
-				
-				-- 触发对应逻辑
-				actionBtn.Activated:Connect(function()
-					sendWeaponAction(action, level)
-				end)
 			end
+			
+			-- 4. 绑定点击触发逻辑
+			actionBtn.Activated:Connect(function()
+				sendWeaponAction(action, level)
+			end)
 		end
+	end
 
 		
 
