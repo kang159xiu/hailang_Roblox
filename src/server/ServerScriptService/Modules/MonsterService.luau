@@ -824,16 +824,18 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	monsterPart:SetAttribute("HP", newHp)
 	setMonsterBillboardText(monsterPart)
 
-	-- 若扣血后怪物仍然存活，则获取怪物模型并播放跳跃受击特效
+	-- 获取怪物模型。无论扣血后是否存活，只要受击前有血量（走到这里说明一定有），就播放跳跃受击特效
 	local monsterModel = getMonsterInstanceFromRoot(monsterPart)
-	if monsterModel and monsterModel:IsA("Model") and newHp > 0 then
+	if monsterModel and monsterModel:IsA("Model") then
 		playMonsterJumpEffect(monsterPart, monsterModel)
 	end
 
+	-- [修改内容] 触发武器命中特效（保持原样，特效本就不受血量限制）
 	local stats = PlayerData.Get(player)
 	local weaponLevel = stats.EquippedWeaponLevel or stats.WeaponLevel or 1
 	playWeaponHitVFXRemote:FireAllClients(hitPart, weaponLevel)
 
+	-- [修改内容] 如果血量归零，则标记死亡（变为尸体状态）
 	if newHp <= 0 then
 		markDead(monsterPart)
 	end
