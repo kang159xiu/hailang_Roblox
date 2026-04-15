@@ -29,6 +29,7 @@ local function ensureRemoteEvent(folder: Folder, name: string): RemoteEvent
 	newEv.Name = name
 	newEv.Parent = folder
 	return newEv
+
 end
 
 local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
@@ -105,6 +106,8 @@ local MerchantService = require(script.Parent:WaitForChild("Modules"):WaitForChi
 local WeaponToolService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponToolService"))
 local WeaponAppearanceService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponAppearanceService"))
 local WeaponService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponService"))
+--引入新的守护者系统模块
+local GuardianService = require(script.Parent:WaitForChild("Modules"):WaitForChild("GuardianService"))
 
 AppearanceBootstrapService.Init()
 WeaponToolService.Init()
@@ -121,6 +124,8 @@ MonsterService.Init()
 LavaService.Init()
 MerchantService.Init()
 WeaponService.Init()
+--  启动守护者系统的全局初始化（生成待机的守护者并开启追踪循环）
+GuardianService.Init()
 
 -- 客户端背包 UI：拿出一只怪到 Tool 栏
 
