@@ -22,7 +22,8 @@ local tool = script.Parent :: Tool
 -- 自定义攻击动画 ID。
 -- 可填写纯数字（例如：1234567890）或 rbxassetid://1234567890
 -- 留空、格式不正确、或加载失败时，会自动回退到默认攻击动画，并打印“默认攻击动画”。
-local CUSTOM_ATTACK_ANIMATION_ID = "97542205785892"
+--97542205785892
+local CUSTOM_ATTACK_ANIMATION_ID = "124215711951588"
 -- 自定义待机动作（握持姿势）的动画 ID
 local CUSTOM_IDLE_ANIMATION_ID = "135075227978653" -- 手持武器待机动画ID
 
