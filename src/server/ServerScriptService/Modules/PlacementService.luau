@@ -1577,18 +1577,22 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 1. 生成并挂载“收益显示”面板（安全搜索版） -------------------------
+				-- 1. 生成并挂载“收益显示”面板 -------------------------
 				if slot.Collector then
 					local displayModel = slot.Collector:FindFirstChild("收益显示", true)
 					
 					if not displayModel then
-						-- 【修改内容】优先从 ReplicatedStorage 拿取绝对干净的模板，避免抓到 Workspace 中其他已被污染的面板
 						local template = ReplicatedStorage:FindFirstChild("收益显示", true) or Workspace:FindFirstChild("收益显示", true)
 						
 						if template and template:IsA("Model") then
 							displayModel = template:Clone()
 							local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
 							local anchorCFrame = locatorPart and locatorPart.CFrame or slot.Collector.CFrame
+							
+							-- 🌟 [物理层终极修复]：用代码强行解除空气墙对鼠标的拦截！
+							-- 无论你的透明定位方块有多大，统统让鼠标穿透过去，直达牌子！
+							if locatorPart then locatorPart.CanQuery = false end
+							slot.Collector.CanQuery = false
 							
 							if not displayModel.PrimaryPart then
 								displayModel.PrimaryPart = displayModel:FindFirstChildWhichIsA("BasePart", true)
@@ -1601,29 +1605,30 @@ function PlacementService.Init()
 						end
 					end
 
-					-- 2. 彻底修复点击升级事件绑定 -------------------------
+					-- 2. 绑定纯粹的“鼠标点击”事件 -------------------------
 					if displayModel then
 						local clickPart = displayModel:FindFirstChild("点击升级", true) or displayModel.PrimaryPart
 						if clickPart then
+							-- 清理掉上一版生成的按键提示器（如果你运行过的话）
+							local oldPrompt = clickPart:FindFirstChildWhichIsA("ProximityPrompt")
+							if oldPrompt then oldPrompt:Destroy() end
+
+							-- 寻找或自动创建鼠标点击检测器
 							local clickDetector = clickPart:FindFirstChildWhichIsA("ClickDetector")
-							
-							-- 如果模型里没有检测器，代码自动补全
 							if not clickDetector then
 								clickDetector = Instance.new("ClickDetector")
 								clickDetector.MaxActivationDistance = 32
 								clickDetector.Parent = clickPart
 							end
 
-							-- 【修改内容】彻底抛弃容易被克隆污染的 IsBound。
-							-- 改用带有玩家独一无二 UserId 的专属标识符，确保不论怎么克隆，
-							-- 该玩家的事件100%能够被成功挂载！
+							-- 使用专属 ID 绑定，杜绝克隆污染
 							local bindKey = "BoundForUser_" .. tostring(player.UserId)
 							if not clickDetector:GetAttribute(bindKey) then
 								clickDetector:SetAttribute(bindKey, true)
 								
 								clickDetector.MouseClick:Connect(function(playerWhoClicked)
 									-- 🩺 [核心诊断打印]：鼠标成功点到，必然输出此句！
-									print(string.format("🟢 [点击测试] 玩家 %s 成功点到了槽位 %d 的升级底座！", playerWhoClicked.Name, slot.Index))
+									print(string.format("🟢 [鼠标点击测试] 玩家 %s 成功点到了槽位 %d 的升级底座！", playerWhoClicked.Name, slot.Index))
 
 									if playerWhoClicked ~= player then return end
 									
@@ -1661,7 +1666,7 @@ function PlacementService.Init()
 					end
 				end
 
-				-- 3. 终极收钱与放置逻辑（解决踩不中 Collector 的问题） --------
+				-- 3. 终极收钱与放置逻辑 (保持原样，这部分你已经测试成功了) --------
 				local function handleSlotTouch(hit)
 					if player:GetAttribute("__DataLoaded") ~= true then return end
 					local character = player.Character
@@ -1673,12 +1678,10 @@ function PlacementService.Init()
 					if (lastTouchAt[key] or 0) + 0.35 > now then return end
 					lastTouchAt[key] = now
 
-					-- 走到大方块上同时触发：尝试放置 + 尝试收钱
 					tryPlaceFromEquippedTool(player, slot.Part)
 					payoutIfAny(player, slot.Part)
 				end
 
-				-- 【核心修改】：把收钱触发器绑定到整个地块（slot.Part），而不是那个小小的 Collector
 				slot.Part.Touched:Connect(handleSlotTouch)
 				if slot.Collector then
 					slot.Collector.Touched:Connect(handleSlotTouch)
