@@ -1576,6 +1576,8 @@ function PlacementService.Init()
 			for _, slot in ipairs(home.Slots) do
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
+				
+
 
 				-- 1. 生成并挂载“收益显示”面板 -------------------------
 				if slot.Collector then
@@ -1606,64 +1608,67 @@ function PlacementService.Init()
 					end
 
 					-- 2. 绑定纯粹的“鼠标点击”事件 -------------------------
-					if displayModel then
-						local clickPart = displayModel:FindFirstChild("点击升级", true) or displayModel.PrimaryPart
-						if clickPart then
-							-- 清理掉上一版生成的按键提示器（如果你运行过的话）
-							local oldPrompt = clickPart:FindFirstChildWhichIsA("ProximityPrompt")
-							if oldPrompt then oldPrompt:Destroy() end
+				-- 2. 彻底修复并强制绑定点击升级事件 -------------------------
+				if displayModel then
+					-- 确保我们找的是零件而不是模组
+					local clickPart = displayModel:FindFirstChild("点击升级", true)
+					if clickPart and clickPart:IsA("BasePart") then
+						
+						-- 【第一步：斩草除根】
+						-- 不管克隆过来的检测器有没有带脏数据，直接把它删掉，确保接下来的检测器是 100% 干净的
+						local oldCD = clickPart:FindFirstChildWhichIsA("ClickDetector")
+						if oldCD then oldCD:Destroy() end
+						
+						-- 【第二步：重建服务】
+						-- 创建一个全新的点击检测器，它没有属性污染，且绝对没有被绑定过
+						local clickDetector = Instance.new("ClickDetector")
+						clickDetector.MaxActivationDistance = 32
+						clickDetector.Parent = clickPart
+						
+						-- 【第三步：强制接线】
+						-- 重点：不再使用 if 判断 Attribute，直接强制执行 Connect！
+						print("🛠️ [系统诊断] 正在为槽位 " .. slot.Index .. " 强制接通点击电线...")
+						
+						clickDetector.MouseClick:Connect(function(playerWhoClicked)
+							
+							-- 🩺 只要鼠标点中了，这句日志 100% 会跳出来！
+							print(string.format("🟢 [点击成功] 玩家 %s 点击了槽位 %d 的牌子", playerWhoClicked.Name, slot.Index))
 
-							-- 寻找或自动创建鼠标点击检测器
-							local clickDetector = clickPart:FindFirstChildWhichIsA("ClickDetector")
-							if not clickDetector then
-								clickDetector = Instance.new("ClickDetector")
-								clickDetector.MaxActivationDistance = 32
-								clickDetector.Parent = clickPart
+							if playerWhoClicked ~= player then return end
+							
+							local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
+							if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
+								toast(player, "请先放置怪物再升级！")
+								print("🟡 [逻辑拦截] 点击有效，但地块上没怪，不执行升级。")
+								return 
 							end
-
-							-- 使用专属 ID 绑定，杜绝克隆污染
-							local bindKey = "BoundForUser_" .. tostring(player.UserId)
-							if not clickDetector:GetAttribute(bindKey) then
-								clickDetector:SetAttribute(bindKey, true)
+							
+							local pm = state.PlacedMonster
+							local upLevel = pm:GetAttribute("UpgradeLevel") or 1
+							local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec") or 0
+							local upgradeCost = upLevel * 10 * baseGps
+							
+							if PlayerData.TrySpendGold(player, upgradeCost) then
+								pm:SetAttribute("UpgradeLevel", upLevel + 1)
+								local newGps = (upLevel + 1) * baseGps
+								local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
+								pm:SetAttribute("GoldPerSec", newGps)
+								pm:SetAttribute("Value", baseValue * (upLevel + 1))
 								
-								clickDetector.MouseClick:Connect(function(playerWhoClicked)
-									-- 🩺 [核心诊断打印]：鼠标成功点到，必然输出此句！
-									print(string.format("🟢 [鼠标点击测试] 玩家 %s 成功点到了槽位 %d 的升级底座！", playerWhoClicked.Name, slot.Index))
-
-									if playerWhoClicked ~= player then return end
-									
-									local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
-									if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
-										toast(player, "请先放置怪物再升级！")
-										print("🔴 [点击拒绝] 因为该槽位没有放置怪物。")
-										return 
-									end
-									
-									local pm = state.PlacedMonster
-									local upLevel = pm:GetAttribute("UpgradeLevel") or 1
-									local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec") or 0
-									local upgradeCost = upLevel * 10 * baseGps
-									
-									if PlayerData.TrySpendGold(player, upgradeCost) then
-										pm:SetAttribute("UpgradeLevel", upLevel + 1)
-										local newGps = (upLevel + 1) * baseGps
-										local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
-										pm:SetAttribute("GoldPerSec", newGps)
-										pm:SetAttribute("Value", baseValue * (upLevel + 1))
-										
-										setPlacedMonsterHeadBillboardText(pm)
-										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
-										toast(player, "升级成功！")
-										print("🟢 [升级成功] 当前等级: " .. tostring(upLevel + 1))
-										DataDirtyService.MarkDirty(player)
-									else
-										toast(player, "金币不足！")
-										print("🟡 [升级失败] 金币不足。所需: " .. tostring(upgradeCost))
-									end
-								end)
+								setPlacedMonsterHeadBillboardText(pm)
+								refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
+								toast(player, "升级成功！")
+								print("🔥 [逻辑运行] 升级完成，当前等级: " .. tostring(upLevel + 1))
+								DataDirtyService.MarkDirty(player)
+							else
+								toast(player, "金币不足！")
+								print("🟡 [升级失败] 金币不足。")
 							end
-						end
+						end)
+					else
+						warn("⚠️ [警告] 槽位 " .. slot.Index .. " 的模型里找不到 '点击升级' 零件！")
 					end
+				end
 				end
 
 				-- 3. 终极收钱与放置逻辑 (保持原样，这部分你已经测试成功了) --------

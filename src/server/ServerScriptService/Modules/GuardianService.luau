@@ -55,9 +55,6 @@ local function getGuardianTemplate(modelName: string): Model?
 	-- 如果还没做该等级的模型，则暂时用 1 级模型兜底（防止脚本报错停止运行）
 	if not template then
 		template = templateFolder:FindFirstChild("守护者形象1")
-		if template then
-			print(string.format("[GuardianService] 未找到 %s，已使用 守护者形象1 占位", modelName))
-		end
 	end
 
 	return (template and template:IsA("Model")) and template or nil
