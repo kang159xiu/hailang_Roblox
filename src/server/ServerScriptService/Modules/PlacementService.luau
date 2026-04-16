@@ -347,49 +347,46 @@ end
 local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	if not collectorPart then return end
 	
-	-- [修改内容] 1. 优先获取定位点 Part，如果找不到则回退到 collectorPart
+	-- 1. 获取定位点 Part
 	local locatorPart = collectorPart:FindFirstChild("收益显示定位")
 	local anchorPart = locatorPart or collectorPart
 	
-	-- [修改内容] 2. 更新“实体升级面板”UI (显示等级和升级消耗)
+	-- 2. 直接获取实体升级面板，绕过旧版会清空文本的霸道逻辑
 	local displayModel = anchorPart:FindFirstChild("收益显示")
 	if displayModel then
 		local clickPart = displayModel:FindFirstChild("点击升级")
-		local bg = clickPart and clickPart:FindFirstChild("SurfaceGui") and clickPart.SurfaceGui:FindFirstChild("升级背景")
+		local surfaceGui = clickPart and clickPart:FindFirstChild("SurfaceGui")
+		local bg = surfaceGui and surfaceGui:FindFirstChild("升级背景")
 		
-		if not placed or placed.Parent == nil then
-			if bg then
-				bg["升级所需金币"].Text = "未放置"
-				bg["当前等级→下一等级"].Text = ""
-			end
-		else
-			local upLevel = placed:GetAttribute("UpgradeLevel") or 1
-			local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
-			local upgradeCost = upLevel * 10 * baseGps
+		if bg then
+			-- 使用 FindFirstChild 安全获取文本标签，防报错
+			local costLabel = bg:FindFirstChild("升级所需金币")
+			local levelLabel = bg:FindFirstChild("当前等级→下一等级")
+			-- 如果你把“当前未领取收益”也做在了这个底座面板上，这里一并兼容：
+			local unclaimedLabel = bg:FindFirstChild("03当前未领取收益") or bg:FindFirstChild("当前未领取收益")
 
-			if bg then
-				bg["升级所需金币"].Text = formatMoney(upgradeCost)
-				bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
+			if not placed or placed.Parent == nil then
+				-- 未放置状态
+				if costLabel then costLabel.Text = "未放置" end
+				if levelLabel then levelLabel.Text = "" end
+				if unclaimedLabel then unclaimedLabel.Text = "0" end
+			else
+				-- 已放置状态，计算数值
+				local upLevel = placed:GetAttribute("UpgradeLevel") or 1
+				local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
+				local upgradeCost = upLevel * 10 * baseGps
+				local unclaimed = math.floor(placed:GetAttribute("UnclaimedGold") or 0)
+
+				-- 安全填入数据
+				if costLabel then costLabel.Text = formatMoney(upgradeCost) end
+				if levelLabel then levelLabel.Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1) end
+				if unclaimedLabel then unclaimedLabel.Text = tostring(unclaimed) end
 			end
 		end
 	end
 
-	-- [修改内容] 3. 重要！更新“未领取收益”悬浮 UI (那个跳动的数字)
-	-- [修改内容] 这里必须传入 anchorPart，让 UI 挂载到定位点的位置
-	local gui = ensureIncomeDisplayGui(player, slotPart, anchorPart)
-	if gui then
-		if not placed or placed.Parent == nil then
-			-- 没怪时清空显示
-			setIncomeDisplayText(gui, nil, nil, nil, nil)
-		else
-			local monsterLevel = placed:GetAttribute("MonsterLevel")
-			local goldPerSec = placed:GetAttribute("GoldPerSec")
-			local unclaimed = placed:GetAttribute("UnclaimedGold")
-			local value = placed:GetAttribute("Value")
-			-- [修改内容] 将实时计算的数值填入 UI
-			setIncomeDisplayText(gui, monsterLevel, goldPerSec, math.floor(unclaimed or 0), value)
-		end
-	end
+	-- [修改内容] 删除了对 ensureIncomeDisplayGui() 的调用。
+	-- 彻底防止旧系统介入并误删 SurfaceGui 里的文本。
 end
 
 -- 这个函数用于向客户端发送一条简短提示文本。
