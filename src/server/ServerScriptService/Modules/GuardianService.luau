@@ -1,11 +1,9 @@
 --!strict
--- ServerScriptService.Modules.GuardianService
--- 守护者系统：负责区域守护、寻路追踪玩家、击飞惩罚与掉落
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 
 local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
@@ -13,9 +11,6 @@ local MonsterService = require(script.Parent:WaitForChild("MonsterService"))
 
 local GuardianService = {}
 
---------------------------------------------------------------------------------
--- 1. 守护者配置表
---------------------------------------------------------------------------------
 type AnimationConfig = { Idle: string, Track: string, Attack: string }
 type GuardianData = { ModelName: string, Speed: number, Animations: AnimationConfig }
 local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
@@ -28,19 +23,12 @@ for level = 1, 30 do
 	}
 end
 
---------------------------------------------------------------------------------
--- 2. 运行时数据状态
---------------------------------------------------------------------------------
 local activeGuardians = {}
 local guardiansFolder: Folder
 
---------------------------------------------------------------------------------
--- 3. 核心辅助函数 (移到外层，极致性能与稳定)
---------------------------------------------------------------------------------
 local function getGuardianTemplate(modelName: string): Model?
 	local templateFolder = workspace:FindFirstChild("GuardianModel")
 	if not templateFolder then return nil end
-
 	local template = templateFolder:FindFirstChild(modelName) or templateFolder:FindFirstChild("守护者形象1")
 	return (template and template:IsA("Model")) and template or nil
 end
@@ -75,68 +63,82 @@ local function playAnim(guardian, animName: string)
 	end
 end
 
--- 【防弹版】检查玩家是否在区域内 (纯 2D 世界坐标距离，无视任何旋转和缩放异常)
 local function isPlayerInZone(playerHRP: BasePart, zonePart: BasePart): boolean
 	local dx = playerHRP.Position.X - zonePart.Position.X
 	local dz = playerHRP.Position.Z - zonePart.Position.Z
 	local horizontalDistance = math.sqrt(dx^2 + dz^2)
-	
-	-- 拿取区域最大边长的一半，加上 15 Studs 的超大容错范围
 	local maxRadius = math.max(zonePart.Size.X, zonePart.Size.Y, zonePart.Size.Z) / 2
 	local margin = 15 
-	
 	return horizontalDistance <= (maxRadius + margin)
 end
 
--- 【强制转向】让守护者看向目标 (锁定 Y 轴，翻转 180 度，使用 PivotTo)
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
-	
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		-- 去掉 180 度翻转，让 RootPart 的 Front 脸正对玩家
-        local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
+		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
 		model:PivotTo(targetCFrame)
 	end
 end
 
---------------------------------------------------------------------------------
--- 4. 生成与状态机逻辑
---------------------------------------------------------------------------------
+local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
+	-- 防止短时间内重复击飞
+	if guardian.State ~= "Track" then return end
+
+	guardian.State = "Attack"
+	guardian.TargetPlayer = nil -- 抓到人后立刻失去目标
+	guardian.AttackTimer = os.clock()
+	playAnim(guardian, "Attack")
+
+	-- 1. 掉落怪物 (调用前两步写的接口)
+	local droppedItems = InventoryService.DropAllCarried(player)
+	for _, item in ipairs(droppedItems) do
+		-- 在玩家周围随机散落
+		local offset = Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
+		local dropPos = playerHRP.Position + offset
+		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
+	end
+
+	-- 2. 物理击飞 (向后上方强力推开)
+	local direction = (playerHRP.Position - guardian.RootPart.Position).Unit
+	local impulse = (direction * 1200) + Vector3.new(0, 800, 0) 
+	playerHRP:ApplyImpulse(impulse * playerHRP.AssemblyMass)
+	
+	print(string.format("[GuardianService] 守护者抓住了 %s！击飞并掉落了 %d 只怪物！", player.Name, #droppedItems))
+end
+
 local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneKey: string)
 	local config = GUARDIAN_CONFIG[zoneLevel] or GUARDIAN_CONFIG[1]
 	local template = getGuardianTemplate(config.ModelName)
 	if not template then return end
 
 	local clone = template:Clone()
-	
-	-- 暴力抓取 RootPart
 	local root = clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	if not root then clone:Destroy() return end
 
 	clone.PrimaryPart = root
 
-	-- 【核心修复】绝对取消除了 RootPart 以外所有东西的锚定
+	-- 【修改内容】只锚定 RootPart，同时开启 RootPart 的 CanTouch
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
 			if d == root then
 				d.Anchored = true
+				d.CanTouch = true -- 允许触发抓捕物理事件
 			else
 				d.Anchored = false
+				d.CanTouch = false
 			end
 			d.CanCollide = false
 		end
 	end
 
-	-- 【调试模式】给 RootPart 上红色和箭头，方便观察
 	root.Transparency = 0.5
 	root.BrickColor = BrickColor.new("Bright red")
 	local decal = Instance.new("Decal", root)
 	decal.Face = Enum.NormalId.Front
 	decal.Texture = "rbxasset://textures/spawnLocation.png"
 	
-	-- 初始化位置
-    local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + 4 + (root.Size.Y / 2), 0)
+	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + 4 + (root.Size.Y / 2), 0)
 	clone:PivotTo(spawnCFrame)
 	clone.Parent = guardiansFolder
 
@@ -158,30 +160,32 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		CurrentWaypointIdx = 1,
 		LastPathTime = 0,
 		AttackTimer = 0,
-		-- 调试用记录
 		WasPlayerInZone = false 
 	}
+
+	-- 【修改内容】绑定抓捕碰撞事件
+	local g = activeGuardians[zoneKey]
+	root.Touched:Connect(function(hit)
+		-- 只有在追踪状态且碰到的目标是仇恨玩家时才触发
+		if g.State == "Track" and g.TargetPlayer then
+			local char = g.TargetPlayer.Character
+			if char and hit:IsDescendantOf(char) then
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					punishPlayer(g, g.TargetPlayer, hrp)
+				end
+			end
+		end
+	end)
 
 	playAnim(activeGuardians[zoneKey], "Idle")
 end
 
-local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
-	guardian.State = "Attack"
-	guardian.AttackTimer = os.clock()
-	playAnim(guardian, "Attack")
 
-	local direction = (playerHRP.Position - guardian.RootPart.Position).Unit
-	local impulse = (direction * 800) + Vector3.new(0, 600, 0) 
-	playerHRP:ApplyImpulse(impulse * playerHRP.AssemblyMass)
-end
-
--- 心跳循环
 local function onHeartbeat(dt: number)
 	local now = os.clock()
 
 	for _, g in pairs(activeGuardians) do
-		
-		-- 寻找区域内玩家
 		local closestHRP: BasePart? = nil
 		local minDist = 999 
 		for _, player in ipairs(Players:GetPlayers()) do
@@ -196,32 +200,25 @@ local function onHeartbeat(dt: number)
 			end
 		end
 
-		-- 【状态：闲置（待机盯人）】
 		if g.State == "Idle" then
 			if closestHRP then
-				-- 【调试打印】
 				if not g.WasPlayerInZone then
 					g.WasPlayerInZone = true
-					print(string.format("[GuardianDebug] 玩家踏入区域 %s，守护者开始死盯！", g.ZoneKey))
 				end
-				-- 死死盯住
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				-- 【调试打印】
 				if g.WasPlayerInZone then
 					g.WasPlayerInZone = false
-					print(string.format("[GuardianDebug] 玩家离开区域 %s，守护者恢复待机。", g.ZoneKey))
 				end
-				-- 没人则平滑转回原位
 				g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
 			end
 
-		-- 【状态：追踪】
 		elseif g.State == "Track" and g.TargetPlayer then
 			local character = g.TargetPlayer.Character
 			local targetHrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			
-			if not targetHrp or not isPlayerInZone(targetHrp, g.ZonePart) then
+			-- 【修改内容】移除了 isPlayerInZone 的判定，守护者会死追到底，直到玩家碰到 di_mian
+			if not targetHrp then
 				g.TargetPlayer = nil
 				g.State = "Return"
 				playAnim(g, "Track")
@@ -230,12 +227,7 @@ local function onHeartbeat(dt: number)
 
 			lookAtFlat(g.Model, g.RootPart, targetHrp.Position)
 
-			local distToPlayer = (targetHrp.Position - g.RootPart.Position).Magnitude
-			if distToPlayer < 5 then
-				punishPlayer(g, g.TargetPlayer, targetHrp)
-				continue
-			end
-
+			-- 移动寻路逻辑
 			if now - g.LastPathTime > 0.3 then
 				g.LastPathTime = now
 				local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 4, AgentCanJump = false})
@@ -259,7 +251,6 @@ local function onHeartbeat(dt: number)
 				end
 			end
 
-		-- 【状态：攻击硬直】
 		elseif g.State == "Attack" then
 			if now - g.AttackTimer > 1.5 then
 				g.TargetPlayer = nil
@@ -267,7 +258,6 @@ local function onHeartbeat(dt: number)
 				playAnim(g, "Track")
 			end
 
-		-- 【状态：返回原位】
 		elseif g.State == "Return" then
 			local targetWP = g.SpawnCFrame.Position
 			local moveVec = (targetWP - g.RootPart.Position)
@@ -285,9 +275,6 @@ local function onHeartbeat(dt: number)
 	end
 end
 
---------------------------------------------------------------------------------
--- 5. 对外接口
---------------------------------------------------------------------------------
 function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
 	local zoneKey = zonePart:GetFullName()
 	local g = activeGuardians[zoneKey]
@@ -315,6 +302,31 @@ function GuardianService.Init()
 	end
 	
 	RunService.Heartbeat:Connect(onHeartbeat)
+
+	-- 【修改内容】监听玩家加入与角色生成，绑定脚底触碰地面的事件
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(function(char)
+			local hrp = char:WaitForChild("HumanoidRootPart", 5)
+			if hrp and hrp:IsA("BasePart") then
+				-- 只要玩家移动，RootPart 就会高频与周围发生触碰
+				hrp.Touched:Connect(function(hit)
+					-- 检查踩到的地板有没有 di_mian 标签
+					if hit and hit:IsA("BasePart") and CollectionService:HasTag(hit, "di_mian") then
+						-- 遍历守护者，如果谁在追这个玩家，强制让它放弃并回原位
+						for _, g in pairs(activeGuardians) do
+							if g.State == "Track" and g.TargetPlayer == player then
+								g.TargetPlayer = nil
+								g.State = "Return"
+								playAnim(g, "Track")
+								print(string.format("[GuardianDebug] %s 逃入 di_mian 安全区，守护者放弃追踪！", player.Name))
+							end
+						end
+					end
+				end)
+			end
+		end)
+	end)
+
 	print("[GuardianService] 守护者系统初始化完成并启动寻路循环")
 end
 

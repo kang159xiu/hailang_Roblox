@@ -653,7 +653,29 @@ function InventoryService.PickupCarryMonster(player: Player, monsterLevel: numbe
 	return true
 end
 
+-- [新增] 玩家被打飞时：强制清空携带中的怪物，并返回数据给外部掉落
+function InventoryService.DropAllCarried(player: Player): {CarriedMonster}
+	local list = carriedByUserId[player.UserId]
+	if not list or #list == 0 then
+		return {}
+	end
 
+	-- 深拷贝一份数据用于返回
+	local dropped = {}
+	for _, v in ipairs(list) do
+		table.insert(dropped, {
+			MonsterLevel = v.MonsterLevel,
+			Value = v.Value,
+			GoldPerSec = v.GoldPerSec,
+		})
+	end
+
+	-- 清空玩家头顶的模型和数据
+	clearCarried(player)
+	pushToast(player, "你被守护者击飞，掉落了所有携带的怪物！")
+	
+	return dropped
+end
 
 -- 兼容旧接口：把携带态转换为 Tool（并自动手持一只）
 function InventoryService.ConvertCarriedToTool(player: Player)

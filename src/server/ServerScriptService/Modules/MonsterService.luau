@@ -853,6 +853,63 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	end
 end
 
+-- [新增] 爆装备接口：在指定坐标散落一只立刻死亡的怪物尸体
+function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string)
+	local template = getMonsterTemplate(level)
+	if not template then return end
+
+	local clone, p = prepareMonsterTemplateClone(template)
+	if not clone or not p then return end
+
+	-- 稍微抬高一点生成，防止掉落地板下面
+	clone:PivotTo(CFrame.new(position + Vector3.new(0, p.Size.Y * 0.5 + 1, 0)))
+	clone.PrimaryPart = p
+
+	p:SetAttribute("IsMonster", true)
+	p:SetAttribute("ZoneKey", zoneKey)
+	p:SetAttribute("ZoneLevel", 1) 
+	p:SetAttribute("MonsterLevel", level)
+
+	p:SetAttribute("MaxHP", 1)
+	p:SetAttribute("HP", 0)
+	p:SetAttribute("Value", value)
+	p:SetAttribute("GoldPerSec", gps)
+	p:SetAttribute("SpawnUnix", os.time())
+	p:SetAttribute("ExpireUnix", os.time() + Config.MONSTER_LIFETIME_SECONDS)
+	p:SetAttribute("Dead", false)
+	p:SetAttribute("Collected", false)
+
+	clone:SetAttribute("IsMonster", true)
+	clone:SetAttribute("Dead", false)
+	clone:SetAttribute("MonsterLevel", level)
+	clone:SetAttribute("ZoneKey", zoneKey)
+
+	buildBillboard(p)
+	setMonsterBillboardText(p)
+
+	clone.Parent = monstersFolder
+	aliveMonsters[p] = true
+
+	task.spawn(function()
+		while p and p.Parent and p:GetAttribute("Dead") ~= true do
+			setMonsterBillboardText(p)
+			task.wait(1)
+		end
+	end)
+
+	-- 直接标记为死亡尸体，挂上交互提示
+	markDead(p)
+
+	clone.Destroying:Connect(function()
+		aliveMonsters[p] = nil
+	end)
+
+	task.delay(Config.MONSTER_LIFETIME_SECONDS, function()
+		if clone and clone.Parent then clone:Destroy() end
+	end)
+end
+
+
 function MonsterService.Init()
 	-- 模块初始化入口。
 	--
