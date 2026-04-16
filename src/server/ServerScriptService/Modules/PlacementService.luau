@@ -343,26 +343,25 @@ local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collec
 end
 
 
--- 这个函数用于按当前放置怪数据刷新某个槽位对应的实体收益显示内容。
-local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
+	-- 这个函数用于按当前放置怪数据刷新某个槽位对应的实体收益显示内容。
+	local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	if not collectorPart then return end
 	
-	-- 1. 获取定位点 Part
-	local locatorPart = collectorPart:FindFirstChild("收益显示定位")
+	-- 1. 获取挂载点
+	local locatorPart = collectorPart:FindFirstChild("收益显示定位", true)
 	local anchorPart = locatorPart or collectorPart
 	
-	-- 2. 直接获取实体升级面板，绕过旧版会清空文本的霸道逻辑
+	-- 2. 找到生成的收益显示模型
 	local displayModel = anchorPart:FindFirstChild("收益显示")
 	if displayModel then
-		local clickPart = displayModel:FindFirstChild("点击升级")
-		local surfaceGui = clickPart and clickPart:FindFirstChild("SurfaceGui")
+		-- [修改内容] 使用递归查找 SurfaceGui，无视其父级 Part 的名字，直接穿透获取
+		local surfaceGui = displayModel:FindFirstChildWhichIsA("SurfaceGui", true)
 		local bg = surfaceGui and surfaceGui:FindFirstChild("升级背景")
 		
 		if bg then
-			-- 使用 FindFirstChild 安全获取文本标签，防报错
+			-- 获取所有的 TextLabel
 			local costLabel = bg:FindFirstChild("升级所需金币")
 			local levelLabel = bg:FindFirstChild("当前等级→下一等级")
-			-- 如果你把“当前未领取收益”也做在了这个底座面板上，这里一并兼容：
 			local unclaimedLabel = bg:FindFirstChild("03当前未领取收益") or bg:FindFirstChild("当前未领取收益")
 
 			if not placed or placed.Parent == nil then
@@ -371,22 +370,19 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 				if levelLabel then levelLabel.Text = "" end
 				if unclaimedLabel then unclaimedLabel.Text = "0" end
 			else
-				-- 已放置状态，计算数值
+				-- 已放置状态，计算金币和等级
 				local upLevel = placed:GetAttribute("UpgradeLevel") or 1
 				local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
 				local upgradeCost = upLevel * 10 * baseGps
 				local unclaimed = math.floor(placed:GetAttribute("UnclaimedGold") or 0)
 
-				-- 安全填入数据
+				-- 安全填入数据（确保数字实时跳动）
 				if costLabel then costLabel.Text = formatMoney(upgradeCost) end
 				if levelLabel then levelLabel.Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1) end
 				if unclaimedLabel then unclaimedLabel.Text = tostring(unclaimed) end
 			end
 		end
 	end
-
-	-- [修改内容] 删除了对 ensureIncomeDisplayGui() 的调用。
-	-- 彻底防止旧系统介入并误删 SurfaceGui 里的文本。
 end
 
 -- 这个函数用于向客户端发送一条简短提示文本。
@@ -1588,26 +1584,20 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 【修改内容】增强版生成逻辑：使用递归查找并增加状态诊断	
+				-- 【修改内容】为每个槽位生成实体“收益显示”模型，适配新的 Workspace 路径并修复点击绑定
 				if slot.Collector then
-					-- [修改内容] 使用递归查找 (true)，防止定位 Part 嵌套在子层级中找不到
 					local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
 					local anchorPart = locatorPart or slot.Collector
 					
-					-- 诊断定位点是否找到
-					if not locatorPart then
-						warn(string.format("[PlacementWarning] 槽位 %d 的 Collector 中未找到 '收益显示定位'，将默认挂载到 Collector 中心", slot.Index))
-					end
-
 					local displayModel = anchorPart:FindFirstChild("收益显示")
 					if not displayModel then
-						local templatesFolder = ReplicatedStorage:FindFirstChild("Templates")
+						-- [修改内容] 适配你指定的新路径: Workspace.区域.Templates.收益显示
+						local regionFolder = Workspace:FindFirstChild("区域")
+						local templatesFolder = regionFolder and regionFolder:FindFirstChild("Templates")
 						local template = templatesFolder and templatesFolder:FindFirstChild("收益显示")
 						
 						if template then
-							-- 执行克隆与放置
 							local clone = template:Clone()
-							-- [修改内容] 强制设置 PrimaryPart，确保 PivotTo 绝对精准
 							if not clone.PrimaryPart then
 								clone.PrimaryPart = clone:FindFirstChildWhichIsA("BasePart", true)
 							end
@@ -1615,35 +1605,56 @@ function PlacementService.Init()
 							clone:PivotTo(anchorPart.CFrame)
 							clone.Parent = anchorPart
 							displayModel = clone
-							
-							-- [诊断] 确认克隆成功
-							print(string.format("[PlacementSuccess] 槽位 %d 的收益显示模板已成功生成到 %s 下", slot.Index, anchorPart.Name))
 						else
-							warn("[PlacementError] 无法在 ReplicatedStorage.Templates 中找到名为 '收益显示' 的模板！")
+							warn(string.format("[PlacementError] 无法在 Workspace.区域.Templates 中找到模板，槽位 %d 无法生成！", slot.Index))
 						end
 					end
 
-					-- 绑定点击逻辑 (即便模型是预放好的也进行绑定)
+					-- 绑定点击逻辑
 					if displayModel then
-						local clickPart = displayModel:FindFirstChild("点击升级", true) -- 递归查找
+						-- [修改内容] 递归查找点击升级 Part，并检测 ClickDetector
+						local clickPart = displayModel:FindFirstChild("点击升级", true)
 						local clickDetector = clickPart and clickPart:FindFirstChildWhichIsA("ClickDetector")
 						
-						if clickDetector then
-							-- 避免重复绑定
-							if not clickDetector:GetAttribute("IsBound") then
-								clickDetector:SetAttribute("IsBound", true)
-								clickDetector.MouseClick:Connect(function(playerWhoClicked)
-									if playerWhoClicked ~= player then return end
-									-- ... (此处保留你原有的升级逻辑代码) ...
-									-- [注意] 这里逻辑保持不变，只需确保能点到即可
-									print("点击了升级面板") -- 诊断：确保点击能触发
-								end)
-							end
+						if not clickDetector then
+							-- 极其重要！如果缺少点击探测器，代码会在此报警！
+							warn(string.format("[UI警告] 槽位 %d 的 '点击升级' 中没有找到 ClickDetector，玩家将无法点击升级！请在 Studio 中手动插入一个 ClickDetector。", slot.Index))
+						elseif not clickDetector:GetAttribute("IsBound") then
+							clickDetector:SetAttribute("IsBound", true)
+							clickDetector.MouseClick:Connect(function(playerWhoClicked)
+								if playerWhoClicked ~= player then return end
+								
+								local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
+								-- 防呆判定：如果没有放怪，点升级没反应
+								if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
+									toast(player, "请先放置怪物再升级！")
+									return 
+								end
+								
+								local pm = state.PlacedMonster
+								local upLevel = pm:GetAttribute("UpgradeLevel") or 1
+								local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec") or 0
+								local upgradeCost = upLevel * 10 * baseGps
+								
+								-- 尝试扣除金币并升级
+								if PlayerData.TrySpendGold(player, upgradeCost) then
+									pm:SetAttribute("UpgradeLevel", upLevel + 1)
+									
+									local newGps = (upLevel + 1) * baseGps
+									local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
+									pm:SetAttribute("GoldPerSec", newGps)
+									pm:SetAttribute("Value", baseValue * (upLevel + 1))
+									
+									setPlacedMonsterHeadBillboardText(pm)
+									refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
+									toast(player, "升级成功！")
+									DataDirtyService.MarkDirty(player)
+								else
+									toast(player, "金币不足！")
+								end
+							end)
 						end
 					end
-				else
-					-- [诊断] 如果 Collector 为空，发出警告
-					warn(string.format("[PlacementWarning] 槽位 %d 缺失 Collector 引用，无法生成收益显示", slot.Index))
 				end
 			end
 
