@@ -1401,6 +1401,7 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	equipped:Destroy()
 	DataDirtyService.MarkDirty(player, 5)
 	toast(player, string.format("已放置怪到区域%d", idx))
+end
 	
 
 -- 这个函数用于在玩家触碰 Collector 时领取该槽位已积累的金币。

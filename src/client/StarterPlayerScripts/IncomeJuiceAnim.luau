@@ -28,10 +28,8 @@ end
 -- 2. 负责踩踏回弹动画 (物理视觉分离)
 local function bindDisplay(model: Model)
 	local hitbox = model:WaitForChild("Hitbox", 5) :: BasePart
-	-- 假设你的视觉底层 Part 叫 "Base" 或者直接用 PrimaryPart
-	local visualPart = model.PrimaryPart 
 	
-	if hitbox and visualPart then
+	if hitbox then
 		local debounce = false
 		hitbox.Touched:Connect(function(hit)
 			if debounce then return end
@@ -39,19 +37,21 @@ local function bindDisplay(model: Model)
 			if char and char:FindFirstChild("Humanoid") then
 				debounce = true
 				
-				-- 视觉部分下沉 0.5 Studs，然后弹回 (使用 PivotTo 保证整体模型移动)
-				local originalCFrame = visualPart.CFrame
+				-- 【修复】找到名为 Visuals 的子容器，只对它做下沉动画
+				-- 如果没找到 Visuals，兜底移动整个 model (会导致发抖)
+				local targetModel = model:FindFirstChild("Visuals") or model
+				local originalCFrame = targetModel:GetPivot()
 				local downCFrame = originalCFrame * CFrame.new(0, -0.5, 0)
 				
-				model:PivotTo(downCFrame)
+				targetModel:PivotTo(downCFrame)
 				task.wait(0.1)
 				
-				-- 这里用一个简单的循环模拟弹性回弹
+				-- 简单的循环模拟弹性回弹
 				for i = 1, 10 do
-					model:PivotTo(downCFrame:Lerp(originalCFrame, i/10))
+					targetModel:PivotTo(downCFrame:Lerp(originalCFrame, i/10))
 					task.wait(0.02)
 				end
-				model:PivotTo(originalCFrame)
+				targetModel:PivotTo(originalCFrame)
 				
 				task.wait(0.5) -- 冷却
 				debounce = false

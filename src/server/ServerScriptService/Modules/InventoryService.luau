@@ -500,17 +500,24 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 
 	local moved = #carried
 	local firstTool: Tool? = nil
+	
+	-- 【修复】这里只用一个统一的循环，并挂上所有强化属性
 	for _, c in ipairs(carried) do
 		local tool = createMonsterToolFromData(
 			c.MonsterLevel,
 			c.Value,
 			c.GoldPerSec,
-			"" -- IMPORTANT: 从携带态来的 Tool 不属于背包列表，因此 ItemId 置空
+			"" -- IMPORTANT: 从携带态来的 Tool 不属于背包列表
 		)
+		
+		-- 写入强化属性
+		local upLevel = (c :: any).UpgradeLevel or 1
+		tool:SetAttribute("UpgradeLevel", upLevel)
+		tool:SetAttribute("BaseValue", c.Value / upLevel)
+		tool:SetAttribute("BaseGoldPerSec", c.GoldPerSec / upLevel)
+		
 		tool.Parent = backpack
-		if not firstTool then
-			firstTool = tool
-		end
+		if not firstTool then firstTool = tool end
 	end
 
 	clearCarried(player)
@@ -521,27 +528,10 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 		if humanoid then
 			-- defer 一帧，确保 Tool 已稳定进入 Backpack
 			task.defer(function()
-				if firstTool.Parent == backpack then
+				if firstTool and firstTool.Parent == backpack then
 					humanoid:EquipTool(firstTool)
 				end
 			end)
-		end
-		--
-		local firstTool: Tool? = nil
-		for _, c in ipairs(carried) do
-			local tool = createMonsterToolFromData(
-				c.MonsterLevel,
-				c.Value,
-				c.GoldPerSec,
-				""
-				-- 你需要去 createMonsterToolFromData 里增加一个 upgradeLevel 参数来接收它，或者直接在这里 SetAttribute
-			)
-			tool:SetAttribute("UpgradeLevel", (c :: any).UpgradeLevel or 1)
-			tool:SetAttribute("BaseValue", c.Value / ((c :: any).UpgradeLevel or 1))
-			tool:SetAttribute("BaseGoldPerSec", c.GoldPerSec / ((c :: any).UpgradeLevel or 1))
-			
-			tool.Parent = backpack
-			if not firstTool then firstTool = tool end
 		end
 	end
 

@@ -857,13 +857,10 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	end
 end
 
+
 -- [新增] 爆装备接口：在指定坐标散落一只立刻死亡的怪物尸体
 function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number)	
 	local template = getMonsterTemplate(level)
-	if not template then return end
-
-	local clone, p = prepareMonsterTemplateClone(template)
-	if not clone or not p then return end
 	if not template then return end
 
 	local clone, p = prepareMonsterTemplateClone(template)
@@ -877,7 +874,6 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	p:SetAttribute("ZoneKey", zoneKey)
 	p:SetAttribute("ZoneLevel", 1) 
 	p:SetAttribute("MonsterLevel", level)
-
 	p:SetAttribute("MaxHP", 1)
 	p:SetAttribute("HP", 0)
 	p:SetAttribute("Value", value)
@@ -886,10 +882,6 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	p:SetAttribute("ExpireUnix", os.time() + Config.MONSTER_LIFETIME_SECONDS)
 	p:SetAttribute("Dead", false)
 	p:SetAttribute("Collected", false)
-	p:SetAttribute("IsMonster", true)
-	p:SetAttribute("ZoneKey", zoneKey)
-	p:SetAttribute("ZoneLevel", 1) 
-	p:SetAttribute("MonsterLevel", level)
 	p:SetAttribute("UpgradeLevel", upgradeLevel or 1) -- 【新增】保存强化等级
 
 	clone:SetAttribute("IsMonster", true)
