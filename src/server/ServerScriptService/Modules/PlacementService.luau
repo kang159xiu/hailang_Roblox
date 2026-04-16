@@ -1846,10 +1846,20 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 				un,
 				nowUnix
 			)
+			
+			-- 【核心修复】把数据库里的强化记忆，重新注入到加载出来的模型里！
+			if placed then
+				placed:SetAttribute("UpgradeLevel", tonumber(d.UpgradeLevel) or 1)
+				placed:SetAttribute("BaseValue", tonumber(d.BaseValue) or placed:GetAttribute("Value"))
+				placed:SetAttribute("BaseGoldPerSec", tonumber(d.BaseGoldPerSec) or placed:GetAttribute("GoldPerSec"))
+			end
+			
 			st.PlacedMonster = placed
 
 			-- 进游戏/加载存档后也立即刷新收益显示牌子
 			refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, placed)
+
+
 		end
 	end
 end
@@ -1873,6 +1883,10 @@ function PlacementService.Export(player: Player): {PersistedSlot}
 					GoldPerSec = math.floor(tonumber(pm:GetAttribute("GoldPerSec")) or 0),
 					UnclaimedGold = math.floor(tonumber(pm:GetAttribute("UnclaimedGold")) or 0),
 					LastTickUnix = math.floor(tonumber(pm:GetAttribute("LastTickUnix")) or os.time()),
+					-- 【修复新增】把强化相关数据存入数据库！
+					UpgradeLevel = math.floor(tonumber(pm:GetAttribute("UpgradeLevel")) or 1),
+					BaseValue = math.floor(tonumber(pm:GetAttribute("BaseValue")) or tonumber(pm:GetAttribute("Value")) or 0),
+					BaseGoldPerSec = math.floor(tonumber(pm:GetAttribute("BaseGoldPerSec")) or tonumber(pm:GetAttribute("GoldPerSec")) or 0),
 				}
 				st.PlacedData = placedData
 			elseif st.PlacedData then
