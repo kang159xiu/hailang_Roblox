@@ -26,8 +26,7 @@ local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local CombatService = require(script.Parent:WaitForChild("CombatService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
--- [修改内容] 引入守护者系统，以便在玩家拾取时触发警报
-local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
+
 
 -- require(...)：加载 ModuleScript 并拿到它导出的 table/函数。
 --
@@ -316,12 +315,12 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	)
 
 	if ok then
-		-- [修改内容] 拾取成功，延迟加载 GuardianService 以避免循环依赖报错
+		-- [修改内容] 拾取成功，触发该区域的守护者警报！
 		local zoneKey = monsterPart:GetAttribute("ZoneKey")
 		if type(zoneKey) == "string" then
 			local zoneInfo = pickupZonesByKey[zoneKey]
 			if zoneInfo and zoneInfo.Part then
-				-- 在这里局部引入并触发警报
+				-- 【关键修改】在这里局部引入，完美避开死循环！
 				local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
 				GuardianService.TriggerAlert(player, zoneInfo.Part)
 			end
