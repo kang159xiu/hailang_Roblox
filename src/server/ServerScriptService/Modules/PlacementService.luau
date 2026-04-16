@@ -347,27 +347,46 @@ end
 local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	if not collectorPart then return end
 	
-	local displayModel = collectorPart:FindFirstChild("收益显示")
-	if not displayModel then return end
-
-	local clickPart = displayModel:FindFirstChild("点击升级")
-	local bg = clickPart and clickPart:FindFirstChild("SurfaceGui") and clickPart.SurfaceGui:FindFirstChild("升级背景")
+	-- [修改内容] 查找新增的定位Part，如果存在就用定位Part，否则回退使用collectorPart保证兼容性
+	local locatorPart = collectorPart:FindFirstChild("收益显示定位")
+	local anchorPart = locatorPart or collectorPart
 	
-	if not placed or placed.Parent == nil then
-		if bg then
-			bg["升级所需金币"].Text = "未放置"
-			bg["当前等级→下一等级"].Text = ""
+	-- 1. 更新新版的“实体升级面板”UI
+	local displayModel = anchorPart:FindFirstChild("收益显示")
+	if displayModel then
+		local clickPart = displayModel:FindFirstChild("点击升级")
+		local bg = clickPart and clickPart:FindFirstChild("SurfaceGui") and clickPart.SurfaceGui:FindFirstChild("升级背景")
+		
+		if not placed or placed.Parent == nil then
+			if bg then
+				bg["升级所需金币"].Text = "未放置"
+				bg["当前等级→下一等级"].Text = ""
+			end
+		else
+			local upLevel = placed:GetAttribute("UpgradeLevel") or 1
+			local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
+			local upgradeCost = upLevel * 10 * baseGps
+
+			if bg then
+				bg["升级所需金币"].Text = formatMoney(upgradeCost)
+				bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
+			end
 		end
-		return
 	end
 
-	local upLevel = placed:GetAttribute("UpgradeLevel") or 1
-	local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
-	local upgradeCost = upLevel * 10 * baseGps
-
-	if bg then
-		bg["升级所需金币"].Text = formatMoney(upgradeCost)
-		bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
+	-- 2. 恢复并更新原版的“当前未领取收益”悬浮UI
+	-- [修改内容] 这里传入 anchorPart，让原版悬浮 UI 也直接挂载并在新的定位 Part 上显示
+	local gui = ensureIncomeDisplayGui(player, slotPart, anchorPart)
+	if gui then
+		if not placed or placed.Parent == nil then
+			setIncomeDisplayText(gui, nil, nil, nil, nil)
+		else
+			local monsterLevel = placed:GetAttribute("MonsterLevel")
+			local goldPerSec = placed:GetAttribute("GoldPerSec")
+			local unclaimed = placed:GetAttribute("UnclaimedGold")
+			local value = placed:GetAttribute("Value")
+			setIncomeDisplayText(gui, monsterLevel, goldPerSec, math.floor(unclaimed or 0), value)
+		end
 	end
 end
 
@@ -1567,15 +1586,22 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 【修改内容】为每个槽位生成实体“收益显示”模型，并绑定升级逻辑
+				-- 【修改内容】为每个槽位生成实体“收益显示”模型，并绑定升级逻辑，适配新的定位Part
 				if slot.Collector then
-					local displayModel = slot.Collector:FindFirstChild("收益显示")
+					-- [修改内容] 适配新的定位Part
+					local locatorPart = slot.Collector:FindFirstChild("收益显示定位")
+					local anchorPart = locatorPart or slot.Collector
+					
+					local displayModel = anchorPart:FindFirstChild("收益显示")
 					if not displayModel then
-						local template = ReplicatedStorage.Templates:FindFirstChild("收益显示")
+						local templatesFolder = ReplicatedStorage:FindFirstChild("Templates")
+						local template = templatesFolder and templatesFolder:FindFirstChild("收益显示")
+						
 						if template then
 							displayModel = template:Clone()
-							displayModel:PivotTo(slot.Collector.CFrame)
-							displayModel.Parent = slot.Collector
+							-- [修改内容] 使用新定位Part的CFrame进行对齐，并把模型放入定位Part中
+							displayModel:PivotTo(anchorPart.CFrame)
+							displayModel.Parent = anchorPart
 							
 							-- 绑定升级逻辑
 							local clickPart = displayModel:FindFirstChild("点击升级")
@@ -1611,6 +1637,8 @@ function PlacementService.Init()
 									end
 								end)
 							end
+						else
+							warn("[PlacementService] 在 ReplicatedStorage.Templates 中未找到 '收益显示' 模板，此区域无法加载升级面板！")
 						end
 					end
 				end
