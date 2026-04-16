@@ -36,38 +36,6 @@ local function formatMoney(amount: number): string
 end
 
 
--- 假设 displayModel 是你克隆出来的“收益显示”模型
--- 假设 monsterInstance 是站在上面的怪物模型
--- 假设 player 是放置这个怪物的玩家
-
-
--- 初始化UI
-refreshUpgradeUI()
-
--- 监听点击升级 (服务端进行资产校验)
-clickDetector.MouseClick:Connect(function(playerWhoClicked)
-	-- 防止别人点你的升级
-	if playerWhoClicked ~= player then return end
-	
-	local upLevel = monsterInstance:GetAttribute("UpgradeLevel") or 1
-	local baseGps = monsterInstance:GetAttribute("BaseGoldPerSec")
-	local upgradeCost = upLevel * 10 * baseGps
-	
-	-- 【重点】这里调用你系统里扣除玩家金币的函数
-	-- local success = PlayerData.DeductMoney(player, upgradeCost)
-	local success = true -- 假设扣钱成功
-	
-	if success then
-		-- 升级成功，强化等级 + 1
-		monsterInstance:SetAttribute("UpgradeLevel", upLevel + 1)
-		-- 刷新面板与产出
-		refreshUpgradeUI()
-	else
-		-- 钱不够，可以调用你之前的 pushToast 提示玩家
-		-- pushToast(player, "金币不足！")
-	end
-end)
------------
 
 export type PersistedPlacedMonster = {
 	MonsterLevel: number,
