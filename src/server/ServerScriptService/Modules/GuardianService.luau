@@ -1,4 +1,7 @@
 --!strict
+-- ServerScriptService.Modules.GuardianService
+-- 守护者系统：负责区域守护、寻路追踪玩家、击飞惩罚与掉落
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
@@ -11,25 +14,52 @@ local MonsterService = require(script.Parent:WaitForChild("MonsterService"))
 
 local GuardianService = {}
 
+--------------------------------------------------------------------------------
+-- 1. 守护者配置表 (1~30 级)
+--------------------------------------------------------------------------------
 type AnimationConfig = { Idle: string, Track: string, Attack: string }
 type GuardianData = { ModelName: string, Speed: number, Animations: AnimationConfig }
 local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 
+-- 自动初始化 1~30 级的配置
 for level = 1, 30 do
 	GUARDIAN_CONFIG[level] = {
+		-- 对应模型名：守护者形象1, 守护者形象2 ...
 		ModelName = "守护者形象" .. tostring(level), 
+		-- 速度随等级提升：基础 12，每级增加 1.5
 		Speed = 12 + (level * 1.5), 
-		Animations = { Idle = "", Track = "", Attack = "" }
+		Animations = {
+			Idle = "",   -- 在此处填入你的动画 ID
+			Track = "", 
+			Attack = "" 
+		}
 	}
 end
 
+--------------------------------------------------------------------------------
+-- 2. 运行时状态记录
+--------------------------------------------------------------------------------
 local activeGuardians = {}
 local guardiansFolder: Folder
 
+--------------------------------------------------------------------------------
+-- 3. 辅助功能函数
+--------------------------------------------------------------------------------
 local function getGuardianTemplate(modelName: string): Model?
 	local templateFolder = workspace:FindFirstChild("GuardianModel")
 	if not templateFolder then return nil end
-	local template = templateFolder:FindFirstChild(modelName) or templateFolder:FindFirstChild("守护者形象1")
+
+	-- 尝试查找当前等级对应的特定形象
+	local template = templateFolder:FindFirstChild(modelName)
+	
+	-- 如果还没做该等级的模型，则暂时用 1 级模型兜底（防止脚本报错停止运行）
+	if not template then
+		template = templateFolder:FindFirstChild("守护者形象1")
+		if template then
+			print(string.format("[GuardianService] 未找到 %s，已使用 守护者形象1 占位", modelName))
+		end
+	end
+
 	return (template and template:IsA("Model")) and template or nil
 end
 
@@ -63,26 +93,33 @@ local function playAnim(guardian, animName: string)
 	end
 end
 
+-- 检查玩家是否在区域内 (2D 水平判定)
 local function isPlayerInZone(playerHRP: BasePart, zonePart: BasePart): boolean
 	local dx = playerHRP.Position.X - zonePart.Position.X
 	local dz = playerHRP.Position.Z - zonePart.Position.Z
 	local horizontalDistance = math.sqrt(dx^2 + dz^2)
+	
 	local maxRadius = math.max(zonePart.Size.X, zonePart.Size.Y, zonePart.Size.Z) / 2
 	local margin = 15 
+	
 	return horizontalDistance <= (maxRadius + margin)
 end
 
+-- 让守护者看向目标 (PivotTo 驱动)
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
+	
 	if (flatTarget - currentPos).Magnitude > 0.1 then
 		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
 		model:PivotTo(targetCFrame)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- 4. 惩罚逻辑：爆怪、击飞并乱翻
+--------------------------------------------------------------------------------
 local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
-	-- 防止短时间内重复击飞
 	if guardian.State ~= "Track" then return end
 
 	guardian.State = "Attack"
@@ -98,52 +135,46 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
 	end
 
-	-- 2. 完美抛物线击飞逻辑
+	-- 2. 物理表现：击飞并空中翻滚
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	
 	if humanoid then
-		-- 强制把玩家的身体状态改为纯物理 (Physics)，这会让它彻底放弃站立抵抗
 		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 		humanoid.PlatformStand = true
 	end
 	
-	-- 【黑科技核心】：把玩家往上强行拉高 2 个 Studs，彻底断开他与地板的物理粘连！
+	-- 强制离地，解除摩擦力
 	playerHRP.CFrame = playerHRP.CFrame + Vector3.new(0, 2, 0)
 	
-	-- 抹平 Y 轴的高度差，只获取纯粹的水平方向
+	-- 计算 45 度击飞向量
 	local diff = playerHRP.Position - guardian.RootPart.Position
 	local horizontalDir = Vector3.new(diff.X, 0, diff.Z)
-	if horizontalDir.Magnitude > 0.01 then
-		horizontalDir = horizontalDir.Unit
-	else
-		horizontalDir = Vector3.new(0, 0, 1) -- 容错：如果完全重合则向 Z 轴击飞
-	end
+	horizontalDir = horizontalDir.Magnitude > 0.1 and horizontalDir.Unit or Vector3.new(0, 0, 1)
 	
-	-- 赋予 45度角（水平推力 = 垂直升力）的初始爆发速度
-	local pushPower = 120 -- 速度值，如果觉得飞得不够远，可以改到 100 或 120
+	local pushPower = 100 
 	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 	
-
-	-- 【新增修改】：给玩家附加一个强烈的随机旋转角速度，实现空中“乱翻”
-	local spin = 30 -- 翻滚的剧烈程度，数值越大转得越快
+	-- 附加随机旋转角速度 (实现身体乱翻)
+	local spin = 40
 	playerHRP.AssemblyAngularVelocity = Vector3.new(
 		math.random(-spin, spin), 
 		math.random(-spin, spin), 
 		math.random(-spin, spin)
 	)
-
-	-- 1秒后在空中或落地时恢复控制权，让玩家重新站起
-	task.delay(1, function()
+	
+	-- 1.2秒后恢复状态
+	task.delay(1.2, function()
 		if humanoid then
 			humanoid.PlatformStand = false
 			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 		end
 	end)
-	
-	print(string.format("[GuardianService] 击飞 %s：解除地板粘连，执行 45 度完美抛物线", player.Name))
 end
 
+--------------------------------------------------------------------------------
+-- 5. 生成与循环逻辑
+--------------------------------------------------------------------------------
 local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneKey: string)
 	local config = GUARDIAN_CONFIG[zoneLevel] or GUARDIAN_CONFIG[1]
 	local template = getGuardianTemplate(config.ModelName)
@@ -155,26 +186,16 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	clone.PrimaryPart = root
 
-	-- 【修改内容】只锚定 RootPart，同时开启 RootPart 的 CanTouch
+	-- 清理调试颜色，开启触碰
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
-			if d == root then
-				d.Anchored = true
-				d.CanTouch = true -- 允许触发抓捕物理事件
-			else
-				d.Anchored = false
-				d.CanTouch = false
-			end
+			d.Anchored = (d == root)
+			d.CanTouch = (d == root)
 			d.CanCollide = false
 		end
 	end
 
-	root.Transparency = 0.5
-	root.BrickColor = BrickColor.new("Bright red")
-	local decal = Instance.new("Decal", root)
-	decal.Face = Enum.NormalId.Front
-	decal.Texture = "rbxasset://textures/spawnLocation.png"
-	
+	-- 初始化位置
 	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + 4 + (root.Size.Y / 2), 0)
 	clone:PivotTo(spawnCFrame)
 	clone.Parent = guardiansFolder
@@ -196,21 +217,17 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		Waypoints = {},
 		CurrentWaypointIdx = 1,
 		LastPathTime = 0,
-		AttackTimer = 0,
-		WasPlayerInZone = false 
+		AttackTimer = 0
 	}
 
-	-- 【修改内容】绑定抓捕碰撞事件
-	local g = activeGuardians[zoneKey]
+	-- 绑定碰撞抓捕
 	root.Touched:Connect(function(hit)
-		-- 只有在追踪状态且碰到的目标是仇恨玩家时才触发
+		local g = activeGuardians[zoneKey]
 		if g.State == "Track" and g.TargetPlayer then
 			local char = g.TargetPlayer.Character
 			if char and hit:IsDescendantOf(char) then
 				local hrp = char:FindFirstChild("HumanoidRootPart")
-				if hrp then
-					punishPlayer(g, g.TargetPlayer, hrp)
-				end
+				if hrp then punishPlayer(g, g.TargetPlayer, hrp) end
 			end
 		end
 	end)
@@ -218,12 +235,11 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	playAnim(activeGuardians[zoneKey], "Idle")
 end
 
-
 local function onHeartbeat(dt: number)
 	local now = os.clock()
-
 	for _, g in pairs(activeGuardians) do
-		local closestHRP: BasePart? = nil
+		-- 搜索最近玩家逻辑
+		local closestHRP = nil
 		local minDist = 999 
 		for _, player in ipairs(Players:GetPlayers()) do
 			local char = player.Character
@@ -239,37 +255,26 @@ local function onHeartbeat(dt: number)
 
 		if g.State == "Idle" then
 			if closestHRP then
-				if not g.WasPlayerInZone then
-					g.WasPlayerInZone = true
-				end
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				if g.WasPlayerInZone then
-					g.WasPlayerInZone = false
-				end
 				g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
 			end
-
 		elseif g.State == "Track" and g.TargetPlayer then
-			local character = g.TargetPlayer.Character
-			local targetHrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			
-			-- 【修改内容】移除了 isPlayerInZone 的判定，守护者会死追到底，直到玩家碰到 di_mian
+			local targetHrp = g.TargetPlayer.Character and g.TargetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if not targetHrp then
 				g.TargetPlayer = nil
 				g.State = "Return"
 				playAnim(g, "Track")
 				continue
 			end
-
 			lookAtFlat(g.Model, g.RootPart, targetHrp.Position)
-
-			-- 移动寻路逻辑
+			
+			-- 寻路移动逻辑
 			if now - g.LastPathTime > 0.3 then
 				g.LastPathTime = now
 				local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 4, AgentCanJump = false})
-				local success = pcall(function() path:ComputeAsync(g.RootPart.Position, targetHrp.Position) end)
-				if success and path.Status == Enum.PathStatus.Success then
+				pcall(function() path:ComputeAsync(g.RootPart.Position, targetHrp.Position) end)
+				if path.Status == Enum.PathStatus.Success then
 					g.Waypoints = path:GetWaypoints()
 					g.CurrentWaypointIdx = 2
 				end
@@ -279,59 +284,49 @@ local function onHeartbeat(dt: number)
 				local targetWP = g.Waypoints[g.CurrentWaypointIdx].Position
 				local moveVec = (targetWP - g.RootPart.Position)
 				local flatMoveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
-				
 				if flatMoveVec.Magnitude < 1 then
 					g.CurrentWaypointIdx += 1
 				else
-					local moveDir = flatMoveVec.Unit
-					g.Model:PivotTo(g.RootPart.CFrame + (moveDir * g.Speed * dt))
+					g.Model:PivotTo(g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt))
 				end
 			end
-
 		elseif g.State == "Attack" then
 			if now - g.AttackTimer > 1.5 then
-				g.TargetPlayer = nil
 				g.State = "Return"
 				playAnim(g, "Track")
 			end
-
 		elseif g.State == "Return" then
-			local targetWP = g.SpawnCFrame.Position
-			local moveVec = (targetWP - g.RootPart.Position)
-			
+			local moveVec = (g.SpawnCFrame.Position - g.RootPart.Position)
 			if moveVec.Magnitude < 1 then
 				g.Model:PivotTo(g.SpawnCFrame)
 				g.State = "Idle"
 				playAnim(g, "Idle")
 			else
-				local moveDir = moveVec.Unit
-				g.Model:PivotTo(g.RootPart.CFrame + (moveDir * g.Speed * dt))
-				lookAtFlat(g.Model, g.RootPart, targetWP)
+				g.Model:PivotTo(g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt))
+				lookAtFlat(g.Model, g.RootPart, g.SpawnCFrame.Position)
 			end
 		end
 	end
 end
 
+--------------------------------------------------------------------------------
+-- 6. 对外接口与初始化
+--------------------------------------------------------------------------------
 function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
 	local zoneKey = zonePart:GetFullName()
 	local g = activeGuardians[zoneKey]
-	
 	if g and (g.State == "Idle" or g.State == "Return") then
 		g.TargetPlayer = player
 		g.State = "Track"
 		g.LastPathTime = 0 
 		playAnim(g, "Track")
-		print(string.format("[GuardianService] 守护者锁定目标: %s", player.Name))
+		print(string.format("[GuardianService] %s 触发拾取！守护者正在追击...", player.Name))
 	end
 end
 
 function GuardianService.Init()
-	guardiansFolder = workspace:FindFirstChild("Guardians") :: Folder
-	if not guardiansFolder then
-		guardiansFolder = Instance.new("Folder")
-		guardiansFolder.Name = "Guardians"
-		guardiansFolder.Parent = workspace
-	end
+	guardiansFolder = workspace:FindFirstChild("Guardians") or Instance.new("Folder", workspace)
+	guardiansFolder.Name = "Guardians"
 
 	local zones = ZoneService.GetPickupZones()
 	for _, z in ipairs(zones) do
@@ -340,22 +335,18 @@ function GuardianService.Init()
 	
 	RunService.Heartbeat:Connect(onHeartbeat)
 
-	-- 【修改内容】监听玩家加入与角色生成，绑定脚底触碰地面的事件
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function(char)
 			local hrp = char:WaitForChild("HumanoidRootPart", 5)
 			if hrp and hrp:IsA("BasePart") then
-				-- 只要玩家移动，RootPart 就会高频与周围发生触碰
 				hrp.Touched:Connect(function(hit)
-					-- 检查踩到的地板有没有 di_mian 标签
-					if hit and hit:IsA("BasePart") and CollectionService:HasTag(hit, "di_mian") then
-						-- 遍历守护者，如果谁在追这个玩家，强制让它放弃并回原位
+					if hit and CollectionService:HasTag(hit, "di_mian") then
 						for _, g in pairs(activeGuardians) do
 							if g.State == "Track" and g.TargetPlayer == player then
 								g.TargetPlayer = nil
 								g.State = "Return"
 								playAnim(g, "Track")
-								print(string.format("[GuardianDebug] %s 逃入 di_mian 安全区，守护者放弃追踪！", player.Name))
+								print(string.format("[Guardian] %s 进入安全区，追击停止", player.Name))
 							end
 						end
 					end
@@ -363,8 +354,6 @@ function GuardianService.Init()
 			end
 		end)
 	end)
-
-	print("[GuardianService] 守护者系统初始化完成并启动寻路循环")
 end
 
 return GuardianService
