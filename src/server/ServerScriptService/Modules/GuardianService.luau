@@ -90,40 +90,40 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	guardian.AttackTimer = os.clock()
 	playAnim(guardian, "Attack")
 
-	-- 1. 掉落怪物
+	-- 1. 掉落怪物逻辑
 	local droppedItems = InventoryService.DropAllCarried(player)
 	for _, item in ipairs(droppedItems) do
-		-- 在玩家周围随机散落
 		local offset = Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
 		local dropPos = playerHRP.Position + offset
 		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
 	end
 
-	-- 2. 物理击飞 (修复玩家不受力的问题)
+	-- 2. 物理击飞逻辑优化
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	
 	if humanoid then
-		-- 【关键1】剥夺玩家 Humanoid 的抓地力和主动控制权，使其进入“僵直/滑行”状态
+		-- 开启僵直状态，让玩家暂时失去抓地力
 		humanoid.PlatformStand = true
 	end
 	
-	-- 计算受力方向（增加防重合报错处理，避免坐标完全重合时方向为 NaN）
+	-- 【关键修复】：只计算水平方向的差异 (X 和 Z)，将 Y 设为 0
 	local diff = playerHRP.Position - guardian.RootPart.Position
-	local direction = diff.Magnitude > 0.01 and diff.Unit or Vector3.new(0, 0, 1)
+	local horizontalDir = Vector3.new(diff.X, 0, diff.Z).Unit
 	
-	-- 【关键2】在服务端直接覆盖瞬时速度，这比 ApplyImpulse 更粗暴有效
-	-- 水平推力 80，垂直升力 60 (你可以根据手感调大或调小)
-	playerHRP.AssemblyLinearVelocity = (direction * 80) + Vector3.new(0, 60, 0)
+	-- 【45度受力】：水平推力等于垂直升力
+	-- 这里的 100 是力度倍率，你可以根据需要调大（例如 120）或调小（例如 80）
+	local pushPower = 100 
+	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 	
-	-- 【关键3】1秒后恢复玩家的控制权，让他重新站起来
+	-- 1秒后恢复控制权
 	task.delay(1, function()
 		if humanoid then
 			humanoid.PlatformStand = false
 		end
 	end)
 	
-	print(string.format("[GuardianService] 守护者抓住了 %s！击飞并掉落了 %d 只怪物！", player.Name, #droppedItems))
+	print(string.format("[GuardianService] 击飞 %s：斜向上 45 度受力", player.Name))
 end
 
 local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneKey: string)
