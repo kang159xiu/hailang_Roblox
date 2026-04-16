@@ -26,6 +26,8 @@ local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local CombatService = require(script.Parent:WaitForChild("CombatService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+-- [修改内容] 引入守护者系统，以便在玩家拾取时触发警报
+local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
 
 -- require(...)：加载 ModuleScript 并拿到它导出的 table/函数。
 --
@@ -306,7 +308,7 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	local value = monsterPart:GetAttribute("Value")
 	local gps = monsterPart:GetAttribute("GoldPerSec")
 
-local ok = InventoryService.PickupCarryMonster(
+	local ok = InventoryService.PickupCarryMonster(
 		player,
 		type(level) == "number" and level or 1,
 		type(value) == "number" and value or 0,
