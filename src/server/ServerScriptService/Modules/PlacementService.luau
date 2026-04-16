@@ -347,11 +347,11 @@ end
 local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	if not collectorPart then return end
 	
-	-- [修改内容] 查找新增的定位Part，如果存在就用定位Part，否则回退使用collectorPart保证兼容性
+	-- [修改内容] 1. 优先获取定位点 Part，如果找不到则回退到 collectorPart
 	local locatorPart = collectorPart:FindFirstChild("收益显示定位")
 	local anchorPart = locatorPart or collectorPart
 	
-	-- 1. 更新新版的“实体升级面板”UI
+	-- [修改内容] 2. 更新“实体升级面板”UI (显示等级和升级消耗)
 	local displayModel = anchorPart:FindFirstChild("收益显示")
 	if displayModel then
 		local clickPart = displayModel:FindFirstChild("点击升级")
@@ -374,17 +374,19 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 		end
 	end
 
-	-- 2. 恢复并更新原版的“当前未领取收益”悬浮UI
-	-- [修改内容] 这里传入 anchorPart，让原版悬浮 UI 也直接挂载并在新的定位 Part 上显示
+	-- [修改内容] 3. 重要！更新“未领取收益”悬浮 UI (那个跳动的数字)
+	-- [修改内容] 这里必须传入 anchorPart，让 UI 挂载到定位点的位置
 	local gui = ensureIncomeDisplayGui(player, slotPart, anchorPart)
 	if gui then
 		if not placed or placed.Parent == nil then
+			-- 没怪时清空显示
 			setIncomeDisplayText(gui, nil, nil, nil, nil)
 		else
 			local monsterLevel = placed:GetAttribute("MonsterLevel")
 			local goldPerSec = placed:GetAttribute("GoldPerSec")
 			local unclaimed = placed:GetAttribute("UnclaimedGold")
 			local value = placed:GetAttribute("Value")
+			-- [修改内容] 将实时计算的数值填入 UI
 			setIncomeDisplayText(gui, monsterLevel, goldPerSec, math.floor(unclaimed or 0), value)
 		end
 	end
@@ -1586,9 +1588,9 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 【修改内容】为每个槽位生成实体“收益显示”模型，并绑定升级逻辑，适配新的定位Part
+				-- 【修改内容】为每个槽位生成实体“收益显示”模型，并绑定升级逻辑
 				if slot.Collector then
-					-- [修改内容] 适配新的定位Part
+					-- [修改内容] 获取新的定位点
 					local locatorPart = slot.Collector:FindFirstChild("收益显示定位")
 					local anchorPart = locatorPart or slot.Collector
 					
@@ -1599,7 +1601,7 @@ function PlacementService.Init()
 						
 						if template then
 							displayModel = template:Clone()
-							-- [修改内容] 使用新定位Part的CFrame进行对齐，并把模型放入定位Part中
+							-- [修改内容] 对齐到定位点的位置
 							displayModel:PivotTo(anchorPart.CFrame)
 							displayModel.Parent = anchorPart
 							
@@ -1618,7 +1620,6 @@ function PlacementService.Init()
 									local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec")
 									local upgradeCost = upLevel * 10 * baseGps
 									
-									-- 调用扣钱
 									if PlayerData.TrySpendGold(player, upgradeCost) then
 										pm:SetAttribute("UpgradeLevel", upLevel + 1)
 										
@@ -1627,8 +1628,8 @@ function PlacementService.Init()
 										pm:SetAttribute("GoldPerSec", newGps)
 										pm:SetAttribute("Value", baseValue * (upLevel + 1))
 										
-										-- 刷新头顶UI与底座UI
 										setPlacedMonsterHeadBillboardText(pm)
+										-- [修改内容] 升级后立即刷新所有 UI
 										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
 										toast(player, "升级成功！")
 										DataDirtyService.MarkDirty(player)
@@ -1637,8 +1638,6 @@ function PlacementService.Init()
 									end
 								end)
 							end
-						else
-							warn("[PlacementService] 在 ReplicatedStorage.Templates 中未找到 '收益显示' 模板，此区域无法加载升级面板！")
 						end
 					end
 				end
