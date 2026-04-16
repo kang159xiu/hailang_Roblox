@@ -121,9 +121,18 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	end
 	
 	-- 赋予 45度角（水平推力 = 垂直升力）的初始爆发速度
-	local pushPower = 80 -- 速度值，如果觉得飞得不够远，可以改到 100 或 120
+	local pushPower = 120 -- 速度值，如果觉得飞得不够远，可以改到 100 或 120
 	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 	
+
+	-- 【新增修改】：给玩家附加一个强烈的随机旋转角速度，实现空中“乱翻”
+	local spin = 30 -- 翻滚的剧烈程度，数值越大转得越快
+	playerHRP.AssemblyAngularVelocity = Vector3.new(
+		math.random(-spin, spin), 
+		math.random(-spin, spin), 
+		math.random(-spin, spin)
+	)
+
 	-- 1秒后在空中或落地时恢复控制权，让玩家重新站起
 	task.delay(1, function()
 		if humanoid then
