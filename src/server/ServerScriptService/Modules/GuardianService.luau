@@ -90,7 +90,7 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	guardian.AttackTimer = os.clock()
 	playAnim(guardian, "Attack")
 
-	-- 1. 掉落怪物 (调用前两步写的接口)
+	-- 1. 掉落怪物
 	local droppedItems = InventoryService.DropAllCarried(player)
 	for _, item in ipairs(droppedItems) do
 		-- 在玩家周围随机散落
@@ -99,10 +99,29 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
 	end
 
-	-- 2. 物理击飞 (向后上方强力推开)
-	local direction = (playerHRP.Position - guardian.RootPart.Position).Unit
-	local impulse = (direction * 1200) + Vector3.new(0, 800, 0) 
-	playerHRP:ApplyImpulse(impulse * playerHRP.AssemblyMass)
+	-- 2. 物理击飞 (修复玩家不受力的问题)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	
+	if humanoid then
+		-- 【关键1】剥夺玩家 Humanoid 的抓地力和主动控制权，使其进入“僵直/滑行”状态
+		humanoid.PlatformStand = true
+	end
+	
+	-- 计算受力方向（增加防重合报错处理，避免坐标完全重合时方向为 NaN）
+	local diff = playerHRP.Position - guardian.RootPart.Position
+	local direction = diff.Magnitude > 0.01 and diff.Unit or Vector3.new(0, 0, 1)
+	
+	-- 【关键2】在服务端直接覆盖瞬时速度，这比 ApplyImpulse 更粗暴有效
+	-- 水平推力 80，垂直升力 60 (你可以根据手感调大或调小)
+	playerHRP.AssemblyLinearVelocity = (direction * 80) + Vector3.new(0, 60, 0)
+	
+	-- 【关键3】1秒后恢复玩家的控制权，让他重新站起来
+	task.delay(1, function()
+		if humanoid then
+			humanoid.PlatformStand = false
+		end
+	end)
 	
 	print(string.format("[GuardianService] 守护者抓住了 %s！击飞并掉落了 %d 只怪物！", player.Name, #droppedItems))
 end
