@@ -60,6 +60,7 @@ type SlotState = {
 
 local slotStatesByUserId: {[number]: {[number]: SlotState}} = {}
 local lastTouchAt: {[string]: number} = {}
+local placementInitStartedByUserId: {[number]: boolean} = {}
 
 -- While placed monsters are producing, UnclaimedGold changes every second.
 -- We pulse dirty marks at a low frequency so periodic saves can happen even if the player doesn't do any actions.
@@ -1539,12 +1540,12 @@ end
 
 -- 这个函数是 PlacementService 的初始化入口，用来挂接所有玩家、槽位和心跳逻辑。
 function PlacementService.Init()
-	-- 初始化已有玩家
-	for _, player in ipairs(Players:GetPlayers()) do
-		ensureState(player)
-	end
-
-	Players.PlayerAdded:Connect(function(player)
+	local function setupPlayer(player: Player)
+		if placementInitStartedByUserId[player.UserId] then
+			return
+		end
+		placementInitStartedByUserId[player.UserId] = true
+		
 		ensureState(player)
 
 		-- 等 Home 建好
@@ -1576,17 +1577,16 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 1. 生成并挂载“收益显示”面板（增强搜索版） -------------------------
+				-- 1. 生成并挂载“收益显示”面板（安全搜索版） -------------------------
 				if slot.Collector then
 					local displayModel = slot.Collector:FindFirstChild("收益显示", true)
 					
 					if not displayModel then
-						-- 自动在 Workspace 或 ReplicatedStorage 搜索模板
-						local template = Workspace:FindFirstChild("收益显示", true) or ReplicatedStorage:FindFirstChild("收益显示", true)
+						-- 【修改内容】优先从 ReplicatedStorage 拿取绝对干净的模板，避免抓到 Workspace 中其他已被污染的面板
+						local template = ReplicatedStorage:FindFirstChild("收益显示", true) or Workspace:FindFirstChild("收益显示", true)
 						
 						if template and template:IsA("Model") then
 							displayModel = template:Clone()
-							-- 寻找定位点，没有则用 Collector 中心
 							local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
 							local anchorCFrame = locatorPart and locatorPart.CFrame or slot.Collector.CFrame
 							
@@ -1601,11 +1601,12 @@ function PlacementService.Init()
 						end
 					end
 
-					-- 2. 绑定点击升级事件（包含自动补全检测器与防呆诊断） -------------------------
+					-- 2. 彻底修复点击升级事件绑定 -------------------------
 					if displayModel then
 						local clickPart = displayModel:FindFirstChild("点击升级", true) or displayModel.PrimaryPart
 						if clickPart then
 							local clickDetector = clickPart:FindFirstChildWhichIsA("ClickDetector")
+							
 							-- 如果模型里没有检测器，代码自动补全
 							if not clickDetector then
 								clickDetector = Instance.new("ClickDetector")
@@ -1613,10 +1614,15 @@ function PlacementService.Init()
 								clickDetector.Parent = clickPart
 							end
 
-							if not clickDetector:GetAttribute("IsBound") then
-								clickDetector:SetAttribute("IsBound", true)
+							-- 【修改内容】彻底抛弃容易被克隆污染的 IsBound。
+							-- 改用带有玩家独一无二 UserId 的专属标识符，确保不论怎么克隆，
+							-- 该玩家的事件100%能够被成功挂载！
+							local bindKey = "BoundForUser_" .. tostring(player.UserId)
+							if not clickDetector:GetAttribute(bindKey) then
+								clickDetector:SetAttribute(bindKey, true)
+								
 								clickDetector.MouseClick:Connect(function(playerWhoClicked)
-									-- 🩺 [核心诊断打印]：只要你的鼠标成功点到了，控制台一定会输出这句话！
+									-- 🩺 [核心诊断打印]：鼠标成功点到，必然输出此句！
 									print(string.format("🟢 [点击测试] 玩家 %s 成功点到了槽位 %d 的升级底座！", playerWhoClicked.Name, slot.Index))
 
 									if playerWhoClicked ~= player then return end
@@ -1684,6 +1690,15 @@ function PlacementService.Init()
 				refreshAllUnlockPrompts()
 			end)
 		end)
+	end
+
+	-- 初始化已有玩家
+	for _, player in ipairs(Players:GetPlayers()) do
+		setupPlayer(player)
+	end
+
+	Players.PlayerAdded:Connect(function(player)
+		setupPlayer(player)
 	end)
 
 	Players.PlayerRemoving:Connect(function(_player)
@@ -1905,6 +1920,7 @@ end
 -- 这个函数用于在玩家彻底清理时移除 PlacementService 的运行时缓存。
 function PlacementService.Cleanup(player: Player)
 	slotStatesByUserId[player.UserId] = nil
+	placementInitStartedByUserId[player.UserId] = nil
 end
 
 -- 这个函数用于统一处理 PlacementService 负责的各种 ProximityPrompt 服务端交互。
