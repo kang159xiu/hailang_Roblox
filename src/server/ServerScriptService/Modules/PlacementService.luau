@@ -21,6 +21,8 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local HomeService = require(script.Parent:WaitForChild("HomeService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 
+
+
 local PlacementService = {}
 
 
@@ -1599,12 +1601,12 @@ function PlacementService.Init()
 						end
 					end
 
-					-- 2. 绑定点击升级事件（包含自动补全检测器） -------------------------
+					-- 2. 绑定点击升级事件（包含自动补全检测器与防呆诊断） -------------------------
 					if displayModel then
 						local clickPart = displayModel:FindFirstChild("点击升级", true) or displayModel.PrimaryPart
 						if clickPart then
 							local clickDetector = clickPart:FindFirstChildWhichIsA("ClickDetector")
-							-- 如果模型里没有检测器，代码为你【自动生成】一个
+							-- 如果模型里没有检测器，代码自动补全
 							if not clickDetector then
 								clickDetector = Instance.new("ClickDetector")
 								clickDetector.MaxActivationDistance = 32
@@ -1614,11 +1616,15 @@ function PlacementService.Init()
 							if not clickDetector:GetAttribute("IsBound") then
 								clickDetector:SetAttribute("IsBound", true)
 								clickDetector.MouseClick:Connect(function(playerWhoClicked)
+									-- 🩺 [核心诊断打印]：只要你的鼠标成功点到了，控制台一定会输出这句话！
+									print(string.format("🟢 [点击测试] 玩家 %s 成功点到了槽位 %d 的升级底座！", playerWhoClicked.Name, slot.Index))
+
 									if playerWhoClicked ~= player then return end
 									
 									local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
 									if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
 										toast(player, "请先放置怪物再升级！")
+										print("🔴 [点击拒绝] 因为该槽位没有放置怪物。")
 										return 
 									end
 									
@@ -1637,9 +1643,11 @@ function PlacementService.Init()
 										setPlacedMonsterHeadBillboardText(pm)
 										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
 										toast(player, "升级成功！")
+										print("🟢 [升级成功] 当前等级: " .. tostring(upLevel + 1))
 										DataDirtyService.MarkDirty(player)
 									else
 										toast(player, "金币不足！")
+										print("🟡 [升级失败] 金币不足。所需: " .. tostring(upgradeCost))
 									end
 								end)
 							end
