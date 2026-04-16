@@ -526,6 +526,23 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 				end
 			end)
 		end
+		--
+		local firstTool: Tool? = nil
+		for _, c in ipairs(carried) do
+			local tool = createMonsterToolFromData(
+				c.MonsterLevel,
+				c.Value,
+				c.GoldPerSec,
+				""
+				-- 你需要去 createMonsterToolFromData 里增加一个 upgradeLevel 参数来接收它，或者直接在这里 SetAttribute
+			)
+			tool:SetAttribute("UpgradeLevel", (c :: any).UpgradeLevel or 1)
+			tool:SetAttribute("BaseValue", c.Value / ((c :: any).UpgradeLevel or 1))
+			tool:SetAttribute("BaseGoldPerSec", c.GoldPerSec / ((c :: any).UpgradeLevel or 1))
+			
+			tool.Parent = backpack
+			if not firstTool then firstTool = tool end
+		end
 	end
 
 	pushToast(player, string.format("已收起并放入工具栏：%d 只", moved))
@@ -643,13 +660,14 @@ function InventoryService.PickupCarryMonster(player: Player, level: number, valu
 	end
 
 	table.insert(list, {
-		MonsterLevel = monsterLevel,
+		MonsterLevel = level, -- 【修复】变量名纠正
 		Value = value,
-		GoldPerSec = goldPerSec,
+		GoldPerSec = gps,     -- 【修复】变量名纠正
+		UpgradeLevel = upgradeLevel or 1, -- 【新增】继承强化等级
 	})
 
 	rebuildCarriedVisual(player)
-	pushToast(player, string.format("已拾取：怪Lv%d（携带 %d/%d）", monsterLevel, #list, maxCarry))
+	pushToast(player, string.format("已拾取：怪Lv%d（携带 %d/%d）", level, #list, maxCarry))
 	return true
 end
 

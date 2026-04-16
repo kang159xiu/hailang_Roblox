@@ -40,42 +40,7 @@ end
 -- 假设 monsterInstance 是站在上面的怪物模型
 -- 假设 player 是放置这个怪物的玩家
 
-local displayModel = ReplicatedStorage.Templates:WaitForChild("收益显示"):Clone()
-displayModel:PivotTo(collectorPart.CFrame)
-displayModel.Parent = workspace -- 放入场景
 
-local clickPart = displayModel:FindFirstChild("点击升级")
-local clickDetector = clickPart and clickPart:FindFirstChild("ClickDetector")
-
--- 刷新显示面板的函数
-local function refreshUpgradeUI()
-	local upLevel = monsterInstance:GetAttribute("UpgradeLevel") or 1
-	local baseGps = monsterInstance:GetAttribute("BaseGoldPerSec") or monsterInstance:GetAttribute("GoldPerSec")
-	
-	-- 核心公式：所需金币 = 当前等级 * 10 * 基础产出
-	local upgradeCost = upLevel * 10 * baseGps
-	
-	local bg = clickPart.SurfaceGui:FindFirstChild("升级背景")
-	if bg then
-		bg["升级所需金币"].Text = formatMoney(upgradeCost)
-		bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
-	end
-	
-	-- 刷新怪物头顶的产出与价值
-	local currentGps = upLevel * baseGps
-	local baseValue = monsterInstance:GetAttribute("BaseValue") or monsterInstance:GetAttribute("Value")
-	monsterInstance:SetAttribute("GoldPerSec", currentGps)
-	monsterInstance:SetAttribute("Value", baseValue * upLevel)
-	
-	-- 如果你有更新 Billboard 的函数，在这里调用
-	-- MonsterService.UpdateBillboard(monsterInstance)
-end
-
--- 初次放置时，必须记录它的 Base 值（防止每次升级在乘法上利滚利）
-if not monsterInstance:GetAttribute("BaseGoldPerSec") then
-	monsterInstance:SetAttribute("BaseGoldPerSec", monsterInstance:GetAttribute("GoldPerSec"))
-	monsterInstance:SetAttribute("BaseValue", monsterInstance:GetAttribute("Value"))
-end
 -- 初始化UI
 refreshUpgradeUI()
 
@@ -409,35 +374,33 @@ local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collec
 	return clone
 end
 
--- 这个函数用于按当前放置怪数据刷新某个槽位对应的收益显示内容。
+
+-- 这个函数用于按当前放置怪数据刷新某个槽位对应的实体收益显示内容。
 local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
-	local gui = ensureIncomeDisplayGui(player, slotPart, collectorPart)
-	if not gui then
-		return
-	end
+	if not collectorPart then return end
+	
+	local displayModel = collectorPart:FindFirstChild("收益显示")
+	if not displayModel then return end
 
-	setIncomeDisplayVisibility(gui, isSlotCurrentlyVisible(slotPart))
-	if not isSlotCurrentlyVisible(slotPart) then
-		return
-	end
-
+	local clickPart = displayModel:FindFirstChild("点击升级")
+	local bg = clickPart and clickPart:FindFirstChild("SurfaceGui") and clickPart.SurfaceGui:FindFirstChild("升级背景")
+	
 	if not placed or placed.Parent == nil then
-		setIncomeDisplayText(gui, nil, nil, nil, nil)
+		if bg then
+			bg["升级所需金币"].Text = "未放置"
+			bg["当前等级→下一等级"].Text = ""
+		end
 		return
 	end
 
-	local lvl = tonumber(placed:GetAttribute("MonsterLevel"))
-	local gps = tonumber(placed:GetAttribute("GoldPerSec"))
-	local un = tonumber(placed:GetAttribute("UnclaimedGold"))
-	local v = tonumber(placed:GetAttribute("Value"))
+	local upLevel = placed:GetAttribute("UpgradeLevel") or 1
+	local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
+	local upgradeCost = upLevel * 10 * baseGps
 
-	setIncomeDisplayText(
-		gui,
-		type(lvl) == "number" and math.floor(lvl) or nil,
-		type(gps) == "number" and math.floor(gps) or 0,
-		type(un) == "number" and math.floor(un) or 0,
-		type(v) == "number" and math.floor(v) or 0
-	)
+	if bg then
+		bg["升级所需金币"].Text = formatMoney(upgradeCost)
+		bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
+	end
 end
 
 -- 这个函数用于向客户端发送一条简短提示文本。
@@ -1392,6 +1355,11 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	local v = equipped:GetAttribute("Value")
 	local gps = equipped:GetAttribute("GoldPerSec")
 
+	-- 【新增】获取 Tool 上可能存在的强化属性
+	local upLevel = equipped:GetAttribute("UpgradeLevel") or 1
+	local baseV = equipped:GetAttribute("BaseValue") or v
+	local baseGps = equipped:GetAttribute("BaseGoldPerSec") or gps
+
 	local placed = createPlacedMonsterPart(
 		player,
 		slotPart,
@@ -1399,6 +1367,13 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		type(v) == "number" and v or 0,
 		type(gps) == "number" and gps or 0
 	)
+
+	-- 【新增】将强化属性继承给放置到地上的怪
+	if placed then
+		placed:SetAttribute("UpgradeLevel", upLevel)
+		placed:SetAttribute("BaseValue", baseV)
+		placed:SetAttribute("BaseGoldPerSec", baseGps)
+	end
 
 	-- 放置后立即刷新收益显示牌子
 	local home = HomeService.GetHome(player)
@@ -1419,11 +1394,14 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		GoldPerSec = type(gps) == "number" and gps or 0,
 		UnclaimedGold = 0,
 		LastTickUnix = os.time(),
+		-- 【新增】把强化等级也写进存档数据里，保证下线不丢
+		UpgradeLevel = upLevel, 
 	}
+	
 	equipped:Destroy()
 	DataDirtyService.MarkDirty(player, 5)
 	toast(player, string.format("已放置怪到区域%d", idx))
-end
+	
 
 -- 这个函数用于在玩家触碰 Collector 时领取该槽位已积累的金币。
 local function payoutIfAny(player: Player, slotPart: BasePart)
@@ -1620,10 +1598,56 @@ function PlacementService.Init()
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 收益显示牌子：一开始就存在
-				ensureIncomeDisplayGui(player, slot.Part, slot.Collector)
+				-- 【修改内容】为每个槽位生成实体“收益显示”模型，并绑定升级逻辑
+				if slot.Collector then
+					local displayModel = slot.Collector:FindFirstChild("收益显示")
+					if not displayModel then
+						local template = ReplicatedStorage.Templates:FindFirstChild("收益显示")
+						if template then
+							displayModel = template:Clone()
+							displayModel:PivotTo(slot.Collector.CFrame)
+							displayModel.Parent = slot.Collector
+							
+							-- 绑定升级逻辑
+							local clickPart = displayModel:FindFirstChild("点击升级")
+							local clickDetector = clickPart and clickPart:FindFirstChild("ClickDetector")
+							if clickDetector then
+								clickDetector.MouseClick:Connect(function(playerWhoClicked)
+									if playerWhoClicked ~= player then return end
+									
+									local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
+									if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then return end
+									
+									local pm = state.PlacedMonster
+									local upLevel = pm:GetAttribute("UpgradeLevel") or 1
+									local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec")
+									local upgradeCost = upLevel * 10 * baseGps
+									
+									-- 调用扣钱
+									if PlayerData.TrySpendGold(player, upgradeCost) then
+										pm:SetAttribute("UpgradeLevel", upLevel + 1)
+										
+										local newGps = (upLevel + 1) * baseGps
+										local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
+										pm:SetAttribute("GoldPerSec", newGps)
+										pm:SetAttribute("Value", baseValue * (upLevel + 1))
+										
+										-- 刷新头顶UI与底座UI
+										setPlacedMonsterHeadBillboardText(pm)
+										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
+										toast(player, "升级成功！")
+										DataDirtyService.MarkDirty(player)
+									else
+										toast(player, "金币不足！")
+									end
+								end)
+							end
+						end
+					end
+				end
 
 				slot.Part.Touched:Connect(function(hit)
+
 						-- Block interactions before data is loaded
 						if player:GetAttribute("__DataLoaded") ~= true then
 							return

@@ -306,16 +306,20 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	local level = monsterPart:GetAttribute("MonsterLevel")
 	local value = monsterPart:GetAttribute("Value")
 	local gps = monsterPart:GetAttribute("GoldPerSec")
+	-- 【新增】读取强化等级
+	local upLevel = monsterPart:GetAttribute("UpgradeLevel") or 1 
 
+	-- 【新增】在调用 PickupCarryMonster 时，把 upLevel 传进去
 	local ok = InventoryService.PickupCarryMonster(
 		player,
 		type(level) == "number" and level or 1,
 		type(value) == "number" and value or 0,
-		type(gps) == "number" and gps or 0
+		type(gps) == "number" and gps or 0,
+		upLevel 
 	)
 
 	if ok then
-		-- [修改内容] 拾取成功，触发该区域的守护者警报！
+		-- 拾取成功，触发该区域的守护者警报！
 		local zoneKey = monsterPart:GetAttribute("ZoneKey")
 		if type(zoneKey) == "string" then
 			local zoneInfo = pickupZonesByKey[zoneKey]
@@ -854,8 +858,12 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 end
 
 -- [新增] 爆装备接口：在指定坐标散落一只立刻死亡的怪物尸体
-function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string)
+function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number)	
 	local template = getMonsterTemplate(level)
+	if not template then return end
+
+	local clone, p = prepareMonsterTemplateClone(template)
+	if not clone or not p then return end
 	if not template then return end
 
 	local clone, p = prepareMonsterTemplateClone(template)
@@ -878,6 +886,11 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	p:SetAttribute("ExpireUnix", os.time() + Config.MONSTER_LIFETIME_SECONDS)
 	p:SetAttribute("Dead", false)
 	p:SetAttribute("Collected", false)
+	p:SetAttribute("IsMonster", true)
+	p:SetAttribute("ZoneKey", zoneKey)
+	p:SetAttribute("ZoneLevel", 1) 
+	p:SetAttribute("MonsterLevel", level)
+	p:SetAttribute("UpgradeLevel", upgradeLevel or 1) -- 【新增】保存强化等级
 
 	clone:SetAttribute("IsMonster", true)
 	clone:SetAttribute("Dead", false)
