@@ -127,6 +127,10 @@ WeaponService.Init()
 --  启动守护者系统的全局初始化（生成待机的守护者并开启追踪循环）
 GuardianService.Init()
 
+
+
+
+
 -- 客户端背包 UI：拿出一只怪到 Tool 栏
 
 takeOutRemote.OnServerEvent:Connect(function(player: Player, itemId: any)

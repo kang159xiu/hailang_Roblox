@@ -632,7 +632,7 @@ function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number
 end
 
 -- 刷怪区域拾取：进入携带态（头顶显示），不进入背包 UI
-function InventoryService.PickupCarryMonster(player: Player, monsterLevel: number, value: number, goldPerSec: number): boolean
+function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number)
 	local stats = PlayerData.Get(player)
 	local maxCarry = Config.GetCarryMax(stats.CarryLevel)
 

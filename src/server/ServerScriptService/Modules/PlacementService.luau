@@ -23,6 +23,87 @@ local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 
 local PlacementService = {}
 
+
+------------------------
+-- 金币单位换算函数
+local function formatMoney(amount: number): string
+	if amount < 10000 then
+		return tostring(math.floor(amount))
+	else
+		-- 保留一位小数，如 15000 变成 1.5w
+		return string.format("%.1fw", amount / 10000) 
+	end
+end
+
+
+-- 假设 displayModel 是你克隆出来的“收益显示”模型
+-- 假设 monsterInstance 是站在上面的怪物模型
+-- 假设 player 是放置这个怪物的玩家
+
+local displayModel = ReplicatedStorage.Templates:WaitForChild("收益显示"):Clone()
+displayModel:PivotTo(collectorPart.CFrame)
+displayModel.Parent = workspace -- 放入场景
+
+local clickPart = displayModel:FindFirstChild("点击升级")
+local clickDetector = clickPart and clickPart:FindFirstChild("ClickDetector")
+
+-- 刷新显示面板的函数
+local function refreshUpgradeUI()
+	local upLevel = monsterInstance:GetAttribute("UpgradeLevel") or 1
+	local baseGps = monsterInstance:GetAttribute("BaseGoldPerSec") or monsterInstance:GetAttribute("GoldPerSec")
+	
+	-- 核心公式：所需金币 = 当前等级 * 10 * 基础产出
+	local upgradeCost = upLevel * 10 * baseGps
+	
+	local bg = clickPart.SurfaceGui:FindFirstChild("升级背景")
+	if bg then
+		bg["升级所需金币"].Text = formatMoney(upgradeCost)
+		bg["当前等级→下一等级"].Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1)
+	end
+	
+	-- 刷新怪物头顶的产出与价值
+	local currentGps = upLevel * baseGps
+	local baseValue = monsterInstance:GetAttribute("BaseValue") or monsterInstance:GetAttribute("Value")
+	monsterInstance:SetAttribute("GoldPerSec", currentGps)
+	monsterInstance:SetAttribute("Value", baseValue * upLevel)
+	
+	-- 如果你有更新 Billboard 的函数，在这里调用
+	-- MonsterService.UpdateBillboard(monsterInstance)
+end
+
+-- 初次放置时，必须记录它的 Base 值（防止每次升级在乘法上利滚利）
+if not monsterInstance:GetAttribute("BaseGoldPerSec") then
+	monsterInstance:SetAttribute("BaseGoldPerSec", monsterInstance:GetAttribute("GoldPerSec"))
+	monsterInstance:SetAttribute("BaseValue", monsterInstance:GetAttribute("Value"))
+end
+-- 初始化UI
+refreshUpgradeUI()
+
+-- 监听点击升级 (服务端进行资产校验)
+clickDetector.MouseClick:Connect(function(playerWhoClicked)
+	-- 防止别人点你的升级
+	if playerWhoClicked ~= player then return end
+	
+	local upLevel = monsterInstance:GetAttribute("UpgradeLevel") or 1
+	local baseGps = monsterInstance:GetAttribute("BaseGoldPerSec")
+	local upgradeCost = upLevel * 10 * baseGps
+	
+	-- 【重点】这里调用你系统里扣除玩家金币的函数
+	-- local success = PlayerData.DeductMoney(player, upgradeCost)
+	local success = true -- 假设扣钱成功
+	
+	if success then
+		-- 升级成功，强化等级 + 1
+		monsterInstance:SetAttribute("UpgradeLevel", upLevel + 1)
+		-- 刷新面板与产出
+		refreshUpgradeUI()
+	else
+		-- 钱不够，可以调用你之前的 pushToast 提示玩家
+		-- pushToast(player, "金币不足！")
+	end
+end)
+-----------
+
 export type PersistedPlacedMonster = {
 	MonsterLevel: number,
 	Value: number,
