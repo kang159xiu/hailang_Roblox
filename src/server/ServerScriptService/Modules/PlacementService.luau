@@ -343,45 +343,35 @@ local function ensureIncomeDisplayGui(player: Player, slotPart: BasePart, collec
 end
 
 
-	-- 这个函数用于按当前放置怪数据刷新某个槽位对应的实体收益显示内容。
-	local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
+-- 这个函数用于按当前放置怪数据刷新某个槽位对应的实体收益显示内容。
+local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, collectorPart: BasePart?, placed: BasePart?)
 	if not collectorPart then return end
 	
-	-- 1. 获取挂载点
-	local locatorPart = collectorPart:FindFirstChild("收益显示定位", true)
-	local anchorPart = locatorPart or collectorPart
+	-- 递归查找真正的收益显示模型
+	local displayModel = collectorPart:FindFirstChild("收益显示", true)
+	if not displayModel then return end
 	
-	-- 2. 找到生成的收益显示模型
-	local displayModel = anchorPart:FindFirstChild("收益显示")
-	if displayModel then
-		-- [修改内容] 使用递归查找 SurfaceGui，无视其父级 Part 的名字，直接穿透获取
-		local surfaceGui = displayModel:FindFirstChildWhichIsA("SurfaceGui", true)
-		local bg = surfaceGui and surfaceGui:FindFirstChild("升级背景")
-		
-		if bg then
-			-- 获取所有的 TextLabel
-			local costLabel = bg:FindFirstChild("升级所需金币")
-			local levelLabel = bg:FindFirstChild("当前等级→下一等级")
-			local unclaimedLabel = bg:FindFirstChild("03当前未领取收益") or bg:FindFirstChild("当前未领取收益")
+	-- 递归查找所有的核心文字组件，无视层级深度！
+	local costLabel = displayModel:FindFirstChild("升级所需金币", true)
+	local levelLabel = displayModel:FindFirstChild("当前等级→下一等级", true)
+	local unclaimedLabel = displayModel:FindFirstChild("03当前未领取收益", true) or displayModel:FindFirstChild("当前未领取收益", true)
 
-			if not placed or placed.Parent == nil then
-				-- 未放置状态
-				if costLabel then costLabel.Text = "未放置" end
-				if levelLabel then levelLabel.Text = "" end
-				if unclaimedLabel then unclaimedLabel.Text = "0" end
-			else
-				-- 已放置状态，计算金币和等级
-				local upLevel = placed:GetAttribute("UpgradeLevel") or 1
-				local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
-				local upgradeCost = upLevel * 10 * baseGps
-				local unclaimed = math.floor(placed:GetAttribute("UnclaimedGold") or 0)
+	if not placed or placed.Parent == nil then
+		-- 未放置状态
+		if costLabel and costLabel:IsA("TextLabel") then costLabel.Text = "未放置" end
+		if levelLabel and levelLabel:IsA("TextLabel") then levelLabel.Text = "" end
+		if unclaimedLabel and unclaimedLabel:IsA("TextLabel") then unclaimedLabel.Text = "0" end
+	else
+		-- 已放置状态，计算金币和等级
+		local upLevel = placed:GetAttribute("UpgradeLevel") or 1
+		local baseGps = placed:GetAttribute("BaseGoldPerSec") or placed:GetAttribute("GoldPerSec") or 0
+		local upgradeCost = upLevel * 10 * baseGps
+		local unclaimed = math.floor(placed:GetAttribute("UnclaimedGold") or 0)
 
-				-- 安全填入数据（确保数字实时跳动）
-				if costLabel then costLabel.Text = formatMoney(upgradeCost) end
-				if levelLabel then levelLabel.Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1) end
-				if unclaimedLabel then unclaimedLabel.Text = tostring(unclaimed) end
-			end
-		end
+		-- 安全填入跳动的数据
+		if costLabel and costLabel:IsA("TextLabel") then costLabel.Text = formatMoney(upgradeCost) end
+		if levelLabel and levelLabel:IsA("TextLabel") then levelLabel.Text = string.format("LV.%d▶LV.%d", upLevel, upLevel + 1) end
+		if unclaimedLabel and unclaimedLabel:IsA("TextLabel") then unclaimedLabel.Text = tostring(unclaimed) end
 	end
 end
 
@@ -1579,82 +1569,105 @@ function PlacementService.Init()
 
 			-- [诊断] 检查 home 对象是否完整
 			print(string.format("[PlacementDebug] 玩家 %s 的家园已就绪，共有 %d 个槽位", player.Name, #home.Slots))
-
+			------------------
 			for _, slot in ipairs(home.Slots) do
 				ensureUnlockPrompt(player, slot.Part)
 				updateUnlockPromptEnabled(player, slot.Part)
 
-				-- 【修改内容】为每个槽位生成实体“收益显示”模型，适配新的 Workspace 路径并修复点击绑定
+				-- 1. 生成并挂载“收益显示”面板（增强搜索版） -------------------------
 				if slot.Collector then
-					local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
-					local anchorPart = locatorPart or slot.Collector
+					local displayModel = slot.Collector:FindFirstChild("收益显示", true)
 					
-					local displayModel = anchorPart:FindFirstChild("收益显示")
 					if not displayModel then
-						-- [修改内容] 适配你指定的新路径: Workspace.区域.Templates.收益显示
-						local regionFolder = Workspace:FindFirstChild("区域")
-						local templatesFolder = regionFolder and regionFolder:FindFirstChild("Templates")
-						local template = templatesFolder and templatesFolder:FindFirstChild("收益显示")
+						-- 自动在 Workspace 或 ReplicatedStorage 搜索模板
+						local template = Workspace:FindFirstChild("收益显示", true) or ReplicatedStorage:FindFirstChild("收益显示", true)
 						
-						if template then
-							local clone = template:Clone()
-							if not clone.PrimaryPart then
-								clone.PrimaryPart = clone:FindFirstChildWhichIsA("BasePart", true)
+						if template and template:IsA("Model") then
+							displayModel = template:Clone()
+							-- 寻找定位点，没有则用 Collector 中心
+							local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
+							local anchorCFrame = locatorPart and locatorPart.CFrame or slot.Collector.CFrame
+							
+							if not displayModel.PrimaryPart then
+								displayModel.PrimaryPart = displayModel:FindFirstChildWhichIsA("BasePart", true)
 							end
 							
-							clone:PivotTo(anchorPart.CFrame)
-							clone.Parent = anchorPart
-							displayModel = clone
-						else
-							warn(string.format("[PlacementError] 无法在 Workspace.区域.Templates 中找到模板，槽位 %d 无法生成！", slot.Index))
+							if displayModel.PrimaryPart then
+								displayModel:PivotTo(anchorCFrame)
+							end
+							displayModel.Parent = slot.Collector
 						end
 					end
 
-					-- 绑定点击逻辑
+					-- 2. 绑定点击升级事件（包含自动补全检测器） -------------------------
 					if displayModel then
-						-- [修改内容] 递归查找点击升级 Part，并检测 ClickDetector
-						local clickPart = displayModel:FindFirstChild("点击升级", true)
-						local clickDetector = clickPart and clickPart:FindFirstChildWhichIsA("ClickDetector")
-						
-						if not clickDetector then
-							-- 极其重要！如果缺少点击探测器，代码会在此报警！
-							warn(string.format("[UI警告] 槽位 %d 的 '点击升级' 中没有找到 ClickDetector，玩家将无法点击升级！请在 Studio 中手动插入一个 ClickDetector。", slot.Index))
-						elseif not clickDetector:GetAttribute("IsBound") then
-							clickDetector:SetAttribute("IsBound", true)
-							clickDetector.MouseClick:Connect(function(playerWhoClicked)
-								if playerWhoClicked ~= player then return end
-								
-								local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
-								-- 防呆判定：如果没有放怪，点升级没反应
-								if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
-									toast(player, "请先放置怪物再升级！")
-									return 
-								end
-								
-								local pm = state.PlacedMonster
-								local upLevel = pm:GetAttribute("UpgradeLevel") or 1
-								local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec") or 0
-								local upgradeCost = upLevel * 10 * baseGps
-								
-								-- 尝试扣除金币并升级
-								if PlayerData.TrySpendGold(player, upgradeCost) then
-									pm:SetAttribute("UpgradeLevel", upLevel + 1)
+						local clickPart = displayModel:FindFirstChild("点击升级", true) or displayModel.PrimaryPart
+						if clickPart then
+							local clickDetector = clickPart:FindFirstChildWhichIsA("ClickDetector")
+							-- 如果模型里没有检测器，代码为你【自动生成】一个
+							if not clickDetector then
+								clickDetector = Instance.new("ClickDetector")
+								clickDetector.MaxActivationDistance = 32
+								clickDetector.Parent = clickPart
+							end
+
+							if not clickDetector:GetAttribute("IsBound") then
+								clickDetector:SetAttribute("IsBound", true)
+								clickDetector.MouseClick:Connect(function(playerWhoClicked)
+									if playerWhoClicked ~= player then return end
 									
-									local newGps = (upLevel + 1) * baseGps
-									local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
-									pm:SetAttribute("GoldPerSec", newGps)
-									pm:SetAttribute("Value", baseValue * (upLevel + 1))
+									local state = slotStatesByUserId[player.UserId] and slotStatesByUserId[player.UserId][slot.Index]
+									if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
+										toast(player, "请先放置怪物再升级！")
+										return 
+									end
 									
-									setPlacedMonsterHeadBillboardText(pm)
-									refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
-									toast(player, "升级成功！")
-									DataDirtyService.MarkDirty(player)
-								else
-									toast(player, "金币不足！")
-								end
-							end)
+									local pm = state.PlacedMonster
+									local upLevel = pm:GetAttribute("UpgradeLevel") or 1
+									local baseGps = pm:GetAttribute("BaseGoldPerSec") or pm:GetAttribute("GoldPerSec") or 0
+									local upgradeCost = upLevel * 10 * baseGps
+									
+									if PlayerData.TrySpendGold(player, upgradeCost) then
+										pm:SetAttribute("UpgradeLevel", upLevel + 1)
+										local newGps = (upLevel + 1) * baseGps
+										local baseValue = pm:GetAttribute("BaseValue") or pm:GetAttribute("Value")
+										pm:SetAttribute("GoldPerSec", newGps)
+										pm:SetAttribute("Value", baseValue * (upLevel + 1))
+										
+										setPlacedMonsterHeadBillboardText(pm)
+										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
+										toast(player, "升级成功！")
+										DataDirtyService.MarkDirty(player)
+									else
+										toast(player, "金币不足！")
+									end
+								end)
+							end
 						end
 					end
+				end
+
+				-- 3. 终极收钱与放置逻辑（解决踩不中 Collector 的问题） --------
+				local function handleSlotTouch(hit)
+					if player:GetAttribute("__DataLoaded") ~= true then return end
+					local character = player.Character
+					if not character or not hit:IsDescendantOf(character) then return end
+
+					local idx = slot.Part:GetAttribute("SlotIndex") or slot.Index
+					local key = string.format("touch_%d_%s", player.UserId, tostring(idx))
+					local now = os.clock()
+					if (lastTouchAt[key] or 0) + 0.35 > now then return end
+					lastTouchAt[key] = now
+
+					-- 走到大方块上同时触发：尝试放置 + 尝试收钱
+					tryPlaceFromEquippedTool(player, slot.Part)
+					payoutIfAny(player, slot.Part)
+				end
+
+				-- 【核心修改】：把收钱触发器绑定到整个地块（slot.Part），而不是那个小小的 Collector
+				slot.Part.Touched:Connect(handleSlotTouch)
+				if slot.Collector then
+					slot.Collector.Touched:Connect(handleSlotTouch)
 				end
 			end
 
