@@ -306,7 +306,7 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	local value = monsterPart:GetAttribute("Value")
 	local gps = monsterPart:GetAttribute("GoldPerSec")
 
-	local ok = InventoryService.PickupCarryMonster(
+local ok = InventoryService.PickupCarryMonster(
 		player,
 		type(level) == "number" and level or 1,
 		type(value) == "number" and value or 0,
@@ -314,6 +314,15 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	)
 
 	if ok then
+		-- [修改内容] 拾取成功，触发该区域的守护者警报！
+		local zoneKey = monsterPart:GetAttribute("ZoneKey")
+		if type(zoneKey) == "string" then
+			local zoneInfo = pickupZonesByKey[zoneKey]
+			if zoneInfo and zoneInfo.Part then
+				GuardianService.TriggerAlert(player, zoneInfo.Part)
+			end
+		end
+
 		aliveMonsters[monsterPart] = nil
 		local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
 		monsterInstance:Destroy()

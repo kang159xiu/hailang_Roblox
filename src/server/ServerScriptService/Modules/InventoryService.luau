@@ -16,6 +16,8 @@ local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChil
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
+-- [新增] 引入 GuardianService
+local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
 
 local InventoryService = {}
 
