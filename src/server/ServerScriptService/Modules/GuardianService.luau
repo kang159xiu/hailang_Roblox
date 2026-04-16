@@ -86,11 +86,11 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	if guardian.State ~= "Track" then return end
 
 	guardian.State = "Attack"
-	guardian.TargetPlayer = nil -- 抓到人后立刻失去目标
+	guardian.TargetPlayer = nil 
 	guardian.AttackTimer = os.clock()
 	playAnim(guardian, "Attack")
 
-	-- 1. 掉落怪物逻辑
+	-- 1. 掉落怪物
 	local droppedItems = InventoryService.DropAllCarried(player)
 	for _, item in ipairs(droppedItems) do
 		local offset = Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
@@ -98,32 +98,41 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
 	end
 
-	-- 2. 物理击飞逻辑优化
+	-- 2. 完美抛物线击飞逻辑
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	
 	if humanoid then
-		-- 开启僵直状态，让玩家暂时失去抓地力
+		-- 强制把玩家的身体状态改为纯物理 (Physics)，这会让它彻底放弃站立抵抗
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 		humanoid.PlatformStand = true
 	end
 	
-	-- 【关键修复】：只计算水平方向的差异 (X 和 Z)，将 Y 设为 0
-	local diff = playerHRP.Position - guardian.RootPart.Position
-	local horizontalDir = Vector3.new(diff.X, 0, diff.Z).Unit
+	-- 【黑科技核心】：把玩家往上强行拉高 2 个 Studs，彻底断开他与地板的物理粘连！
+	playerHRP.CFrame = playerHRP.CFrame + Vector3.new(0, 2, 0)
 	
-	-- 【45度受力】：水平推力等于垂直升力
-	-- 这里的 100 是力度倍率，你可以根据需要调大（例如 120）或调小（例如 80）
-	local pushPower = 100 
+	-- 抹平 Y 轴的高度差，只获取纯粹的水平方向
+	local diff = playerHRP.Position - guardian.RootPart.Position
+	local horizontalDir = Vector3.new(diff.X, 0, diff.Z)
+	if horizontalDir.Magnitude > 0.01 then
+		horizontalDir = horizontalDir.Unit
+	else
+		horizontalDir = Vector3.new(0, 0, 1) -- 容错：如果完全重合则向 Z 轴击飞
+	end
+	
+	-- 赋予 45度角（水平推力 = 垂直升力）的初始爆发速度
+	local pushPower = 80 -- 速度值，如果觉得飞得不够远，可以改到 100 或 120
 	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 	
-	-- 1秒后恢复控制权
+	-- 1秒后在空中或落地时恢复控制权，让玩家重新站起
 	task.delay(1, function()
 		if humanoid then
 			humanoid.PlatformStand = false
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 		end
 	end)
 	
-	print(string.format("[GuardianService] 击飞 %s：斜向上 45 度受力", player.Name))
+	print(string.format("[GuardianService] 击飞 %s：解除地板粘连，执行 45 度完美抛物线", player.Name))
 end
 
 local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneKey: string)
