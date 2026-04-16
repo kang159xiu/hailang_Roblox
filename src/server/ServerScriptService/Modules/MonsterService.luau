@@ -316,11 +316,13 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	)
 
 	if ok then
-		-- [修改内容] 拾取成功，触发该区域的守护者警报！
+		-- [修改内容] 拾取成功，延迟加载 GuardianService 以避免循环依赖报错
 		local zoneKey = monsterPart:GetAttribute("ZoneKey")
 		if type(zoneKey) == "string" then
 			local zoneInfo = pickupZonesByKey[zoneKey]
 			if zoneInfo and zoneInfo.Part then
+				-- 在这里局部引入并触发警报
+				local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
 				GuardianService.TriggerAlert(player, zoneInfo.Part)
 			end
 		end
