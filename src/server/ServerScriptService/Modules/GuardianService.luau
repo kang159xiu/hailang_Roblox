@@ -116,14 +116,23 @@ end
 -- =======================================================
 -- [修改内容] 增加辅助函数：获取玩家当前举起的怪物最高等级
 -- 遍历玩家角色身上的部件，判断是否携带了怪物，如果没携带返回 0
+
 local function getPlayerCarriedMaxLevel(player: Player): number
 	local maxLevel = 0
 	local char = player.Character
 	if char then
 		for _, child in ipairs(char:GetChildren()) do
-			-- 这里假设你的怪物模型带有 IsMonster 或 MonsterLevel 属性
-			if child:GetAttribute("IsMonster") or child:GetAttribute("MonsterLevel") then
-				local lv = child:GetAttribute("MonsterLevel") or 1
+			-- 判断是否是怪物模型（名字带“怪物”或“Monster”，或者有Attribute）
+			if child:GetAttribute("IsMonster") or child:GetAttribute("MonsterLevel") or string.find(child.Name, "怪物") or string.find(child.Name, "Monster") then
+				
+				local lv = child:GetAttribute("MonsterLevel")
+				
+				-- 如果模型身上没有挂载 Attribute，就尝试从名字(如"怪物形象5")中提取数字
+				if type(lv) ~= "number" then
+					local numStr = string.match(child.Name, "%d+")
+					lv = numStr and tonumber(numStr) or 1
+				end
+
 				if lv > maxLevel then
 					maxLevel = lv
 				end
@@ -132,6 +141,7 @@ local function getPlayerCarriedMaxLevel(player: Player): number
 	end
 	return maxLevel
 end
+-- =======================================================
 -- =======================================================
 
 --------------------------------------------------------------------------------
