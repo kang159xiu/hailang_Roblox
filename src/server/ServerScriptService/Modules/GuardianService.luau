@@ -143,6 +143,29 @@ local function getPlayerCarriedMaxLevel(player: Player): number
 end
 -- =======================================================
 -- =======================================================
+-- [修改内容] 新增辅助函数：向下打射线检测玩家脚底是否踩着安全区
+local function isPlayerOnSafeGround(char: Model): boolean
+	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then return false end
+	
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	-- 射线忽略玩家自己的身体
+	params.FilterDescendantsInstances = {char}
+	
+	-- 从玩家中心往下打 20 个单位的射线（即使跳起来也能检测到下方的地面）
+	local result = workspace:Raycast(hrp.Position, Vector3.new(0, -20, 0), params)
+	
+	if result and result.Instance then
+		local hit = result.Instance
+		if CollectionService:HasTag(hit, "di_mian") or CollectionService:HasTag(hit, "ground") or CollectionService:HasTag(hit, "gorund") then
+			return true
+		end
+	end
+	return false
+end
+-- =======================================================
+
 
 --------------------------------------------------------------------------------
 -- 4. 惩罚逻辑：爆怪、击飞并乱翻
@@ -274,23 +297,28 @@ local function onHeartbeat(dt: number)
 			local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if hrp and isPlayerInZone(hrp, g.ZonePart) then
 				
-				-- [修改内容] 检查玩家当前携带的怪物最高等级
 				local carriedLevel = getPlayerCarriedMaxLevel(player)
+				-- [修改内容] 每帧检测该玩家脚底是否是安全区
+				local isSafe = isPlayerOnSafeGround(char)
 				
-				-- [修改内容] 核心跨区追踪逻辑：如果玩家头顶有怪(>0) 且 踏入的区域等级 <= 携带怪的最高等级，守护者自动启动追击
-				if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
-					if g.State == "Idle" or g.State == "Return" then
-						g.TargetPlayer = player
-						g.State = "Track"
-						g.LastPathTime = 0
-						playAnim(g, "Track")
+				-- [修改内容] 只有当玩家【不在安全区】时，守护者才会锁定并追击他
+				if not isSafe then
+					-- 核心跨区追踪逻辑
+					if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
+						if g.State == "Idle" or g.State == "Return" then
+							g.TargetPlayer = player
+							g.State = "Track"
+							g.LastPathTime = 0
+							playAnim(g, "Track")
+						end
 					end
-				end
 
-				local d = (hrp.Position - g.RootPart.Position).Magnitude
-				if d < minDist then
-					minDist = d
-					closestHRP = hrp
+					-- 计算距离锁定目标
+					local d = (hrp.Position - g.RootPart.Position).Magnitude
+					if d < minDist then
+						minDist = d
+						closestHRP = hrp
+					end
 				end
 			end
 		end
@@ -302,10 +330,14 @@ local function onHeartbeat(dt: number)
 				g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
-			local targetHrp = g.TargetPlayer.Character and g.TargetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			local targetChar = g.TargetPlayer.Character
+			local targetHrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart") :: BasePart?
 			
-			-- [修改内容] 实时监测状态：如果玩家不存在，或者玩家头顶已经没有怪了(carriedLevel == 0)，则立刻放弃追踪并返回
-			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 then
+			-- [修改内容] 检测正在被追的人是不是踩进了安全区
+			local isSafe = targetChar and isPlayerOnSafeGround(targetChar)
+
+			-- [修改内容] 如果玩家不存在、头顶怪没了、或者【跑进了安全区(isSafe)】，守护者立刻回头放弃追踪
+			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 or isSafe then
 				g.TargetPlayer = nil
 				g.State = "Return"
 				playAnim(g, "Track")
@@ -379,40 +411,8 @@ function GuardianService.Init()
 	end
 	
 	RunService.Heartbeat:Connect(onHeartbeat)
-
-	Players.PlayerAdded:Connect(function(player)
-		player.CharacterAdded:Connect(function(char)
-			
-			-- [修改内容] 提取触碰地面判定逻辑，兼容多种标签写法 (防止拼写错误)
-			local function onPartTouched(hit)
-				if hit and (CollectionService:HasTag(hit, "di_mian") or CollectionService:HasTag(hit, "ground") or CollectionService:HasTag(hit, "gorund")) then
-					for _, g in pairs(activeGuardians) do
-						if g.State == "Track" and g.TargetPlayer == player then
-							g.TargetPlayer = nil
-							g.State = "Return"
-							playAnim(g, "Track")
-							print(string.format("[Guardian] %s 进入安全区(地面)，追击停止", player.Name))
-						end
-					end
-				end
-			end
-
-			-- [修改内容] Roblox的HRP悬在半空碰不到地，这里改为遍历玩家身上所有的肢体(比如左右脚)绑定触碰事件
-			for _, child in ipairs(char:GetChildren()) do
-				if child:IsA("BasePart") then
-					child.Touched:Connect(onPartTouched)
-				end
-			end
-			
-			-- [修改内容] 兼容 R15 模型延迟加载肢体的情况
-			char.ChildAdded:Connect(function(child)
-				if child:IsA("BasePart") then
-					child.Touched:Connect(onPartTouched)
-				end
-			end)
-			
-		end)
-	end)
+	
+	-- [修改内容] 旧版基于 Touched 事件的检测容易引起状态打架和疯狂打印，已被彻底移除。现在由 onHeartbeat 里的射线(Raycast)负责安全区检测。
 end
 
 return GuardianService
