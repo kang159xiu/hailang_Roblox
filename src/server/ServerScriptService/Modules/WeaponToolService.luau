@@ -19,26 +19,15 @@ local WeaponAppearanceService = require(script.Parent:WaitForChild("WeaponAppear
 
 local WeaponToolService = {}
 
+-- [修改内容] 移除对静态 Config 表的多余 type() 类型校验，改为利用短路求值实现极简获取
 local function getWeaponName(level: number): string
-	local t = (Config :: any).WEAPON_NAME_BY_LEVEL
-	if type(t) == "table" then
-		local v = t[level]
-		if type(v) == "string" and v ~= "" then
-			return v
-		end
-	end
-	return string.format("武器%d", level)
+	local name = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[level]
+	return (name ~= nil and name ~= "") and name or string.format("武器%d", level)
 end
 
 local function getWeaponImageId(level: number): string?
-	local t = (Config :: any).WEAPON_IMAGE_ID_BY_LEVEL
-	if type(t) == "table" then
-		local v = t[level]
-		if type(v) == "string" and v ~= "" then
-			return v
-		end
-	end
-	return nil
+	local img = Config.WEAPON_IMAGE_ID_BY_LEVEL and Config.WEAPON_IMAGE_ID_BY_LEVEL[level]
+	return (img ~= nil and img ~= "") and img or nil
 end
 
 local function getTemplateTool(): Tool?
@@ -60,68 +49,25 @@ local function getTemplateTool(): Tool?
 	return nil
 end
 
-local function syncToolGripFromTemplate(tool: Tool, template: Tool)
-	-- 核心逻辑：直接复制模板 Tool 的 Grip 四元组。
-	-- Roblox 的手持朝向/位置，本质上由以下属性共同决定：
-	-- - GripForward
-	-- - GripRight
-	-- - GripUp
-	-- - GripPos
-	--
-	-- 这样做的目的，是让“玩家手上的武器位置”完全以模板为准。
-	-- 以后你只需要在 Studio 中调整 Workspace.weaponModle 的握持效果，
-	-- 玩家最终拿到的 Tool 就会在下次 Sync 时自动套用同样的参数。
-	tool.GripForward = template.GripForward
-	tool.GripRight = template.GripRight
-	tool.GripUp = template.GripUp
-	tool.GripPos = template.GripPos
-
-	-- RequiresHandle 也同步，确保 Tool 的持握规则和模板一致。
-	tool.RequiresHandle = template.RequiresHandle
-end
-
-local function syncToolHandleFromTemplate(tool: Tool, template: Tool)
-	-- 核心逻辑：不再假设 Handle 是固定的 1x1x1 默认 Part，
-	-- 而是直接克隆模板里的 Handle。
-	--
-	-- 这样可以保留你模板中 Handle 的：
-	-- 1) 尺寸
-	-- 2) CFrame / 朝向基准
-	-- 3) 子物件结构（例如 TouchInterest、rootpart）
-	--
-	-- 这正是“以后改模板，玩家手持位置也会跟着改”的关键。
-	local templateHandle = template:FindFirstChild("Handle")
-	if not templateHandle or not templateHandle:IsA("BasePart") then
-		return
-	end
-
-	local currentHandle = tool:FindFirstChild("Handle")
-	if currentHandle then
-		-- 先删除旧 Handle，避免旧结构残留。
-		-- 否则可能会出现：
-		-- - 老的 rootpart 还在
-		-- - 尺寸/位置没有更新
-		-- - 模板改过后玩家 Tool 仍沿用旧 Handle
-		currentHandle:Destroy()
-	end
-
-	local clonedHandle = templateHandle:Clone()
-	clonedHandle.Name = "Handle"
-	clonedHandle.Parent = tool
-end
-
+-- [修改内容] 移除过度封装的子函数。Roblox 的 Tool.Grip 是 CFrame，可直接赋值，无需拆开四元组。
 local function syncToolFromTemplate(tool: Tool, template: Tool?)
-	-- 统一同步入口：
-	-- 让玩家 Tool 的“握持参数 + Handle 结构”都跟模板保持一致。
-	--
-	-- 注意：这里不会复制整把模板 Tool 的所有内容，
-	-- 而是只同步“影响手持位置的关键部分”，避免把不必要的脚本/状态一并带过去。
-	if not template then
-		return
-	end
+	if not template then return end
 
-	syncToolGripFromTemplate(tool, template)
-	syncToolHandleFromTemplate(tool, template)
+	-- 1. 同步持握基准
+	tool.Grip = template.Grip
+	tool.RequiresHandle = template.RequiresHandle
+
+	-- 2. 同步 Handle 实体
+	local templateHandle = template:FindFirstChild("Handle")
+	if templateHandle and templateHandle:IsA("BasePart") then
+		local currentHandle = tool:FindFirstChild("Handle")
+		if currentHandle then
+			currentHandle:Destroy()
+		end
+		local clonedHandle = templateHandle:Clone()
+		clonedHandle.Name = "Handle"
+		clonedHandle.Parent = tool
+	end
 end
 
 local function isWeaponTool(inst: Instance): boolean

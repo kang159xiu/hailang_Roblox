@@ -170,11 +170,8 @@ local function skill19(player: Player, hrp: BasePart)
 			if vfx then
 				inst = vfx
 				inst.Parent = workspace
-				if inst:IsA("BasePart") then
-					inst.CFrame = CFrame.new(pos)
-				elseif inst:IsA("Model") then
-					inst:PivotTo(CFrame.new(pos))
-				end
+				-- [修改内容] BasePart 和 Model 原生支持 PivotTo()，删除冗余的类型判定
+				inst:PivotTo(CFrame.new(pos))
 			else
 				local p = Instance.new("Part")
 				p.Anchored = true
@@ -211,11 +208,8 @@ local function skill20(player: Player, hrp: BasePart)
 	if vfxTemplate then
 		inst = vfxTemplate:Clone()
 		inst.Parent = workspace
-		if inst:IsA("BasePart") then
-			inst.CFrame = CFrame.new(pos)
-		elseif inst:IsA("Model") then
-			inst:PivotTo(CFrame.new(pos))
-		end
+		-- [修改内容] 同上，直接使用 PivotTo 即可
+		inst:PivotTo(CFrame.new(pos))
 	else
 		local p = Instance.new("Part")
 		p.Anchored = true

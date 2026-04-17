@@ -1,52 +1,32 @@
 # 千宇宙工作室 (Thousand Universes Studio) AI 协作与开发规范
 
-## 0. 最高优先级工作流：策划主导的逻辑推演 (CRITICAL WORKFLOW)
-在处理任何新需求、功能开发或报错时，你**必须**严格按以下三步执行，严禁越过逻辑确认直接输出大段代码：
+## 0. 核心 AI 行为准则 (Karpathy Guidelines)
+* **编码前先思考**：不要做无端假设。如果需求有歧义或有多种实现方式，必须先向用户明确。
+* **保持最简**：只编写满足当前需求的最少代码，拒绝过度封装和未要求的“面向未来”的功能。
+* **精确的局部修改**：只修改目标代码，绝不顺手重构无关代码或随意更改现有格式。
+* **目标导向**：每一个修改都必须有明确的验证标准。
 
-1. **第一步：拆解逻辑 (Analyze)**：接收到需求后，**只允许**用中文列出实现该功能的“逻辑步骤”和“条件判断”。此时绝不输出最终代码。
-2. **第二步：策划对齐 (Align)**：等待用户（以策划身份）审视你给出的中文逻辑。针对用户发现的问题，必须配合探讨、修改，直到整个逻辑闭环完全通顺且被确认。
-3. **第三步：代码翻译 (Execute)**：**只有**在逻辑被完全确认无误后（如用户明确回复“可以”、“写代码吧”），你才能将这些步骤翻译成可运行的 Luau 代码，并且**强制要求逐行（或在每处条件判断/逻辑节点上方）添加简明的中文注释**。
+## 1. 最高优先级工作流：策划主导的逻辑推演 (CRITICAL WORKFLOW)
+在处理任何新需求、功能开发或报错时，**必须**严格按以下三步执行，严禁越过逻辑确认直接输出大段代码：
+1.  **拆解逻辑 (Analyze)**：接收到需求后，**只允许**用中文列出实现该功能的“逻辑步骤”和“条件判断”。此时绝不输出最终代码。
+2.  **策划对齐 (Align)**：等待用户确认给出的中文逻辑。探讨并修改，直到逻辑闭环完全通顺。
+3.  **代码翻译 (Execute)**：逻辑确认无误后（如用户回复“写代码吧”），再将其翻译成 Luau 代码，并强制逐行（或在逻辑节点上方）添加简明的中文注释。
 
-## 1. 核心操作界限 (Operational Boundaries)
-* **VSCode 脚本文件权限 (完全授权)**：你**拥有完全权限**在 VSCode 工作区内读取、**自由创建新脚本文件**以及修改现有的源码文件（`.luau` / `.json`）。
-* **Roblox Studio 脚本禁区 (绝对禁止)**：**绝对禁止**尝试直接修改 Roblox Studio 编辑器内部的脚本，也禁止要求用户去 Studio 里手动写代码。所有代码工作必须且只能在 VSCode 端完成。
-* **场景元件界限**：你**可以且被允许**直接操作 Roblox Studio 的编辑器环境。针对 3D 场景或 UI 的搭建，可以直接在编辑界面执行物理操作（创建、移动、修改 Part/Model/GUI 等），不要把所有场景搭建都写成运行时的生成代码。
-* **禁止本地运行**：**绝对禁止**在终端使用 `lua` / `luau` / `node` 尝试运行脚本。Roblox 代码无本地环境，强行运行会报 `Unknown global` 错误。你只负责逻辑推演和文件读写。
+## 2. 核心操作界限 (Operational Boundaries)
+* **代码修改 (VS Code)**：拥有完全权限在 VS Code 工作区内读取、创建和修改本地源码文件（`.luau` / `.json`）。
+* **场景操作 (MCP)**：允许使用 MCP 操作 Roblox Studio 里的 Part、属性和对象。不要把基础场景搭建写成运行时的生成代码。
+* **绝对禁区**：
+    * 严禁尝试直接修改 Roblox Studio 编辑器内部的脚本。
+    * 严禁使用 `execute_luau` 工具在 Studio 内直接写入脚本。
+    * 严禁在本地终端使用 `lua`/`luau`/`node` 尝试运行 Roblox 脚本。
 
-## 2. 编码与 API 原则 (Coding Standards)
-* **原生优先**：强制使用 Roblox 原生 API（如 `Instance.new`, `WaitForChild`）和标准的 Luau 语法。
-* **严格类型**：所有新建脚本顶部**必须**包含 `--!strict`，并在代码中保留清晰的类型推断。
+## 3. 编码与 API 原则 (Coding Standards)
+* **原生优先**：强制使用 Roblox 原生 API（如 `Instance.new`, `WaitForChild`）。
+* **严格类型**：新建脚本顶部**必须**包含 `--!strict`，保留清晰的类型推断。
 * **注释规范**：
-  - 必须提供精确、精简的中文注释，**绝不啰嗦废话**。
-  - **函数注释**：在每个函数定义的正上方，**必须**添加一句话说明，解释该函数的核心功能与返回值。
-    - *示例*：
-      ```lua
-      -- 判断是否装备 返回布尔值
-      local function isEquipped(): boolean
-      ```
-  - **逐行/逻辑节点注释**：在输出最终代码时，根据第一步确认的“逻辑步骤”，强制在代码中逐行（或在关键 API/判断语句上方）添加对应注释。
-  - *代码块综合示例*：
-    ```lua
-    -- 判断是否达到生成上限 返回布尔值
-    local function canSpawn(): boolean
-        -- 步骤1：判断当前怪物数量
-        if currentEnemies < maxEnemies then
-            -- 步骤2：创建怪物模型实例
-            local monster = Instance.new("Model")
-            monster.Parent = workspace
-            return true
-        end
-        return false
-    end
-    ```
+    * **函数注释**：函数定义正上方必须有一句话说明其核心功能与返回值（例：`-- 判断是否装备 返回布尔值`）。
+    * **步骤注释**：代码内必须根据第一步确认的“逻辑步骤”添加对应注释（例：`-- 步骤1：判断当前怪物数量`）。绝不啰嗦废话。
 
-## 3. 架构规范 (Architecture Patterns)
-
-### 服务端 (Server) - 单例服务架构
-* **入口**：统一为 `src/server/ServerScriptService/Server.server.luau`。
-* **模块化**：业务逻辑存放在 `src/server/ServerScriptService/Modules/` 下，拆分为独立的 ModuleScript，返回一个表，由入口文件调用其 `.Init()` 方法。
-* **网络通信**：服务端不在 Studio 预设 Remotes。必须在代码中动态检测并创建 `ReplicatedStorage.Remotes` 下的 `RemoteEvent`。
-
-### 客户端 (Client) - 单体核心脚本
-* **入口与核心**：逻辑高度集中在 `src/client/StarterPlayerScripts/Client.client.luau`。
-* **数据同步**：主要通过监听 `Player:GetAttributeChangedSignal()` 或接收 `RemoteEvent` 来更新客户端状态。
+## 4. 架构规范 (Architecture Patterns)
+* **服务端 (Server)**：单例服务架构。入口统一为 `Server.server.luau`。业务逻辑放在 `Modules/` 下拆分为独立 ModuleScript。必须在代码中动态创建 `ReplicatedStorage.Remotes` 下的通信事件。
+* **客户端 (Client)**：单体核心脚本。入口为 `Client.client.luau`。主要通过监听 `Player:GetAttributeChangedSignal()` 或接收 `RemoteEvent` 同步状态。
