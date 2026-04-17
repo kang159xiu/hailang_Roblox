@@ -18,6 +18,7 @@ For more help, check out [the Rojo documentation](https://rojo.space/docs).
 
 打开终端
 ctrl+`(tab 上方)
+--
 
 启动rojo
 & "C:\Tools\Rojo\rojo.exe" serve
