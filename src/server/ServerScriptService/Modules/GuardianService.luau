@@ -382,21 +382,35 @@ function GuardianService.Init()
 
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function(char)
-			local hrp = char:WaitForChild("HumanoidRootPart", 5)
-			if hrp and hrp:IsA("BasePart") then
-				hrp.Touched:Connect(function(hit)
-					if hit and CollectionService:HasTag(hit, "di_mian") then
-						for _, g in pairs(activeGuardians) do
-							if g.State == "Track" and g.TargetPlayer == player then
-								g.TargetPlayer = nil
-								g.State = "Return"
-								playAnim(g, "Track")
-								print(string.format("[Guardian] %s 进入安全区，追击停止", player.Name))
-							end
+			
+			-- [修改内容] 提取触碰地面判定逻辑，兼容多种标签写法 (防止拼写错误)
+			local function onPartTouched(hit)
+				if hit and (CollectionService:HasTag(hit, "di_mian") or CollectionService:HasTag(hit, "ground") or CollectionService:HasTag(hit, "gorund")) then
+					for _, g in pairs(activeGuardians) do
+						if g.State == "Track" and g.TargetPlayer == player then
+							g.TargetPlayer = nil
+							g.State = "Return"
+							playAnim(g, "Track")
+							print(string.format("[Guardian] %s 进入安全区(地面)，追击停止", player.Name))
 						end
 					end
-				end)
+				end
 			end
+
+			-- [修改内容] Roblox的HRP悬在半空碰不到地，这里改为遍历玩家身上所有的肢体(比如左右脚)绑定触碰事件
+			for _, child in ipairs(char:GetChildren()) do
+				if child:IsA("BasePart") then
+					child.Touched:Connect(onPartTouched)
+				end
+			end
+			
+			-- [修改内容] 兼容 R15 模型延迟加载肢体的情况
+			char.ChildAdded:Connect(function(child)
+				if child:IsA("BasePart") then
+					child.Touched:Connect(onPartTouched)
+				end
+			end)
+			
 		end)
 	end)
 end
