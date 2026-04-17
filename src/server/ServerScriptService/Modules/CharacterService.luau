@@ -12,13 +12,13 @@ local CharacterService = {}
 local function applyStats(player: Player, humanoid: Humanoid, fullHeal: boolean?)
 	local stats = PlayerData.Get(player)
 
-	-- speed
+	-- 设置移动速度: 基础速度 + 速度等级 * 每级增加速度
 	humanoid.WalkSpeed = Config.WALK_SPEED_BASE + stats.SpeedLevel * Config.WALK_SPEED_PER_UPGRADE
 
-	-- health
+	-- 计算最大血量: 基础血量 + 血量等级 * 每级增加血量
 	local maxHealth = Config.HEALTH_BASE + stats.HealthLevel * Config.HEALTH_PER_UPGRADE
 	humanoid.MaxHealth = maxHealth
-
+	--如果要求完全恢复血量 (比如重生时)
 	if fullHeal == true then
 		humanoid.Health = maxHealth
 		return

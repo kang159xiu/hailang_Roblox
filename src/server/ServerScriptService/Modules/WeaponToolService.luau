@@ -260,7 +260,9 @@ function WeaponToolService.GrantWeapon(player: Player, weaponLevel: number, equi
 	WeaponToolService.Sync(player, equipNow == true)
 end
 
-function WeaponToolService.Sync(player: Player, forceEquip: boolean?)
+
+function WeaponToolService.Sync(player: Player, forceEquip: boolean?, dontEquip: boolean?)
+	-- [修改内容] 增加 dontEquip 参数，用于控制同步时是否保持收起状态
 	local stats = PlayerData.Get(player)
 	local desiredLevel = stats.EquippedWeaponLevel or stats.WeaponLevel
 
@@ -278,7 +280,7 @@ function WeaponToolService.Sync(player: Player, forceEquip: boolean?)
 	if not backpack or not humanoid then
 		-- Backpack/character may not be ready yet - retry shortly
 		task.delay(0.25, function()
-			WeaponToolService.Sync(player, forceEquip)
+			WeaponToolService.Sync(player, forceEquip, dontEquip)
 		end)
 		return
 	end
@@ -289,9 +291,18 @@ function WeaponToolService.Sync(player: Player, forceEquip: boolean?)
 		-- If player already holds a weapon tool, don't forcibly swap it.
 		for _, ch in ipairs(character:GetChildren()) do
 			if isWeaponTool(ch) then
+				-- [修改内容] 如果明确要求不装备且玩家正拿着武器，则强制收起
+				if dontEquip then
+					humanoid:UnequipTools()
+				end
 				return
 			end
 		end
+	end
+
+	-- [修改内容] 如果要求不装备（例如开局），则直接返回，不再执行后续的 EquipTool
+	if dontEquip then
+		return
 	end
 
 	for _, ch in ipairs(backpack:GetChildren()) do
@@ -328,6 +339,115 @@ function WeaponToolService.Init()
 	for _, p in ipairs(Players:GetPlayers()) do
 		hookPlayer(p)
 	end
+end
+
+
+
+-- [修改内容] 引入 CollectionService 用于监听场景中的标签 Part
+local CollectionService = game:GetService("CollectionService")
+
+-- [修改内容] 新增方法：主动装备背包中的武器（用于离开 home/碰触 di_mian 时）
+function WeaponToolService.EquipWeapon(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not humanoid or not backpack then return end
+
+	-- 检查是否已经拿在手上，避免重复触发影响性能或打断动画
+	for _, ch in ipairs(character:GetChildren()) do
+		if isWeaponTool(ch) then
+			return
+		end
+	end
+
+	local stats = PlayerData.Get(player)
+	local desiredLevel = stats.EquippedWeaponLevel or stats.WeaponLevel
+
+	for _, ch in ipairs(backpack:GetChildren()) do
+		if isWeaponTool(ch) then
+			local tool = ch :: Tool
+			if getWeaponLevelFromTool(tool) == desiredLevel then
+				humanoid:EquipTool(tool)
+				break
+			end
+		end
+	end
+end
+
+-- [修改内容] 新增方法：主动收起手上的武器（用于进入 home 时）
+function WeaponToolService.UnequipWeapon(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if not humanoid then return end
+
+	local isHolding = false
+	for _, ch in ipairs(character:GetChildren()) do
+		if isWeaponTool(ch) then
+			isHolding = true
+			break
+		end
+	end
+
+	if isHolding then
+		humanoid:UnequipTools()
+	end
+end
+
+function WeaponToolService.Init()
+	local function hookPlayer(player: Player)
+		player.CharacterAdded:Connect(function()
+			-- 等 Backpack 和 StarterPack Tool 下发完成
+			task.delay(0.25, function()
+				ensureSingleWeaponTool(player, PlayerData.Get(player).EquippedWeaponLevel or 1)
+				-- [修改内容] 传入 dontEquip = true，开局工具栏有武器但不自动拿到手上
+				WeaponToolService.Sync(player, false, true)
+			end)
+		end)
+
+		-- 初次进来补一次（有时 CharacterAdded 前 Backpack 已存在）
+		task.delay(0.1, function()
+			ensureSingleWeaponTool(player, PlayerData.Get(player).EquippedWeaponLevel or 1)
+			-- [修改内容] 同上，传入 dontEquip = true
+			WeaponToolService.Sync(player, false, true)
+		end)
+
+		-- 不监听 Backpack.ChildAdded：避免因排序/重入导致报错
+	end
+
+	Players.PlayerAdded:Connect(hookPlayer)
+	for _, p in ipairs(Players:GetPlayers()) do
+		hookPlayer(p)
+	end
+
+	-- [修改内容] 监听玩家碰触 "home" 标签的 Part -> 收起武器
+	local function onHomePartAdded(part)
+		part.Touched:Connect(function(hit)
+			local player = Players:GetPlayerFromCharacter(hit.Parent)
+			if player then
+				WeaponToolService.UnequipWeapon(player)
+			end
+		end)
+	end
+
+	for _, part in ipairs(CollectionService:GetTagged("home")) do
+		onHomePartAdded(part)
+	end
+	CollectionService:GetInstanceAddedSignal("home"):Connect(onHomePartAdded)
+
+	-- 监听玩家碰触 "na_qu_area" 标签的 Part -> 拿起武器
+	local function onDimianPartAdded(part)
+		part.Touched:Connect(function(hit)
+			local player = Players:GetPlayerFromCharacter(hit.Parent)
+			if player then
+				WeaponToolService.EquipWeapon(player)
+			end
+		end)
+	end
+
+	for _, part in ipairs(CollectionService:GetTagged("na_qu_area")) do
+		onDimianPartAdded(part)
+	end
+	CollectionService:GetInstanceAddedSignal("na_qu_area"):Connect(onDimianPartAdded)
 end
 
 return WeaponToolService
