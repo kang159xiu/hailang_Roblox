@@ -67,7 +67,9 @@ local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") ::
 -- 使用 StarterGui.MainUI（场景里已存在），避免重复创建 HUD 导致遮挡。
 local mainGui = player:WaitForChild("PlayerGui"):WaitForChild("MainUI") :: ScreenGui
 
-local goldLabel = mainGui:WaitForChild("GoldLabel") :: TextLabel
+-- [修改内容] 按照新层级，先获取 GoldFrame 容器，再定位内部的 GoldLabel
+local goldFrame = mainGui:WaitForChild("GoldFrame")
+local goldLabel = goldFrame:WaitForChild("GoldLabel") :: TextLabel
 local toast = mainGui:WaitForChild("Toast") :: TextLabel
 
 toast.Visible = false
@@ -149,7 +151,10 @@ local function formatNumberShort(n: number): string
 end
 
 local function refreshGold()
-	goldLabel.Text = string.format("Gold: %s", formatNumberShort(getGold()))
+	-- [修改内容] 更新文本显示方式。如果您的新 UI 已经带了金币图标，
+	-- 这里通常直接显示格式化后的数字即可。
+	-- 如果您仍需要 "Gold: " 前缀，请改回 string.format("Gold: %s", ...)
+	goldLabel.Text = formatNumberShort(getGold())
 end
 
 refreshGold()
