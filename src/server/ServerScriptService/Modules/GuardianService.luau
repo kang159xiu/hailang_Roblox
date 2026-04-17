@@ -106,19 +106,40 @@ end
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
-	
+
 	if (flatTarget - currentPos).Magnitude > 0.1 then
 		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
 		model:PivotTo(targetCFrame)
 	end
 end
 
+-- =======================================================
+-- [修改内容] 增加辅助函数：获取玩家当前举起的怪物最高等级
+-- 遍历玩家角色身上的部件，判断是否携带了怪物，如果没携带返回 0
+local function getPlayerCarriedMaxLevel(player: Player): number
+	local maxLevel = 0
+	local char = player.Character
+	if char then
+		for _, child in ipairs(char:GetChildren()) do
+			-- 这里假设你的怪物模型带有 IsMonster 或 MonsterLevel 属性
+			if child:GetAttribute("IsMonster") or child:GetAttribute("MonsterLevel") then
+				local lv = child:GetAttribute("MonsterLevel") or 1
+				if lv > maxLevel then
+					maxLevel = lv
+				end
+			end
+		end
+	end
+	return maxLevel
+end
+-- =======================================================
+
 --------------------------------------------------------------------------------
 -- 4. 惩罚逻辑：爆怪、击飞并乱翻
 --------------------------------------------------------------------------------
+
 local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	if guardian.State ~= "Track" then return end
-
 	guardian.State = "Attack"
 	guardian.TargetPlayer = nil 
 	guardian.AttackTimer = os.clock()
@@ -242,6 +263,20 @@ local function onHeartbeat(dt: number)
 			local char = player.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if hrp and isPlayerInZone(hrp, g.ZonePart) then
+				
+				-- [修改内容] 检查玩家当前携带的怪物最高等级
+				local carriedLevel = getPlayerCarriedMaxLevel(player)
+				
+				-- [修改内容] 核心跨区追踪逻辑：如果玩家头顶有怪(>0) 且 踏入的区域等级 <= 携带怪的最高等级，守护者自动启动追击
+				if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
+					if g.State == "Idle" or g.State == "Return" then
+						g.TargetPlayer = player
+						g.State = "Track"
+						g.LastPathTime = 0
+						playAnim(g, "Track")
+					end
+				end
+
 				local d = (hrp.Position - g.RootPart.Position).Magnitude
 				if d < minDist then
 					minDist = d
@@ -258,12 +293,15 @@ local function onHeartbeat(dt: number)
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
 			local targetHrp = g.TargetPlayer.Character and g.TargetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if not targetHrp then
+			
+			-- [修改内容] 实时监测状态：如果玩家不存在，或者玩家头顶已经没有怪了(carriedLevel == 0)，则立刻放弃追踪并返回
+			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 then
 				g.TargetPlayer = nil
 				g.State = "Return"
 				playAnim(g, "Track")
 				continue
 			end
+
 			lookAtFlat(g.Model, g.RootPart, targetHrp.Position)
 			
 			-- 寻路移动逻辑
