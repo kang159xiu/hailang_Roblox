@@ -22,6 +22,10 @@ export type PersistedPlacedMonster = {
 	GoldPerSec: number,
 	UnclaimedGold: number,
 	LastTickUnix: number,
+	-- [修改内容] 新增怪物强化升级相关的存档数据结构声明
+	UpgradeLevel: number?,
+	BaseValue: number?,
+	BaseGoldPerSec: number?,
 }
 
 export type PersistedSlot = {

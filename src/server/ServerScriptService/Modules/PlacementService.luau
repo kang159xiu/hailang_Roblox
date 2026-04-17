@@ -45,6 +45,10 @@ export type PersistedPlacedMonster = {
 	GoldPerSec: number,
 	UnclaimedGold: number,
 	LastTickUnix: number,
+	-- [修改内容] 同步新增怪物强化升级相关的存档数据结构声明
+	UpgradeLevel: number?,
+	BaseValue: number?,
+	BaseGoldPerSec: number?,
 }
 
 export type PersistedSlot = {
@@ -1369,8 +1373,10 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		GoldPerSec = type(gps) == "number" and gps or 0,
 		UnclaimedGold = 0,
 		LastTickUnix = os.time(),
-		-- 【新增】把强化等级也写进存档数据里，保证下线不丢
-		UpgradeLevel = upLevel, 
+		-- [修改内容] 确保放置动作发生后，内存态马上同步包含强化在内的所有完整数据，避免未自动保存就下线造成数据丢失
+		UpgradeLevel = upLevel,
+		BaseValue = baseV,
+		BaseGoldPerSec = baseGps,
 	}
 	
 	equipped:Destroy()
@@ -1926,6 +1932,10 @@ function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlo
 					GoldPerSec = math.floor(tonumber((placed :: any).GoldPerSec) or 0),
 					UnclaimedGold = math.floor(tonumber((placed :: any).UnclaimedGold) or 0),
 					LastTickUnix = math.floor(tonumber((placed :: any).LastTickUnix) or os.time()),
+					-- [修改内容] 加载存档时，将强化的等级和基础数值一并读取到运行时数据内存中
+					UpgradeLevel = math.floor(tonumber((placed :: any).UpgradeLevel) or 1),
+					BaseValue = math.floor(tonumber((placed :: any).BaseValue) or tonumber((placed :: any).Value) or 0),
+					BaseGoldPerSec = math.floor(tonumber((placed :: any).BaseGoldPerSec) or tonumber((placed :: any).GoldPerSec) or 0),
 				}
 			end
 		end
