@@ -67,45 +67,13 @@ local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") ::
 -- 使用 StarterGui.MainUI（场景里已存在），避免重复创建 HUD 导致遮挡。
 local mainGui = player:WaitForChild("PlayerGui"):WaitForChild("MainUI") :: ScreenGui
 
--- [修改内容] 使用我们之前商定的新路径寻找 GoldLabel
-local goldFrame = mainGui:WaitForChild("GoldFrame", 5) -- 设置5秒超时防止永久卡死
-local goldLabel = goldFrame and goldFrame:WaitForChild("GoldLabel", 5) :: TextLabel
+-- [修改内容] 极致精简：直接获取金币相关的 UI，不再使用超时检测
+local goldFrame = mainGui:WaitForChild("GoldFrame")
+local goldLabel = goldFrame:WaitForChild("GoldLabel") :: TextLabel
 
--- [修改内容] 为 Toast 增加超时处理，防止因为找不到 Toast 导致整个金币系统崩溃
-local toast = mainGui:WaitForChild("Toast", 2) :: TextLabel -- 如果2秒找不到就跳过
-
--- [修改内容] 增加安全检查，只有在 UI 确实存在时才进行后续操作
-if toast then
-	toast.Visible = false
-else
-	warn("[Client] 未能在 MainUI 下找到 Toast 组件，请检查层级！")
-end
-
-if not goldLabel then
-	warn("[Client] 关键错误：未能在 MainUI.GoldFrame 下找到 GoldLabel，金币显示将失效！")
-end
-
-
-
-local toastToken = 0
+-- [修改内容] 极致精简：彻底移除 Toast UI 相关变量及逻辑，仅保留函数外壳以防报错，将提示静默输出到控制台
 local function showToast(text: string, seconds: number?)
-	-- [修改内容] 增加安全检查。如果找不到 Toast 界面，就改为在控制台打印提示，防止脚本报错
-	if not toast then
-		print("[系统提示]:", text)
-		return
-	end
-	
-	toastToken += 1
-	local token = toastToken
-	toast.Text = text
-	toast.Visible = true
-	local t = seconds or 2
-	task.delay(t, function()
-		if toastToken ~= token then
-			return
-		end
-		toast.Visible = false
-	end)
+	print("[系统提示]:", text)
 end
 
 toastRemote.OnClientEvent:Connect(function(text: string)
