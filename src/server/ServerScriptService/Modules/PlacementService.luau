@@ -1766,7 +1766,8 @@ function PlacementService.Init()
 					if type(un) ~= "number" then
 						un = 0
 					end
-					local newUn = math.min(30000, un + gps)
+					-- [修改内容] 移除了 math.min(30000, ...) 限制，使在线收益不再有上限
+					local newUn = un + gps 
 					local nowUnix = os.time()
 					pm:SetAttribute("UnclaimedGold", newUn)
 					pm:SetAttribute("LastTickUnix", nowUnix)
@@ -1832,7 +1833,8 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 
 			local un = math.floor(tonumber(d.UnclaimedGold) or 0)
 			if gain > 0 then
-				un = math.min(30000, un + gain)
+				-- [修改内容] 移除了 math.min(30000, ...) 限制，使离线收益结算不再有上限
+				un = un + gain 
 				d.UnclaimedGold = un
 				d.LastTickUnix = nowUnix
 				DataDirtyService.MarkDirty(player, 5)
