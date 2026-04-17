@@ -14,6 +14,8 @@ local CharacterService = require(script.Parent:WaitForChild("CharacterService"))
 local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 
 local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
+-- [修改内容] 引入 Util 模块，以便在下方使用 Util.FormatMoney 转化数字
+local Util = require(script.Parent:WaitForChild("Util"))
 
 local MerchantService = {}
 
@@ -140,12 +142,14 @@ function MerchantService.Init()
 			return
 		end
 		if not PlayerData.TrySpendGold(player, price) then
-			pushToast(player, string.format("金币不足，需要 %d", price))
+			-- [修改内容] 使用 Util.FormatMoney 转化价格，并把占位符 %d (数字) 改为 %s (字符串)
+			pushToast(player, string.format("金币不足，需要 %s", Util.FormatMoney(price)))
 			return
 		end
 		WeaponToolService.GrantWeapon(player, nextLevel, true)
 		DataDirtyService.MarkDirty(player, 5)
-		pushToast(player, string.format("购买成功：武器Lv.%d（花费%d）", nextLevel, price))
+		-- [修改内容] 购买成功的提示也同样加上单位转化
+		pushToast(player, string.format("购买成功：武器Lv.%d（花费%s）", nextLevel, Util.FormatMoney(price)))
 	end)
 
 	-- 装备已拥有的武器（从商店 UI 点击）
