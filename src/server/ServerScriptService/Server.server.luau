@@ -155,8 +155,20 @@ takeOutRemote.OnServerEvent:Connect(function(player: Player, itemId: any)
 end)
 
 -- 测试：清空玩家数据（仅 Studio）
+-- [修改内容] 处理玩家清空数据的请求
 clearDataRemote.OnServerEvent:Connect(function(player: Player)
-	DataPersistenceService.ClearPlayerData(player)
+	warn(string.format("玩家 %s 正在清空数据...", player.Name))
+	
+	-- 1. 重置基础属性 (金币、等级等)
+	PlayerData.ResetData(player)
+	
+	-- 2. 清空背包 (怪物道具)
+	InventoryService.Clear(player)
+	
+	-- 3. 这里的逻辑很关键：我们直接 Kick 玩家
+	-- 因为 Kick 会触发 PlayerRemoving，从而触发 DataPersistenceService 的保存逻辑
+	-- 由于我们上面已经执行了 ResetData 和 Clear，保存到数据库的将是“干净”的初始数据
+	player:Kick("\n你的数据已成功清空！\n请重新加入游戏开始新旅程。")
 end)
 
 -- 普通攻击：客户端请求对某个怪造成一次伤害

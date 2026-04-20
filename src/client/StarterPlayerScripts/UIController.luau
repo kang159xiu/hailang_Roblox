@@ -28,6 +28,11 @@ local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") ::
 local monsterInventoryList = monsterInventoryWindow:WaitForChild("List") :: ScrollingFrame
 local rowTemplate = monsterInventoryWindow:WaitForChild("RowTemplate") :: ImageButton
 
+-- [修改内容] 引用删除数据按钮
+local deleteBtn = mainGui:WaitForChild("delete") :: ImageButton
+-- [修改内容] 引用清空数据的远程事件
+local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
+
 -- [修改内容] 新增武器列表、武器模板和选项卡按钮的变量引用
 local weaponList = monsterInventoryWindow:WaitForChild("weaponList") :: ScrollingFrame
 local weaponTemplate = monsterInventoryWindow:WaitForChild("WeaponTemplate") :: GuiObject
@@ -359,6 +364,17 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 		end)
 	end
 
+
+	-- [修改内容] 删除数据按钮逻辑
+	if deleteBtn then
+		deleteBtn.Activated:Connect(function()
+			-- 弹出二次确认弹窗（这里简单用 print，建议你之后加个确认 UI）
+			print("玩家请求清空所有数据")
+			requestClearPlayerData:FireServer()
+		end)
+	end
+
+	
 	-- [修改内容] 监听顶部选项卡按钮点击
 	if monsterTabBtn then
 		monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end)

@@ -726,7 +726,8 @@ local function ensureState(player: Player): {[number]: SlotState}
 	m = {}
 	for i = 1, 30 do
 		m[i] = {
-			Unlocked = (i == 1),
+			--Unlocked = (i == 1),
+			Unlocked = true, -- [修改内容] 默认所有位置直接解锁，不需要购买
 			PlacedMonster = nil,
 			PlacedData = nil,
 		}
@@ -1570,18 +1571,15 @@ function PlacementService.Init()
 				return
 			end
 
-			local function refreshAllUnlockPrompts()
-				for _, slot in ipairs(home.Slots) do
-					updateUnlockPromptEnabled(player, slot.Part)
-				end
-			end
+			-- [修改内容] 移除了 refreshAllUnlockPrompts 函数，不再需要刷新解锁UI
 
 			-- [诊断] 检查 home 对象是否完整
 			print(string.format("[PlacementDebug] 玩家 %s 的家园已就绪，共有 %d 个槽位", player.Name, #home.Slots))
 			------------------
 			for _, slot in ipairs(home.Slots) do
-				ensureUnlockPrompt(player, slot.Part)
-				updateUnlockPromptEnabled(player, slot.Part)
+				-- [修改内容] 移除了购买提示的创建和更新
+				-- ensureUnlockPrompt(player, slot.Part)
+				-- updateUnlockPromptEnabled(player, slot.Part)
 				
 
 
@@ -1710,10 +1708,6 @@ function PlacementService.Init()
 				end
 			end
 
-			-- 家园升级后需要刷新 UnlockPrompt（哪些格子可用/可解锁）
-			player:GetAttributeChangedSignal("HomeLevel"):Connect(function()
-				refreshAllUnlockPrompts()
-			end)
 		end)
 	end
 
@@ -1740,19 +1734,7 @@ function PlacementService.Init()
 		acc += dt
 		unlockAcc += dt
 
-		-- 0.25s 刷新一次解锁提示（只在玩家站在对应地块上方时显示）
-		if unlockAcc >= 0.25 then
-			unlockAcc = 0
-			for _, player in ipairs(Players:GetPlayers()) do
-				local home = HomeService.GetHome(player)
-				if not home then
-					continue
-				end
-				for _, slot in ipairs(home.Slots) do
-					updateUnlockPromptEnabled(player, slot.Part)
-				end
-			end
-		end
+
 
 		if acc < 1.0 then
 			return
@@ -1933,8 +1915,7 @@ function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlo
 
 	for i = 1, 30 do
 		local loaded = (type(loadedSlots) == "table") and loadedSlots[i] or nil
-		local unlocked = if type(loaded) == "table" then ((loaded :: any).Unlocked == true) else (i == 1)
-		states[i].Unlocked = unlocked or (i == 1)
+		states[i].Unlocked = true -- [修改内容] 加载存档时也强制所有位置保持解锁状态
 		states[i].PlacedMonster = nil
 		states[i].PlacedData = nil
 
@@ -1985,19 +1966,6 @@ function PlacementService.TryHandlePromptInteraction(player: Player, promptInsta
 		return false
 	end
 
-	if promptInstance.Name == "UnlockPrompt" then
-		local slotPart = promptParent
-		if promptInstance.Enabled ~= true then
-			print(string.format("[PromptDebug][Placement] reject player=%s prompt=%s reason=prompt_disabled", player.Name, debugInstancePath(promptInstance)))
-			return false
-		end
-
-		local slotIndex = slotPart:GetAttribute("SlotIndex")
-		print(string.format("[PromptDebug][Placement] attempt action=UnlockPrompt player=%s prompt=%s target=%s slotIndex=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(slotPart), tostring(slotIndex)))
-		local ok = tryUnlockSlotFromPrompt(player, slotPart, promptInstance)
-		print(string.format("[PromptDebug][Placement] result action=UnlockPrompt player=%s success=%s", player.Name, tostring(ok)))
-		return ok
-	end
 
 	local placedPart = promptParent
 	if placedPart:GetAttribute("IsPlacedMonster") ~= true then
