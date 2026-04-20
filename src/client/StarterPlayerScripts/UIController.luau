@@ -93,11 +93,98 @@ local function createWindow(titleText: string)
 	return frame
 end
 
+-- =====================
+-- [修改内容] 金币爆点飞行动效逻辑
+-- =====================
+local TweenService = game:GetService("TweenService")
+local rng = Random.new()
+
+local function playGoldFlyingAnimation(increaseAmount: number)
+	local playerGui = player:WaitForChild("PlayerGui")
+	
+	-- 1. 获取用户指定的素材图片
+	local sucaiGui = playerGui:FindFirstChild("sucai")
+	if not sucaiGui then return end
+	local moneyFrame = sucaiGui:FindFirstChild("money_Frame")
+	if not moneyFrame then return end
+	local moneyImageSource = moneyFrame:FindFirstChild("money_image")
+	if not moneyImageSource then return end
+
+	-- 2. 创建一个全局特效容器，保证在屏幕最上层，防止被其他UI裁剪
+	local fxContainer = mainGui:FindFirstChild("FXContainer")
+	if not fxContainer then
+		fxContainer = Instance.new("Frame")
+		fxContainer.Name = "FXContainer"
+		fxContainer.BackgroundTransparency = 1
+		fxContainer.Size = UDim2.fromScale(1, 1)
+		fxContainer.ZIndex = 100 -- 置于顶层
+		fxContainer.Parent = mainGui
+	end
+
+	-- 3. 动态计算生成数量: 基础10个，每多100金币多生成1个，上限20个
+	local count = math.clamp(10 + math.floor(increaseAmount / 100), 10, 20)
+
+	for i = 1, count do
+		task.spawn(function()
+			-- 克隆金币UI
+			local coin = moneyImageSource:Clone()
+			
+			-- [修改内容] 强制设置金币的绝对像素大小，例如宽 40，高 40。您可以根据实际观感调整这两个数值。
+			coin.Size = UDim2.fromOffset(50, 50) 
+			
+			coin.AnchorPoint = Vector2.new(0.5, 0.5)
+			coin.Position = UDim2.fromScale(0.5, 0.5) -- 初始从屏幕中心爆出
+			coin.Parent = fxContainer
+
+			-- 第一阶段：散开动画 (时间节奏: 0.3秒，半径: 50~200)
+			local angle = rng:NextNumber(0, math.pi * 2)
+			local radius = rng:NextNumber(50, 200)
+			local scatterPos = UDim2.new(0.5, math.cos(angle) * radius, 0.5, math.sin(angle) * radius)
+			
+			local scatterTween = TweenService:Create(coin, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+				Position = scatterPos
+			})
+			scatterTween:Play()
+			scatterTween.Completed:Wait() -- 阻塞当前协程，等待0.3秒散开结束
+
+			-- 第二阶段：飞向目标 (时间节奏: 0.4秒)
+			-- 获取金币文本框在屏幕上的绝对中心位置
+			local targetAbsPos = goldLabel.AbsolutePosition + (goldLabel.AbsoluteSize / 2)
+			local flyTween = TweenService:Create(coin, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+				-- 直接使用 Offset 精确锁定屏幕像素坐标
+				Position = UDim2.fromOffset(targetAbsPos.X, targetAbsPos.Y)
+			})
+			flyTween:Play()
+			flyTween.Completed:Wait() -- 阻塞当前协程，等待0.4秒飞行结束
+
+			-- 动画完成，销毁克隆体
+			coin:Destroy()
+		end)
+		
+		-- [修改内容] 添加极短的随机延迟，让爆出的金币有先后的层次感
+		task.wait(rng:NextNumber(0, 0.02))
+	end
+end
+
+
 function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
-	-- 1. 金币同步
-	local function refreshGold() goldLabel.Text = formatNumberShort(player:GetAttribute("Gold") or 0) end
-	player:GetAttributeChangedSignal("Gold"):Connect(refreshGold)
-	refreshGold()
+	-- 1. [修改内容] 金币同步与飞行动效触发
+	local lastGold = player:GetAttribute("Gold") or 0
+	goldLabel.Text = formatNumberShort(lastGold)
+	
+	local function onGoldChanged()
+		local currentGold = player:GetAttribute("Gold") or 0
+		goldLabel.Text = formatNumberShort(currentGold)
+		
+		-- 判断是收获金币（增加）才播放动画
+		if currentGold > lastGold then
+			local increaseAmount = currentGold - lastGold
+			playGoldFlyingAnimation(increaseAmount)
+		end
+		
+		lastGold = currentGold
+	end
+	player:GetAttributeChangedSignal("Gold"):Connect(onGoldChanged)
 
 	-- 2. Toast 监听
 	toastRemote.OnClientEvent:Connect(showToast)
