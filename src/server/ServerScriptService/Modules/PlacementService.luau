@@ -1604,10 +1604,19 @@ function PlacementService.Init()
 							
 							-- [修改内容] 修复位置错乱：不再使用深度遍历(true)去随机抓取零件，防止误把“点击升级”当成中心原点
 							if not displayModel.PrimaryPart then
-								displayModel.PrimaryPart = displayModel:FindFirstChild("Root") 
+								-- [深度修复]：智能寻找含有UI界面的主面板作为中心点，绝不误抓“点击升级”按钮
+								local bestCenter = nil
+								for _, desc in ipairs(displayModel:GetDescendants()) do
+									if desc:IsA("SurfaceGui") then
+										bestCenter = desc.Parent
+										break
+									end
+								end
+								
+								displayModel.PrimaryPart = bestCenter 
+									or displayModel:FindFirstChild("Root")
 									or displayModel:FindFirstChild("基座")
-									or displayModel:FindFirstChild(displayModel.Name)
-									or displayModel:FindFirstChildWhichIsA("BasePart") -- 仅限第一层查找
+									or displayModel:FindFirstChildWhichIsA("BasePart")
 							end
 							
 							-- [修改内容] 强制执行 PivotTo。如果没有明确的 PrimaryPart，Roblox 会自动计算整个模型的中心包围盒进行对齐，非常安全
