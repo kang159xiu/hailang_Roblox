@@ -326,7 +326,7 @@ local function playGoldTextAnimation(difference: number)
 	-- 根据增减判断文本与颜色
 	if difference > 0 then
 		textClone.Text = "+" .. formatNumberShort(difference)
-		textClone.TextColor3 = Color3.fromRGB(85, 255, 85) -- 绿色代表增加
+		textClone.TextColor3 = Color3.fromRGB(238, 255, 0) -- 绿色代表增加
 	else
 		textClone.Text = "-" .. formatNumberShort(math.abs(difference))
 		textClone.TextColor3 = Color3.fromRGB(255, 85, 85) -- 红色代表减少
