@@ -45,12 +45,54 @@ local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
 -- [修改内容] 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
-local shopsGui = playerGui:WaitForChild("ShopsUI") :: ScreenGui
-local upgradeWindow = shopsGui:WaitForChild("升级商店Window") :: Frame
+local shopsGui = player:WaitForChild("PlayerGui"):WaitForChild("ShopsUI")
+local upgradeWindow = shopsGui:WaitForChild("升级商店Window")
+
 local upgradeCloseBtn = upgradeWindow:WaitForChild("Close") :: GuiButton
 local upgradeRowTemplate = upgradeWindow:WaitForChild("RowTemplate") :: ImageLabel
-local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow -- 如果有 List 容器就用 List
+local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow
 
+local upgradeTemplate = upgradeWindow:WaitForChild("RowTemplate")
+upgradeTemplate.Visible = false -- 隐藏原始模板，防止它作为实体显示出来
+-- 清理旧的克隆行
+local function clearUpgradeRows()
+	for _, child in ipairs(upgradeList:GetChildren()) do
+		-- 只删除克隆出来的组件，保留模板和 Layout 排版组件
+		if child:IsA("GuiObject") and child.Name ~= "RowTemplate" and not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+end
+
+-- [修改内容] 纯模板化的生成逻辑，不再使用 Instance.new
+local function buildUpgradeRow(titleText: string, infoText: string, onBuy: () -> ())
+	local row = upgradeTemplate:Clone()
+	row.Name = "UpgradeRow_" .. titleText
+	row.Visible = true
+	row.Parent = upgradeList
+
+	-- 1. 绑定标题（如：升级攻击）
+	local titleLabel = row:FindFirstChild("升级目标")
+	if titleLabel and titleLabel:IsA("TextLabel") then
+		titleLabel.Text = titleText
+	end
+
+	-- 2. 绑定花费与增加数值（如：花费:10w +10 攻击力）
+	local infoLabel = row:FindFirstChild("花费+增加数值")
+	if infoLabel and infoLabel:IsA("TextLabel") then
+		infoLabel.Text = infoText
+	end
+
+	-- 3. 绑定升级按钮的点击事件 (ImageButton 继承自 GuiButton)
+	local btn = row:FindFirstChild("升级按钮")
+	if btn and btn:IsA("GuiButton") then
+		btn.Activated:Connect(function()
+			onBuy()
+		end)
+	else
+		warn("[UIController] 未在 RowTemplate 中找到名为 '升级按钮' 的按钮组件！")
+	end
+end
 -- =====================
 -- 辅助函数
 -- =====================
@@ -130,68 +172,94 @@ end
 -- =====================
 -- [修改内容] 升级商店逻辑
 -- =====================
+-- [修改内容] 融合了你优秀的表驱动循环逻辑，以及精准的 UI 模板文本分离映射
 local function refreshUpgradeShopUI()
 	-- 1. 清理旧条目
 	for _, ch in ipairs(upgradeList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch ~= upgradeRowTemplate and not ch:IsA("UILayout") then
+		if ch:IsA("GuiObject") and ch.Name ~= "RowTemplate" and not ch:IsA("UILayout") then
 			ch:Destroy()
 		end
 	end
 
 	-- 2. 定义升级类型
 	local upgradeTypes = {
-		{ name = "攻击力", type = "Attack", getLv = "AttackLevel" },
-		{ name = "行走速度", type = "Speed", getLv = "SpeedLevel" },
-		{ name = "生命上限", type = "Health", getLv = "HealthLevel" },
-		{ name = "背包容量", type = "Carry", getLv = "CarryLevel" },
+		{ name = "升级攻击", type = "Attack", getLv = "AttackLevel" },
+		{ name = "升级速度", type = "Speed", getLv = "SpeedLevel" },
+		{ name = "升级血量", type = "Health", getLv = "HealthLevel" },
+		{ name = "升级背包容量", type = "Carry", getLv = "CarryLevel" },
 	}
 
 	for _, info in ipairs(upgradeTypes) do
 		local currentLv = player:GetAttribute(info.getLv) or 0
 		local nextLv = currentLv + 1
 		
-		-- 获取花费和增加数值
-		local cost, increment = 0, 0
+		-- 获取花费和增加数值字符串
+		local cost = 0
+		local incrementText = ""
+		local isMaxed = false
+
 		if info.type == "Attack" then
-			cost = Config.GetAttackUpgradeCost(nextLv)
-			increment = Config.GetAttackValue(nextLv) - Config.GetAttackValue(currentLv)
+			cost = Config.GetAttackUpgradeCost and Config.GetAttackUpgradeCost(nextLv) or 0
+			incrementText = string.format("+%d 攻击力", Config.ATTACK_UPGRADE_ADD or 10)
 		elseif info.type == "Speed" then
-			cost = Config.GetSpeedUpgradeCost(nextLv)
-			increment = Config.GetSpeedValue(nextLv) - Config.GetSpeedValue(currentLv)
+			cost = Config.GetSpeedUpgradeCost and Config.GetSpeedUpgradeCost(nextLv) or 0
+			incrementText = string.format("+%d 速度", Config.WALK_SPEED_PER_UPGRADE or 2)
 		elseif info.type == "Health" then
-			cost = Config.GetHealthUpgradeCost(nextLv)
-			increment = Config.GetHealthValue(nextLv) - Config.GetHealthValue(currentLv)
+			cost = Config.GetHealthUpgradeCost and Config.GetHealthUpgradeCost(nextLv) or 0
+			incrementText = string.format("+%d 最大血量", Config.HEALTH_PER_UPGRADE or 100)
 		elseif info.type == "Carry" then
-			cost = Config.GetCarryUpgradeCost(nextLv) or 0
-			local currentCarry = Config.GetCarryValue(currentLv)
-			local nextCarry = Config.GetCarryValue(nextLv) or currentCarry
-			increment = nextCarry - currentCarry
+			local nextCost = Config.GetCarryUpgradeCost and Config.GetCarryUpgradeCost(nextLv)
+			if nextCost == nil then
+				isMaxed = true -- 如果获取不到下一级价格，说明满了
+			else
+				cost = nextCost
+				local currentCarry = Config.GetCarryMax and Config.GetCarryMax(currentLv) or (currentLv + 1)
+				local nextCarry = Config.GetCarryMax and Config.GetCarryMax(nextLv) or (nextLv + 1)
+				incrementText = string.format("可携带: %d → %d", currentCarry, nextCarry)
+			end
 		end
 
 		-- 3. 克隆模板并设置
-		local row = upgradeRowTemplate:Clone()
+		-- 注意：如果你的模板变量叫 upgradeRowTemplate，请把这里的 upgradeTemplate 换成你实际的变量名
+		local row = upgradeTemplate:Clone() 
 		row.Name = info.type .. "Row"
 		row.Visible = true
 		row.Parent = upgradeList
 
-		local label = row:FindFirstChild("升级目标") :: TextLabel
-		if label then
-			if cost > 0 then
-				label.Text = string.format("%s (Lv.%d)\n花费: %s  增加: +%d", info.name, currentLv, formatNumberShort(cost), increment)
+		-- A. 赋值：升级目标文本框
+		local targetLabel = row:FindFirstChild("升级目标")
+		if targetLabel and targetLabel:IsA("TextLabel") then
+			targetLabel.Text = info.name
+		end
+
+		-- B. 赋值：花费与增加数值文本框
+		local costInfoLabel = row:FindFirstChild("花费+增加数值")
+		if costInfoLabel and costInfoLabel:IsA("TextLabel") then
+			if isMaxed then
+				costInfoLabel.Text = "已满级"
 			else
-				label.Text = info.name .. " (已满级)"
+				costInfoLabel.Text = string.format("花费:%s   %s", formatNumberShort(cost), incrementText)
 			end
 		end
 
-		local upBtn = row:FindFirstChild("升级按钮") :: ImageButton
-		if upBtn then
-			if cost > 0 then
+		-- C. 绑定：升级按钮
+		local upBtn = row:FindFirstChild("升级按钮")
+		if upBtn and upBtn:IsA("GuiButton") then
+			if isMaxed then
+				if upBtn:IsA("ImageButton") then
+					upBtn.ImageTransparency = 0.5 -- 满级变灰
+				end
+				upBtn.Interactable = false -- 禁用点击 (Roblox 新版按钮禁用属性)
+				upBtn.Active = false
+			else
+				if upBtn:IsA("ImageButton") then
+					upBtn.ImageTransparency = 0
+				end
+				upBtn.Interactable = true
 				upBtn.Activated:Connect(function()
+					-- 注意：确保你的 requestPurchaseUpgrade 变量在文件顶部有定义
 					requestPurchaseUpgrade:FireServer(info.type)
 				end)
-			else
-				upBtn.ImageTransparency = 0.5 -- 满级变灰
-				upBtn.Active = false
 			end
 		end
 	end
