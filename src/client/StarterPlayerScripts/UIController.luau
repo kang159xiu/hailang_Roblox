@@ -122,7 +122,8 @@ end
 -- =====================
 local function refreshMonsterInventoryUI(payload)
 	for _, ch in ipairs(monsterInventoryList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
+		-- [修改内容] 改为判断 UILayout，防止 UIGridLayout 等其他布局组件被误删
+		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
 	-- [修改内容] 精确定位到 Workspace 下的 "Monster image" 文件夹
@@ -159,7 +160,8 @@ end
 -- =====================
 local function refreshWeaponInventoryUI()
 	for _, ch in ipairs(weaponList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
+		-- [修改内容] 改为判断 UILayout
+		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
@@ -311,6 +313,16 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	-- [修改内容] 游戏启动时，隐藏用于克隆的原始模板，避免在列表中显示空白项
 	if rowTemplate then rowTemplate.Visible = false end
 	if weaponTemplate then weaponTemplate.Visible = false end
+
+	-- [修改内容] 强制开启两个滑动列表的 Y 轴（上下）自动画布大小，并将基础 CanvasSize 归零。彻底修复无法滑动的问题。
+	if monsterInventoryList then
+		monsterInventoryList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		monsterInventoryList.CanvasSize = UDim2.new(0, 0, 0, 0)
+	end
+	if weaponList then
+		weaponList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		weaponList.CanvasSize = UDim2.new(0, 0, 0, 0)
+	end
 
 	-- 1. [修改内容] 金币同步与飞行动效触发
 	local lastGold = player:GetAttribute("Gold") or 0
