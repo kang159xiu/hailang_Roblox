@@ -2014,4 +2014,23 @@ function PlacementService.TryHandlePromptInteraction(player: Player, promptInsta
 	return false
 end
 
+-- [修改内容] 删档专用：彻底清理该玩家所有的放置怪物
+function PlacementService.Clear(player: Player)
+	local states = slotStatesByUserId[player.UserId]
+	if not states then return end
+	
+	for i = 1, 30 do
+		local st = states[i]
+		-- 销毁地上的 3D 怪物实体
+		if st and st.PlacedMonster and st.PlacedMonster.Parent then
+			destroyPlacedMonster(st.PlacedMonster)
+		end
+		-- 清空内存数据
+		if st then
+			st.PlacedMonster = nil
+			st.PlacedData = nil
+		end
+	end
+	DataDirtyService.MarkDirty(player)
+end
 return PlacementService

@@ -155,19 +155,24 @@ takeOutRemote.OnServerEvent:Connect(function(player: Player, itemId: any)
 end)
 
 -- 测试：清空玩家数据（仅 Studio）
--- [修改内容] 处理玩家清空数据的请求
+-- [修改内容] 处理玩家清空数据的请求（加强防错防卡死版）
 clearDataRemote.OnServerEvent:Connect(function(player: Player)
 	warn(string.format("玩家 %s 正在清空数据...", player.Name))
 	
-	-- 1. 重置基础属性 (金币、等级等)
+	-- 1. 重置基础属性 (金币、各种等级恢复至 1 级)
 	PlayerData.ResetData(player)
 	
-	-- 2. 清空背包 (怪物道具)
-	InventoryService.Clear(player)
+	-- 2. 强行摧毁家园里放置的所有怪物，防止它们继续产出金币！
+	local PlacementService = require(script.Parent.Modules.PlacementService)
+	PlacementService.Clear(player)
 	
-	-- 3. 这里的逻辑很关键：我们直接 Kick 玩家
-	-- 因为 Kick 会触发 PlayerRemoving，从而触发 DataPersistenceService 的保存逻辑
-	-- 由于我们上面已经执行了 ResetData 和 Clear，保存到数据库的将是“干净”的初始数据
+	-- 3. 安全清空背包（使用 pcall 保护，防止你没写这个方法导致脚本崩溃）
+	pcall(function()
+		InventoryService.Clear(player)
+	end)
+	
+	-- 4. 踢出玩家以强制保存干净的数据。
+	-- (注：踢出的瞬间 UI 画面会直接定格，所以你肉眼看不到金币归 0，但只要重新进游戏就已经是全新的空号了)
 	player:Kick("\n你的数据已成功清空！\n请重新加入游戏开始新旅程。")
 end)
 

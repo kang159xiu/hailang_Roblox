@@ -182,19 +182,19 @@ local function formatUpgradeCostText(cost: number?): string
 		return "已满级"
 	end
 	-- 你要求 UI 用 1w/5w
-	if cost == 10000 then
-		return "1w"
-	elseif cost == 50000 then
-		return "5w"
+	if cost == 200000 then
+		return "20w"
+	elseif cost == 1000000 then
+		return "100w"
 	end
 	return tostring(cost)
 end
 
 local function getNextHomeUpgradeCost(homeLevel: number): number?
 	if homeLevel <= 1 then
-		return 10000
+		return 200000
 	elseif homeLevel == 2 then
-		return 50000
+		return 1000000
 	end
 	return nil
 end
@@ -278,6 +278,7 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 		prompt.HoldDuration = 0.5
 		prompt.RequiresLineOfSight = false
 		prompt.Parent = upgradePart
+
 
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
 			local owner = homeRoot:GetAttribute("OwnerUserId")
