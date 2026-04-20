@@ -442,6 +442,29 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 
 	-- 5. 初始化商店 (此处应包含原脚本中 openWeaponShopUI 等监听器)
 	-- [逻辑流]：监听服务端事件 -> 显示对应的 Window -> 调用刷新函数渲染列表
+	-- [修改内容] 初始化 shopsGui 容器（如果不存在的话）
+	if not shopsGui then
+		shopsGui = Instance.new("ScreenGui")
+		shopsGui.Name = "ShopsGui"
+		shopsGui.Parent = player:WaitForChild("PlayerGui")
+	end
+
+	-- [修改内容] 监听服务端发来的打开武器商店指令
+	openWeaponShopUI.OnClientEvent:Connect(function()
+		if not weaponWindow then
+			weaponWindow = createWindow("Weapon")
+		end
+		weaponWindow.Visible = true
+	end)
+
+	-- [修改内容] 监听服务端发来的打开升级商店指令
+	openUpgradeShopUI.OnClientEvent:Connect(function()
+		if not upgradeWindow then
+			upgradeWindow = createWindow("Upgrade")
+		end
+		upgradeWindow.Visible = true
+	end)
+
 	print("[UIController] 2D UI 逻辑已初始化")
 
 	-- [修改内容] 删除按钮逻辑，带防卡死判断（终极唯一版）
