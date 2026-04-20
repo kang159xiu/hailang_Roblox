@@ -81,6 +81,8 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local takeOutRemote = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
 local clearDataRemote = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
 local requestPromptInteractionRemote = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
+-- [修改内容] 引用装备武器事件
+local requestEquipWeaponRemote = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
 
 local function debugPromptPath(instance: Instance?): string
 	if not instance then
@@ -130,6 +132,18 @@ GuardianService.Init()
 
 
 
+
+-- [修改内容] 客户端背包 UI：请求装备武器
+local PlayerData = require(script.Parent:WaitForChild("Modules"):WaitForChild("PlayerData"))
+requestEquipWeaponRemote.OnServerEvent:Connect(function(player: Player, weaponLevel: any)
+	if type(weaponLevel) ~= "number" then
+		return
+	end
+	-- 1. 更新玩家数据属性（这会自动触发客户端 UI 的 GetAttributeChangedSignal，使按钮变成“已装备”）
+	PlayerData.SetEquippedWeaponLevel(player, weaponLevel)
+	-- 2. 强制同步玩家背包里的 Tool，并让玩家把新武器拿在手上
+	WeaponToolService.Sync(player, true)
+end)
 
 -- 客户端背包 UI：拿出一只怪到 Tool 栏
 
