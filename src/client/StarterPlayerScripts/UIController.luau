@@ -24,6 +24,8 @@ local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") ::
 -- =====================
 local mainGui = player:WaitForChild("PlayerGui"):WaitForChild("MainUI") :: ScreenGui
 local goldLabel = mainGui:WaitForChild("GoldFrame"):WaitForChild("GoldLabel") :: TextLabel
+-- [修改内容] 引用金币增减提示的 TextLabel
+local addGoldUI = mainGui:WaitForChild("GoldFrame"):WaitForChild("addGoldUI") :: TextLabel
 local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") :: Frame
 local monsterInventoryList = monsterInventoryWindow:WaitForChild("List") :: ScrollingFrame
 local rowTemplate = monsterInventoryWindow:WaitForChild("RowTemplate") :: ImageButton
@@ -312,6 +314,55 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 	end
 end
 
+-- [修改内容] 添加金币增减文字动画逻辑
+local function playGoldTextAnimation(difference: number)
+	if difference == 0 or not addGoldUI then return end
+	
+	-- 克隆一个现有的 addGoldUI，避免金币快速变化时动画互相干扰和覆盖
+	local textClone = addGoldUI:Clone()
+	textClone.Visible = true
+	textClone.Parent = addGoldUI.Parent
+	
+	-- 根据增减判断文本与颜色
+	if difference > 0 then
+		textClone.Text = "+" .. formatNumberShort(difference)
+		textClone.TextColor3 = Color3.fromRGB(85, 255, 85) -- 绿色代表增加
+	else
+		textClone.Text = "-" .. formatNumberShort(math.abs(difference))
+		textClone.TextColor3 = Color3.fromRGB(255, 85, 85) -- 红色代表减少
+	end
+	
+	-- 初始化透明度和位置（保持为模板原位置）
+	textClone.TextTransparency = 0
+	if textClone:FindFirstChild("UIStroke") then
+		textClone.UIStroke.Transparency = 0
+	end
+	
+	-- 创建向上移动并淡出的动画 (向上偏移 30 像素)
+	local targetPos = textClone.Position - UDim2.fromOffset(0, 30)
+	
+	-- 对 TextLabel 自身进行动画
+	local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local tween = TweenService:Create(textClone, tweenInfo, {
+		Position = targetPos,
+		TextTransparency = 1
+	})
+	
+	-- 如果带有描边 (UIStroke)，也让描边一起淡出
+	if textClone:FindFirstChild("UIStroke") then
+		local strokeTween = TweenService:Create(textClone.UIStroke, tweenInfo, {
+			Transparency = 1
+		})
+		strokeTween:Play()
+	end
+	
+	tween:Play()
+	
+	-- 动画结束后销毁克隆体释放内存
+	tween.Completed:Connect(function()
+		textClone:Destroy()
+	end)
+end
 
 function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
 	-- [修改内容] 游戏启动时，隐藏用于克隆的原始模板，避免在列表中显示空白项
@@ -332,14 +383,24 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	local lastGold = player:GetAttribute("Gold") or 0
 	goldLabel.Text = formatNumberShort(lastGold)
 	
+	-- [修改内容] 隐藏原始的增减提示 UI 作为模板
+	if addGoldUI then addGoldUI.Visible = false end
+	
 	local function onGoldChanged()
 		local currentGold = player:GetAttribute("Gold") or 0
 		goldLabel.Text = formatNumberShort(currentGold)
 		
-		-- 判断是收获金币（增加）才播放动画
+		-- 计算金币差值
+		local difference = currentGold - lastGold
+		
+		-- [修改内容] 无论金币是增加还是减少，都播放文字飘动提示
+		if difference ~= 0 then
+			playGoldTextAnimation(difference)
+		end
+		
+		-- 判断是收获金币（增加）才播放全屏飞行动画
 		if currentGold > lastGold then
-			local increaseAmount = currentGold - lastGold
-			playGoldFlyingAnimation(increaseAmount)
+			playGoldFlyingAnimation(difference)
 		end
 		
 		lastGold = currentGold
