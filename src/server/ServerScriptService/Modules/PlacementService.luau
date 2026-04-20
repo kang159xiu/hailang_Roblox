@@ -1597,33 +1597,30 @@ function PlacementService.Init()
 							local locatorPart = slot.Collector:FindFirstChild("收益显示定位", true)
 							local anchorCFrame = locatorPart and locatorPart.CFrame or slot.Collector.CFrame
 							
-							-- 🌟 [物理层终极修复]：用代码强行解除空气墙对鼠标的拦截！
-							-- 无论你的透明定位方块有多大，统统让鼠标穿透过去，直达牌子！
+
 							if locatorPart then locatorPart.CanQuery = false end
 							slot.Collector.CanQuery = false
 							
-							-- [修改内容] 修复位置错乱：不再使用深度遍历(true)去随机抓取零件，防止误把“点击升级”当成中心原点
+							-- [终极修复]：不再通过名字或 UI 瞎猜！直接遍历模型，找到“体积最大”的零件作为中心点！
+							-- 主显示板的体积绝对比“升级按钮”大，这样 100% 能抓对大基准板！
 							if not displayModel.PrimaryPart then
-								-- [深度修复]：智能寻找含有UI界面的主面板作为中心点，绝不误抓“点击升级”按钮
-								local bestCenter = nil
-								for _, desc in ipairs(displayModel:GetDescendants()) do
-									if desc:IsA("SurfaceGui") then
-										bestCenter = desc.Parent
-										break
-									end
-								end
+								-- 深度搜索名为 "收益显示底座" 的 Part
+								local realBase = displayModel:FindFirstChild("收益显示底座", true)
 								
-								displayModel.PrimaryPart = bestCenter 
-									or displayModel:FindFirstChild("Root")
-									or displayModel:FindFirstChild("基座")
-									or displayModel:FindFirstChildWhichIsA("BasePart")
+								if realBase and realBase:IsA("BasePart") then
+									displayModel.PrimaryPart = realBase
+								else
+									-- 极端兜底情况（防止报错）
+									displayModel.PrimaryPart = displayModel:FindFirstChildWhichIsA("BasePart")
+								end
 							end
 							
-							-- [修改内容] 强制执行 PivotTo。如果没有明确的 PrimaryPart，Roblox 会自动计算整个模型的中心包围盒进行对齐，非常安全
-							displayModel:PivotTo(anchorCFrame)
-							
-							-- [修改内容] 如果发现朝向刚好反了(背对玩家)，可以取消下面这行的注释进行180度翻转
-							-- displayModel:PivotTo(anchorCFrame * CFrame.Angles(0, math.rad(180), 0))
+							if displayModel.PrimaryPart then
+								displayModel:PivotTo(anchorCFrame)
+								
+								-- [终极保险]：如果发现牌子背对着玩家，请把下面这行开头的 "-- " 删掉即可 180 度转回正面！
+								-- displayModel:PivotTo(anchorCFrame * CFrame.Angles(0, math.rad(180), 0))
+							end
 							
 							displayModel.Parent = slot.Collector
 						end
