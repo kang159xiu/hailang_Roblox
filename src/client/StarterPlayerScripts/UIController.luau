@@ -45,15 +45,26 @@ local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
 -- [修改内容] 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
-local shopsGui = player:WaitForChild("PlayerGui"):WaitForChild("ShopsUI")
+local shopsGui = playerGui:WaitForChild("ShopsUI")
+
+-- 升级商店引用
 local upgradeWindow = shopsGui:WaitForChild("升级商店Window")
-
 local upgradeCloseBtn = upgradeWindow:WaitForChild("Close") :: GuiButton
-local upgradeRowTemplate = upgradeWindow:WaitForChild("RowTemplate") :: ImageLabel
+local upgradeTemplate = upgradeWindow:WaitForChild("RowTemplate") :: GuiObject
 local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow
-
-local upgradeTemplate = upgradeWindow:WaitForChild("RowTemplate")
 upgradeTemplate.Visible = false -- 隐藏原始模板，防止它作为实体显示出来
+
+-- [修改内容] 武器商店引用
+local weaponWindow = shopsGui:FindFirstChild("武器商店Window")
+if weaponWindow then
+	local weaponCloseBtn = weaponWindow:FindFirstChild("Close")
+	if weaponCloseBtn and weaponCloseBtn:IsA("GuiButton") then
+		weaponCloseBtn.Activated:Connect(function()
+			weaponWindow.Visible = false
+		end)
+	end
+end
+
 -- 清理旧的克隆行
 local function clearUpgradeRows()
 	for _, child in ipairs(upgradeList:GetChildren()) do
@@ -61,36 +72,6 @@ local function clearUpgradeRows()
 		if child:IsA("GuiObject") and child.Name ~= "RowTemplate" and not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
-	end
-end
-
--- [修改内容] 纯模板化的生成逻辑，不再使用 Instance.new
-local function buildUpgradeRow(titleText: string, infoText: string, onBuy: () -> ())
-	local row = upgradeTemplate:Clone()
-	row.Name = "UpgradeRow_" .. titleText
-	row.Visible = true
-	row.Parent = upgradeList
-
-	-- 1. 绑定标题（如：升级攻击）
-	local titleLabel = row:FindFirstChild("升级目标")
-	if titleLabel and titleLabel:IsA("TextLabel") then
-		titleLabel.Text = titleText
-	end
-
-	-- 2. 绑定花费与增加数值（如：花费:10w +10 攻击力）
-	local infoLabel = row:FindFirstChild("花费+增加数值")
-	if infoLabel and infoLabel:IsA("TextLabel") then
-		infoLabel.Text = infoText
-	end
-
-	-- 3. 绑定升级按钮的点击事件 (ImageButton 继承自 GuiButton)
-	local btn = row:FindFirstChild("升级按钮")
-	if btn and btn:IsA("GuiButton") then
-		btn.Activated:Connect(function()
-			onBuy()
-		end)
-	else
-		warn("[UIController] 未在 RowTemplate 中找到名为 '升级按钮' 的按钮组件！")
 	end
 end
 -- =====================
@@ -573,24 +554,27 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	if not shopsGui then
 		shopsGui = Instance.new("ScreenGui")
 		shopsGui.Name = "ShopsGui"
-		shopsGui.Parent = player:WaitForChild("PlayerGui")
+		shopsGui.Parent = playerGui
 	end
 
-	-- [修改内容] 监听服务端发来的打开武器商店指令
+	-- [修改内容] 修复打开武器商店报错的问题，直接显示已存在的 UI
 	openWeaponShopUI.OnClientEvent:Connect(function()
-		if not weaponWindow then
-			weaponWindow = createWindow("Weapon")
+		if weaponWindow then
+			weaponWindow.Visible = true
+		else
+			warn("[UIController] 未在 ShopsUI 中找到 '武器商店Window'")
 		end
-		weaponWindow.Visible = true
 	end)
 
 	-- [修改内容] 监听服务端发来的打开升级商店指令
 	openUpgradeShopUI.OnClientEvent:Connect(function()
-		upgradeWindow.Visible = true
-		refreshUpgradeShopUI() -- 每次打开刷新一次数据
+		if upgradeWindow then
+			upgradeWindow.Visible = true
+			refreshUpgradeShopUI() -- 每次打开刷新一次数据
+		end
 	end)
 
-	-- [修改内容] 绑定关闭按钮
+	-- [修改内容] 绑定升级商店关闭按钮
 	if upgradeCloseBtn then
 		upgradeCloseBtn.Activated:Connect(function()
 			upgradeWindow.Visible = false
