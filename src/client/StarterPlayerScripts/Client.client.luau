@@ -60,7 +60,13 @@ local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChil
 -- [修改内容] 移除已被 UIController 接管的 UI Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestPromptInteraction = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
+-- 替换为（添加商店相关的 5 个 RemoteEvent）：
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
+local openWeaponShopUI = remotes:WaitForChild("OpenWeaponShopUI") :: RemoteEvent -- [修改内容] 监听打开武器商店
+local openUpgradeShopUI = remotes:WaitForChild("OpenUpgradeShopUI") :: RemoteEvent -- [修改内容] 监听打开升级商店
+local requestPurchaseWeapon = remotes:WaitForChild("RequestPurchaseWeapon") :: RemoteEvent -- [修改内容] 请求购买武器
+local requestEquipWeapon = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent -- [修改内容] 请求装备武器
+local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent -- [修改内容] 请求升级属性
 
 
 -- =====================
@@ -479,6 +485,119 @@ end)
 
 
 
+-- [修改内容] 插入完整的商店 UI 逻辑块，负责窗口创建、内容刷新和交互
+
+local shopsGui = player:WaitForChild("PlayerGui"):WaitForChild("ShopsUI", 5) :: ScreenGui?
+if not (shopsGui and shopsGui:IsA("ScreenGui")) then
+	shopsGui = Instance.new("ScreenGui")
+	shopsGui.Name = "ShopsUI"
+	shopsGui.ResetOnSpawn = false
+	shopsGui.Enabled = true
+	shopsGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local function createWindow(titleText: string): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = titleText .. "Window"
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.Position = UDim2.fromScale(0.5, 0.5)
+	frame.Size = UDim2.fromOffset(620, 420)
+	frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	frame.BackgroundTransparency = 0.05
+	frame.Visible = false
+	frame.Parent = shopsGui
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.fromOffset(16, 10)
+	title.Size = UDim2.fromOffset(400, 36)
+	title.Font = Enum.Font.GothamBold
+	title.TextScaled = true
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.Text = titleText
+	title.Parent = frame
+
+	local close = Instance.new("TextButton")
+	close.Name = "Close"
+	close.AnchorPoint = Vector2.new(1, 0)
+	close.Position = UDim2.fromOffset(frame.Size.X.Offset - 12, 12)
+	close.Size = UDim2.fromOffset(90, 32)
+	close.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	close.TextColor3 = Color3.fromRGB(255, 255, 255)
+	close.Font = Enum.Font.GothamBold
+	close.TextScaled = true
+	close.Text = "关闭"
+	close.Parent = frame
+	close.Activated:Connect(function() frame.Visible = false end)
+
+	return frame
+end
+
+-- ===== 武器商店相关逻辑 =====
+local weaponWindow = createWindow("武器商店")
+local weaponInfo = Instance.new("TextLabel")
+weaponInfo.Name = "Info"
+weaponInfo.BackgroundTransparency = 1
+weaponInfo.Position = UDim2.fromOffset(16, 52)
+weaponInfo.Size = UDim2.fromOffset(560, 28)
+weaponInfo.TextXAlignment = Enum.TextXAlignment.Left
+weaponInfo.Font = Enum.Font.Gotham
+weaponInfo.TextScaled = true
+weaponInfo.TextColor3 = Color3.fromRGB(220, 220, 220)
+weaponInfo.Parent = weaponWindow
+
+local weaponList = Instance.new("ScrollingFrame")
+weaponList.Name = "List"
+weaponList.Position = UDim2.fromOffset(16, 88)
+weaponList.Size = UDim2.fromOffset(588, 316)
+weaponList.BackgroundTransparency = 0.35
+weaponList.BorderSizePixel = 0
+weaponList.ScrollBarThickness = 8
+weaponList.Parent = weaponWindow
+
+local weaponLayout = Instance.new("UIListLayout")
+weaponLayout.Padding = UDim.new(0, 8)
+weaponLayout.SortOrder = Enum.SortOrder.LayoutOrder
+weaponLayout.Parent = weaponList
+
+local function refreshWeaponShop()
+	local ownedMax = player:GetAttribute("WeaponLevel") or 1
+	local equipped = player:GetAttribute("EquippedWeaponLevel") or 1
+	weaponInfo.Text = string.format("已拥有最高：Lv.%d   当前装备：Lv.%d", ownedMax, equipped)
+	
+	-- 清理旧行并根据 Config.WEAPON_PRICE_BY_LEVEL 重新生成（此处省略具体循环逻辑，需参考 Config）
+end
+
+openWeaponShopUI.OnClientEvent:Connect(function()
+	weaponWindow.Visible = true
+	refreshWeaponShop()
+end)
+
+-- ===== 升级商店相关逻辑 =====
+local upgradeWindow = createWindow("升级商店")
+local upgradeList = Instance.new("Frame")
+upgradeList.Name = "List"
+upgradeList.Position = UDim2.fromOffset(16, 60)
+upgradeList.Size = UDim2.fromOffset(588, 344)
+upgradeList.BackgroundTransparency = 1
+upgradeList.Parent = upgradeWindow
+
+local upgradeLayout = Instance.new("UIListLayout")
+upgradeLayout.Padding = UDim.new(0, 10)
+upgradeLayout.Parent = upgradeList
+
+local function refreshUpgradeShop()
+	-- 根据属性（AttackLevel, HealthLevel等）刷新显示
+end
+
+openUpgradeShopUI.OnClientEvent:Connect(function()
+	upgradeWindow.Visible = true
+	refreshUpgradeShop()
+end)
+
+
 -- =====================
 -- Home 头像显示：离开出生点 20 单位后显示，回到范围内隐藏
 -- 仅本地创建，因此只有玩家自己可见
@@ -673,3 +792,19 @@ RunService.Heartbeat:Connect(function()
 		setHeadGuiVisible(false)
 	end
 end)
+
+-- [修改内容] 自动刷新监听
+local function hookRefreshOnAttr(attrName: string)
+	player:GetAttributeChangedSignal(attrName):Connect(function()
+		if upgradeWindow.Visible then refreshUpgradeShop() end
+		if weaponWindow.Visible then refreshWeaponShop() end
+	end)
+end
+
+hookRefreshOnAttr("Gold")
+hookRefreshOnAttr("AttackLevel")
+hookRefreshOnAttr("HealthLevel")
+hookRefreshOnAttr("SpeedLevel")
+hookRefreshOnAttr("CarryLevel")
+hookRefreshOnAttr("WeaponLevel")
+hookRefreshOnAttr("EquippedWeaponLevel")

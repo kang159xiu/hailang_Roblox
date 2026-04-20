@@ -43,10 +43,13 @@ local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
 
 local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
-
-local shopsGui: ScreenGui
-local weaponWindow: Frame
-local upgradeWindow: Frame
+-- [修改内容] 引用您预设的商店 UI
+local playerGui = player:WaitForChild("PlayerGui")
+local shopsGui = playerGui:WaitForChild("ShopsUI") :: ScreenGui
+local upgradeWindow = shopsGui:WaitForChild("升级商店Window") :: Frame
+local upgradeCloseBtn = upgradeWindow:WaitForChild("Close") :: GuiButton
+local upgradeRowTemplate = upgradeWindow:WaitForChild("RowTemplate") :: ImageLabel
+local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow -- 如果有 List 容器就用 List
 
 -- =====================
 -- 辅助函数
@@ -123,6 +126,76 @@ local function loadViewportFromScene(targetContainer: GuiObject, modelSource: In
 	camera.CFrame = CFrame.lookAt(camPos, cf.Position)
 end
 
+
+-- =====================
+-- [修改内容] 升级商店逻辑
+-- =====================
+local function refreshUpgradeShopUI()
+	-- 1. 清理旧条目
+	for _, ch in ipairs(upgradeList:GetChildren()) do
+		if ch:IsA("GuiObject") and ch ~= upgradeRowTemplate and not ch:IsA("UILayout") then
+			ch:Destroy()
+		end
+	end
+
+	-- 2. 定义升级类型
+	local upgradeTypes = {
+		{ name = "攻击力", type = "Attack", getLv = "AttackLevel" },
+		{ name = "行走速度", type = "Speed", getLv = "SpeedLevel" },
+		{ name = "生命上限", type = "Health", getLv = "HealthLevel" },
+		{ name = "背包容量", type = "Carry", getLv = "CarryLevel" },
+	}
+
+	for _, info in ipairs(upgradeTypes) do
+		local currentLv = player:GetAttribute(info.getLv) or 0
+		local nextLv = currentLv + 1
+		
+		-- 获取花费和增加数值
+		local cost, increment = 0, 0
+		if info.type == "Attack" then
+			cost = Config.GetAttackUpgradeCost(nextLv)
+			increment = Config.GetAttackValue(nextLv) - Config.GetAttackValue(currentLv)
+		elseif info.type == "Speed" then
+			cost = Config.GetSpeedUpgradeCost(nextLv)
+			increment = Config.GetSpeedValue(nextLv) - Config.GetSpeedValue(currentLv)
+		elseif info.type == "Health" then
+			cost = Config.GetHealthUpgradeCost(nextLv)
+			increment = Config.GetHealthValue(nextLv) - Config.GetHealthValue(currentLv)
+		elseif info.type == "Carry" then
+			cost = Config.GetCarryUpgradeCost(nextLv) or 0
+			local currentCarry = Config.GetCarryValue(currentLv)
+			local nextCarry = Config.GetCarryValue(nextLv) or currentCarry
+			increment = nextCarry - currentCarry
+		end
+
+		-- 3. 克隆模板并设置
+		local row = upgradeRowTemplate:Clone()
+		row.Name = info.type .. "Row"
+		row.Visible = true
+		row.Parent = upgradeList
+
+		local label = row:FindFirstChild("升级目标") :: TextLabel
+		if label then
+			if cost > 0 then
+				label.Text = string.format("%s (Lv.%d)\n花费: %s  增加: +%d", info.name, currentLv, formatNumberShort(cost), increment)
+			else
+				label.Text = info.name .. " (已满级)"
+			end
+		end
+
+		local upBtn = row:FindFirstChild("升级按钮") :: ImageButton
+		if upBtn then
+			if cost > 0 then
+				upBtn.Activated:Connect(function()
+					requestPurchaseUpgrade:FireServer(info.type)
+				end)
+			else
+				upBtn.ImageTransparency = 0.5 -- 满级变灰
+				upBtn.Active = false
+			end
+		end
+	end
+end
 -- =====================
 -- 怪物背包逻辑
 -- =====================
@@ -225,95 +298,7 @@ local function switchInventoryTab(tabName: string)
 	end
 end
 
--- =====================
--- 商店 UI 逻辑 (武器/升级)
--- =====================
-local function createWindow(titleText: string)
-	local frame = Instance.new("Frame")
-	frame.Name = titleText .. "Window"
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.Position = UDim2.fromScale(0.5, 0.5)
-	frame.Size = UDim2.fromOffset(620, 420)
-	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30) -- 稍微调亮一点背景色
-	frame.BorderSizePixel = 0
-	frame.Visible = false
-	frame.Parent = shopsGui
 
-	-- [修改内容] 添加圆角让 UI 更好看
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = frame
-
-	-- [修改内容] 添加顶部标题栏
-	local topBar = Instance.new("Frame")
-	topBar.Name = "TopBar"
-	topBar.Size = UDim2.new(1, 0, 0, 40)
-	topBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	topBar.BorderSizePixel = 0
-	topBar.Parent = frame
-
-	local topBarCorner = Instance.new("UICorner")
-	topBarCorner.CornerRadius = UDim.new(0, 8)
-	topBarCorner.Parent = topBar
-
-	-- 填补直角（隐藏圆角带来的底部缺口）
-	local bottomFiller = Instance.new("Frame")
-	bottomFiller.Size = UDim2.new(1, 0, 0, 8)
-	bottomFiller.Position = UDim2.new(0, 0, 1, -8)
-	bottomFiller.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	bottomFiller.BorderSizePixel = 0
-	bottomFiller.Parent = topBar
-
-	-- [修改内容] 添加标题文字
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Name = "TitleLabel"
-	titleLabel.Size = UDim2.new(1, -100, 1, 0)
-	titleLabel.Position = UDim2.new(0, 15, 0, 0)
-	titleLabel.BackgroundTransparency = 1
-	-- 自动判断是武器商店还是升级商店
-	titleLabel.Text = titleText == "Weapon" and "武器商店" or (titleText == "Upgrade" and "升级商店" or titleText)
-	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	titleLabel.TextSize = 20
-	titleLabel.Font = Enum.Font.SourceSansBold
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.Parent = topBar
-
-	-- [修改内容] 添加关闭按钮
-	local closeBtn = Instance.new("TextButton")
-	closeBtn.Name = "CloseButton"
-	closeBtn.Size = UDim2.new(0, 40, 0, 40)
-	closeBtn.Position = UDim2.new(1, -40, 0, 0)
-	closeBtn.BackgroundTransparency = 1
-	closeBtn.Text = "X"
-	closeBtn.TextColor3 = Color3.fromRGB(255, 85, 85)
-	closeBtn.TextSize = 24
-	closeBtn.Font = Enum.Font.SourceSansBold
-	closeBtn.Parent = topBar
-
-	-- [修改内容] 关闭按钮逻辑
-	closeBtn.Activated:Connect(function()
-		frame.Visible = false
-	end)
-
-	-- [修改内容] 添加商品列表容器，方便后续渲染商品条目
-	local contentList = Instance.new("ScrollingFrame")
-	contentList.Name = "ContentList"
-	contentList.Size = UDim2.new(1, -20, 1, -50)
-	contentList.Position = UDim2.new(0, 10, 0, 45)
-	contentList.BackgroundTransparency = 1
-	contentList.BorderSizePixel = 0
-	contentList.ScrollBarThickness = 6
-	contentList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	contentList.CanvasSize = UDim2.new(0, 0, 0, 0)
-	contentList.Parent = frame
-
-	local uiListLayout = Instance.new("UIListLayout")
-	uiListLayout.Padding = UDim.new(0, 5)
-	uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	uiListLayout.Parent = contentList
-
-	return frame
-end
 
 -- =====================
 -- [修改内容] 金币爆点飞行动效逻辑
@@ -533,11 +518,26 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 
 	-- [修改内容] 监听服务端发来的打开升级商店指令
 	openUpgradeShopUI.OnClientEvent:Connect(function()
-		if not upgradeWindow then
-			upgradeWindow = createWindow("Upgrade")
-		end
 		upgradeWindow.Visible = true
+		refreshUpgradeShopUI() -- 每次打开刷新一次数据
 	end)
+
+	-- [修改内容] 绑定关闭按钮
+	if upgradeCloseBtn then
+		upgradeCloseBtn.Activated:Connect(function()
+			upgradeWindow.Visible = false
+		end)
+	end
+
+	-- [修改内容] 属性变化时实时刷新（可选，为了让购买后文字立即变动）
+	local attributes = {"AttackLevel", "SpeedLevel", "HealthLevel", "CarryLevel"}
+	for _, attr in ipairs(attributes) do
+		player:GetAttributeChangedSignal(attr):Connect(function()
+			if upgradeWindow.Visible then
+				refreshUpgradeShopUI()
+			end
+		end)
+	end
 
 	print("[UIController] 2D UI 逻辑已初始化")
 
