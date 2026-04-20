@@ -1602,13 +1602,20 @@ function PlacementService.Init()
 							if locatorPart then locatorPart.CanQuery = false end
 							slot.Collector.CanQuery = false
 							
+							-- [修改内容] 修复位置错乱：不再使用深度遍历(true)去随机抓取零件，防止误把“点击升级”当成中心原点
 							if not displayModel.PrimaryPart then
-								displayModel.PrimaryPart = displayModel:FindFirstChildWhichIsA("BasePart", true)
+								displayModel.PrimaryPart = displayModel:FindFirstChild("Root") 
+									or displayModel:FindFirstChild("基座")
+									or displayModel:FindFirstChild(displayModel.Name)
+									or displayModel:FindFirstChildWhichIsA("BasePart") -- 仅限第一层查找
 							end
 							
-							if displayModel.PrimaryPart then
-								displayModel:PivotTo(anchorCFrame)
-							end
+							-- [修改内容] 强制执行 PivotTo。如果没有明确的 PrimaryPart，Roblox 会自动计算整个模型的中心包围盒进行对齐，非常安全
+							displayModel:PivotTo(anchorCFrame)
+							
+							-- [修改内容] 如果发现朝向刚好反了(背对玩家)，可以取消下面这行的注释进行180度翻转
+							-- displayModel:PivotTo(anchorCFrame * CFrame.Angles(0, math.rad(180), 0))
+							
 							displayModel.Parent = slot.Collector
 						end
 					end
