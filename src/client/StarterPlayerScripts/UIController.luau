@@ -308,6 +308,10 @@ end
 
 
 function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
+	-- [修改内容] 游戏启动时，隐藏用于克隆的原始模板，避免在列表中显示空白项
+	if rowTemplate then rowTemplate.Visible = false end
+	if weaponTemplate then weaponTemplate.Visible = false end
+
 	-- 1. [修改内容] 金币同步与飞行动效触发
 	local lastGold = player:GetAttribute("Gold") or 0
 	goldLabel.Text = formatNumberShort(lastGold)
