@@ -535,6 +535,26 @@ local function createWindow(titleText: string): Frame
 	return frame
 end
 
+-- [修改内容] 引入必要的数值格式化工具
+local function formatNumberShort(n: number): string
+	local abs = math.abs(n)
+	local units = {
+		{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" },
+		{ 1e9, "B" }, { 1e6, "M" }, { 1e4, "w" },
+	}
+	for _, u in ipairs(units) do
+		local base = u[1] :: number
+		local suffix = u[2] :: string
+		if abs >= base then
+			local v = n / base
+			local s: string = string.format("%.1f", v)
+			s = s:gsub("%.?0+$", "")
+			return s .. suffix
+		end
+	end
+	return tostring(math.floor(n))
+end
+
 -- ===== 武器商店相关逻辑 =====
 local weaponWindow = createWindow("武器商店")
 local weaponInfo = Instance.new("TextLabel")
@@ -562,12 +582,98 @@ weaponLayout.Padding = UDim.new(0, 8)
 weaponLayout.SortOrder = Enum.SortOrder.LayoutOrder
 weaponLayout.Parent = weaponList
 
+-- [修改内容] 武器行为判断与生成逻辑
+type WeaponAction = "Buy" | "Equip" | "Unequip"
+
+local function resolveWeaponAction(itemLevel: number): (string, WeaponAction)
+	local ownedMaxLevel = player:GetAttribute("WeaponLevel") or 1
+	local equippedLevel = player:GetAttribute("EquippedWeaponLevel") or 1
+
+	if itemLevel > ownedMaxLevel then
+		return "购买武器", "Buy"
+	elseif itemLevel == equippedLevel then
+		return "卸下武器", "Unequip"
+	else
+		return "装备", "Equip"
+	end
+end
+
+local function buildWeaponRow(level: number)
+	local price = Config.WEAPON_PRICE_BY_LEVEL[level]
+	if price == nil then return end
+	local attack = Config.WEAPON_ATTACK_BY_LEVEL[level] or 0
+	local buttonText, action = resolveWeaponAction(level)
+
+	local row = Instance.new("Frame")
+	row.Name = "WeaponRow" .. tostring(level)
+	row.LayoutOrder = level
+	row.Size = UDim2.fromOffset(570, 70)
+	row.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	row.BorderSizePixel = 0
+	row.Parent = weaponList
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Position = UDim2.fromOffset(20, 10)
+	nameLabel.Size = UDim2.fromOffset(240, 24)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextScaled = true
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	local weaponName = (Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[level]) or string.format("武器 Lv.%d", level)
+	nameLabel.Text = tostring(weaponName)
+	nameLabel.Parent = row
+
+	local desc = Instance.new("TextLabel")
+	desc.BackgroundTransparency = 1
+	desc.Position = UDim2.fromOffset(20, 38)
+	desc.Size = UDim2.fromOffset(320, 20)
+	desc.TextXAlignment = Enum.TextXAlignment.Left
+	desc.Font = Enum.Font.Gotham
+	desc.TextScaled = true
+	desc.TextColor3 = Color3.fromRGB(220, 220, 220)
+	desc.Text = string.format("攻击力+%d   价格:%s", attack, formatNumberShort(price))
+	desc.Parent = row
+
+	local btn = Instance.new("TextButton")
+	btn.Name = "Buy"
+	btn.AnchorPoint = Vector2.new(1, 0.5)
+	btn.Position = UDim2.new(1, -10, 0.5, 0)
+	btn.Size = UDim2.fromOffset(110, 44)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextScaled = true
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+	btn.Text = buttonText
+	btn.Parent = row
+
+	btn.Activated:Connect(function()
+		if action == "Buy" then
+			requestPurchaseWeapon:FireServer(level)
+		elseif action == "Equip" then
+			requestEquipWeapon:FireServer(level)
+		elseif action == "Unequip" then
+			requestEquipWeapon:FireServer(1)
+		end
+	end)
+end
+
 local function refreshWeaponShop()
 	local ownedMax = player:GetAttribute("WeaponLevel") or 1
 	local equipped = player:GetAttribute("EquippedWeaponLevel") or 1
 	weaponInfo.Text = string.format("已拥有最高：Lv.%d   当前装备：Lv.%d", ownedMax, equipped)
 	
-	-- 清理旧行并根据 Config.WEAPON_PRICE_BY_LEVEL 重新生成（此处省略具体循环逻辑，需参考 Config）
+	for _, ch in ipairs(weaponList:GetChildren()) do
+		if not ch:IsA("UIListLayout") then ch:Destroy() end
+	end
+	
+	for level = 1, 20 do
+		buildWeaponRow(level)
+	end
+	
+	task.delay(0, function()
+		weaponList.CanvasSize = UDim2.fromOffset(0, weaponLayout.AbsoluteContentSize.Y + 10)
+	end)
 end
 
 openWeaponShopUI.OnClientEvent:Connect(function()
@@ -588,15 +694,98 @@ local upgradeLayout = Instance.new("UIListLayout")
 upgradeLayout.Padding = UDim.new(0, 10)
 upgradeLayout.Parent = upgradeList
 
+local function buildUpgradeRow(titleText: string, infoText: string, onBuy: () -> ())
+	local row = Instance.new("Frame")
+	row.Size = UDim2.fromOffset(588, 70)
+	row.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	row.BorderSizePixel = 0
+	row.Parent = upgradeList
+
+	local title = Instance.new("TextLabel")
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.fromOffset(14, 10)
+	title.Size = UDim2.fromOffset(320, 24)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Font = Enum.Font.GothamBold
+	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.Text = titleText
+	title.Parent = row
+
+	local info = Instance.new("TextLabel")
+	info.BackgroundTransparency = 1
+	info.Position = UDim2.fromOffset(14, 38)
+	info.Size = UDim2.fromOffset(420, 20)
+	info.TextXAlignment = Enum.TextXAlignment.Left
+	info.Font = Enum.Font.Gotham
+	info.TextScaled = true
+	info.TextColor3 = Color3.fromRGB(220, 220, 220)
+	info.Text = infoText
+	info.Parent = row
+
+	local btn = Instance.new("TextButton")
+	btn.AnchorPoint = Vector2.new(1, 0.5)
+	btn.Position = UDim2.new(1, -12, 0.5, 0)
+	btn.Size = UDim2.fromOffset(110, 44)
+	btn.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextScaled = true
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Text = "升级"
+	btn.Parent = row
+
+	btn.Activated:Connect(function() onBuy() end)
+end
+
 local function refreshUpgradeShop()
-	-- 根据属性（AttackLevel, HealthLevel等）刷新显示
+	for _, ch in ipairs(upgradeList:GetChildren()) do
+		if not ch:IsA("UIListLayout") then ch:Destroy() end
+	end
+
+	local atkLevel = player:GetAttribute("AttackLevel") or 0
+	local hpLevel = player:GetAttribute("HealthLevel") or 0
+	local spdLevel = player:GetAttribute("SpeedLevel") or 0
+	local carryLevel = player:GetAttribute("CarryLevel") or 0
+
+	local nextAtkCost = Config.GetAttackUpgradeCost(atkLevel + 1)
+	local nextHpCost = Config.GetHealthUpgradeCost(hpLevel + 1)
+	local nextSpdCost = Config.GetSpeedUpgradeCost(spdLevel + 1)
+	local nextCarryCost = Config.GetCarryUpgradeCost(carryLevel + 1)
+
+	buildUpgradeRow(
+		"升级攻击力 (Lv." .. (atkLevel + 1) .. ")",
+		string.format("花费:%s   +%d 攻击力", formatNumberShort(nextAtkCost), Config.ATTACK_UPGRADE_ADD),
+		function() requestPurchaseUpgrade:FireServer("Attack") end
+	)
+
+	buildUpgradeRow(
+		"升级血量 (Lv." .. (hpLevel + 1) .. ")",
+		string.format("花费:%s   +%d 最大血量", formatNumberShort(nextHpCost), Config.HEALTH_PER_UPGRADE),
+		function() requestPurchaseUpgrade:FireServer("Health") end
+	)
+
+	buildUpgradeRow(
+		"升级速度 (Lv." .. (spdLevel + 1) .. ")",
+		string.format("花费:%s   +%d 速度", formatNumberShort(nextSpdCost), Config.WALK_SPEED_PER_UPGRADE),
+		function() requestPurchaseUpgrade:FireServer("Speed") end
+	)
+
+	local curMaxCarry = Config.GetCarryMax(carryLevel)
+	local nextMaxCarry = Config.GetCarryMax(carryLevel + 1)
+	local carryInfo = nextCarryCost == nil 
+		and string.format("当前可携带:%d（已满级）", curMaxCarry)
+		or string.format("花费:%s   可携带:%d → %d", formatNumberShort(nextCarryCost), curMaxCarry, nextMaxCarry)
+
+	buildUpgradeRow(
+		"升级携带数量", carryInfo,
+		function() requestPurchaseUpgrade:FireServer("Carry") end
+	)
 end
 
 openUpgradeShopUI.OnClientEvent:Connect(function()
 	upgradeWindow.Visible = true
 	refreshUpgradeShop()
 end)
-
 
 -- =====================
 -- Home 头像显示：离开出生点 20 单位后显示，回到范围内隐藏

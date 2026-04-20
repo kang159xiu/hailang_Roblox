@@ -230,37 +230,5 @@ Config.SKILL20_AOE_DAMAGE = 8000
 
 
 
--- [修改内容] 添加商店相关的配置参数
-Config.WEAPON_PRICE_BY_LEVEL = {
-	[2] = 500, [3] = 1500, [4] = 4000, [5] = 10000,
-	-- ... 这里根据你的需求补全到 20 级
-}
-
-Config.WEAPON_ATTACK_BY_LEVEL = {
-	[1] = 10, [2] = 25, [3] = 60, [4] = 150, [5] = 350,
-	-- ... 这里根据你的需求补全
-}
-
-Config.ATTACK_UPGRADE_ADD = 10
-Config.HEALTH_PER_UPGRADE = 100
-Config.WALK_SPEED_PER_UPGRADE = 2
-
--- 升级花费计算逻辑
-function Config.GetAttackUpgradeCost(level: number)
-	return 100 * math.pow(1.5, level - 1)
-end
-
-function Config.GetHealthUpgradeCost(level: number)
-	return 150 * math.pow(1.4, level - 1)
-end
-
-function Config.GetSpeedUpgradeCost(level: number)
-	return 200 * math.pow(1.8, level - 1)
-end
-
-function Config.GetCarryUpgradeCost(level: number)
-	if level > 5 then return nil end
-	return 500 * math.pow(3, level - 1)
-end
 
 return Config

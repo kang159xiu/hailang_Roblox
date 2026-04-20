@@ -82,7 +82,7 @@ local function isNear(player: Player, part: BasePart, maxDist: number): boolean
 end
 
 function MerchantService.Init()
-    -- 1. [修改内容] 初始化升级商人交互
+	-- 1. [修改内容] 初始化升级商人交互
 	local merchant = ZoneService.GetMerchantPart()
 	if merchant then
 		local openPrompt = ensurePrompt(merchant, "OpenUpgradeShop")
@@ -93,31 +93,118 @@ function MerchantService.Init()
 		end)
 	end
 
-    -- 2. [修改内容] 处理武器购买请求
+	-- 1.1 初始化武器商人交互
+	local weaponMerchant = ZoneService.GetWeaponMerchantPart()
+	if weaponMerchant then
+		local openPrompt = ensurePrompt(weaponMerchant, "OpenWeaponShop")
+		openPrompt.ActionText = "打开武器商店"
+		openPrompt.ObjectText = "武器商人"
+		openPrompt.Triggered:Connect(function(player)
+			openWeaponShopUI:FireClient(player)
+		end)
+	end
+
+	-- 2. [修改内容] 处理武器购买请求
 	requestPurchaseWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
 		local wm = ZoneService.GetWeaponMerchantPart()
 		if not wm or not isNear(player, wm, 12) then return end
 
 		local stats = PlayerData.Get(player)
+		local desired = tonumber(desiredWeaponLevel)
+		if not desired then return end
+
 		local nextLevel = stats.WeaponLevel + 1
-        local price = Config.WEAPON_PRICE_BY_LEVEL[nextLevel]
-		
-		if price and PlayerData.TrySpendGold(player, price) then
-			WeaponToolService.GrantWeapon(player, nextLevel, true)
-			pushToast(player, string.format("购买成功！花费 %s", Util.FormatMoney(price)))
-		else
-			pushToast(player, "金币不足或已满级")
+		if desired ~= nextLevel then
+			pushToast(player, "只能购买下一把武器")
+			return
 		end
+
+		local price = Config.WEAPON_PRICE_BY_LEVEL[nextLevel]
+		if price == nil then
+			pushToast(player, "已经是最高武器")
+			return
+		end
+		
+		if not PlayerData.TrySpendGold(player, price) then
+			pushToast(player, string.format("金币不足，需要 %s", Util.FormatMoney(price)))
+			return
+		end
+		
+		WeaponToolService.GrantWeapon(player, nextLevel, true)
+		DataDirtyService.MarkDirty(player, 5)
+		pushToast(player, string.format("购买成功：武器Lv.%d（花费%s）", nextLevel, Util.FormatMoney(price)))
 	end)
 
-    -- 3. [修改内容] 处理升级请求（攻击/速度/血量）
-    requestPurchaseUpgrade.OnServerEvent:Connect(function(player: Player, upgradeType: string)
-        local m = ZoneService.GetMerchantPart()
-        if not m or not isNear(player, m, 12) then return end
-        
-        -- 根据 upgradeType 执行 PlayerData.AddAttackLevel 等逻辑并扣款
-        -- (参考有商店版本的 140-175 行逻辑进行集成)
-    end)
+	-- 3. [修改内容] 处理装备已拥有武器的请求
+	requestEquipWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
+		local wm = ZoneService.GetWeaponMerchantPart()
+		if not wm or not isNear(player, wm, 12) then return end
+
+		local desired = tonumber(desiredWeaponLevel)
+		if not desired then return end
+
+		PlayerData.SetEquippedWeaponLevel(player, desired)
+		WeaponToolService.Sync(player, true)
+		DataDirtyService.MarkDirty(player, 5)
+		pushToast(player, string.format("已装备：武器Lv.%d", desired))
+	end)
+
+	-- 4. [修改内容] 处理升级请求（攻击/速度/血量/携带数量）
+	requestPurchaseUpgrade.OnServerEvent:Connect(function(player: Player, upgradeType: any)
+		local m = ZoneService.GetMerchantPart()
+		if not m or not isNear(player, m, 12) then return end
+
+		local t = tostring(upgradeType)
+		local stats = PlayerData.Get(player)
+
+		if t == "Attack" then
+			local nextLevel = stats.AttackLevel + 1
+			local cost = Config.GetAttackUpgradeCost(nextLevel)
+			if PlayerData.TrySpendGold(player, cost) then
+				PlayerData.AddAttackLevel(player, 1)
+				DataDirtyService.MarkDirty(player, 5)
+				pushToast(player, string.format("攻击力升级成功！花费：%s", Util.FormatMoney(cost)))
+			else
+				pushToast(player, "金币不足")
+			end
+		elseif t == "Speed" then
+			local nextLevel = stats.SpeedLevel + 1
+			local cost = Config.GetSpeedUpgradeCost(nextLevel)
+			if PlayerData.TrySpendGold(player, cost) then
+				PlayerData.AddSpeedLevel(player, 1)
+				CharacterService.Refresh(player)
+				DataDirtyService.MarkDirty(player, 5)
+				pushToast(player, string.format("速度升级成功！花费：%s", Util.FormatMoney(cost)))
+			else
+				pushToast(player, "金币不足")
+			end
+		elseif t == "Health" then
+			local nextLevel = stats.HealthLevel + 1
+			local cost = Config.GetHealthUpgradeCost(nextLevel)
+			if PlayerData.TrySpendGold(player, cost) then
+				PlayerData.AddHealthLevel(player, 1)
+				CharacterService.Refresh(player)
+				DataDirtyService.MarkDirty(player, 5)
+				pushToast(player, string.format("血量升级成功！花费：%s", Util.FormatMoney(cost)))
+			else
+				pushToast(player, "金币不足")
+			end
+		elseif t == "Carry" then
+			local nextLevel = stats.CarryLevel + 1
+			local cost = Config.GetCarryUpgradeCost(nextLevel)
+			if cost == nil then
+				pushToast(player, "携带数量已满级")
+				return
+			end
+			if PlayerData.TrySpendGold(player, cost) then
+				PlayerData.AddCarryLevel(player, 1)
+				DataDirtyService.MarkDirty(player, 5)
+				pushToast(player, string.format("携带数量升级成功！花费：%s", Util.FormatMoney(cost)))
+			else
+				pushToast(player, "金币不足")
+			end
+		end
+	end)
 end
 
 return MerchantService
