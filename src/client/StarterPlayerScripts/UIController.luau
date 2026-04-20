@@ -27,7 +27,15 @@ local goldLabel = mainGui:WaitForChild("GoldFrame"):WaitForChild("GoldLabel") ::
 local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") :: Frame
 local monsterInventoryList = monsterInventoryWindow:WaitForChild("List") :: ScrollingFrame
 local rowTemplate = monsterInventoryWindow:WaitForChild("RowTemplate") :: ImageButton
+
+-- [修改内容] 新增武器列表、武器模板和选项卡按钮的变量引用
+local weaponList = monsterInventoryWindow:WaitForChild("weaponList") :: ScrollingFrame
+local weaponTemplate = monsterInventoryWindow:WaitForChild("WeaponTemplate") :: GuiObject
+local monsterTabBtn = monsterInventoryWindow:WaitForChild("monster") :: GuiButton
+local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
+
 local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
+
 
 local shopsGui: ScreenGui
 local weaponWindow: Frame
@@ -55,6 +63,47 @@ local function showToast(text: string)
 end
 
 -- =====================
+-- [修改内容] UI 形象加载辅助函数
+-- =====================
+-- =====================
+-- [修改内容] 动态创建 Viewport 形象函数
+-- =====================
+local function loadViewportIcon(targetContainer: GuiObject, modelSource: Instance?)
+	if not modelSource then return end
+	
+	-- 1. 清理旧内容
+	targetContainer:ClearAllChildren()
+
+	-- 2. 创建 ViewportFrame
+	local viewport = Instance.new("ViewportFrame")
+	viewport.Size = UDim2.fromScale(1, 1)
+	viewport.BackgroundTransparency = 1
+	viewport.Parent = targetContainer
+
+	-- 3. 克隆模型并放入
+	local model = modelSource:Clone()
+	if model:IsA("Model") then
+		model:PivotTo(CFrame.new(0, 0, 0))
+	elseif model:IsA("BasePart") then
+		model.CFrame = CFrame.new(0, 0, 0)
+	end
+	model.Parent = viewport
+
+	-- 4. 创建并配置摄像机
+	local camera = Instance.new("Camera")
+	viewport.CurrentCamera = camera
+	camera.Parent = viewport
+
+	-- 5. 自动聚焦算法：根据模型大小计算摄像机位置
+	local cf, size = model:GetBoundingBox()
+	local maxSide = math.max(size.X, size.Y, size.Z)
+	local distance = maxSide / math.tan(math.rad(camera.FieldOfView) / 2)
+	
+	-- 将相机放在模型前方，稍微斜向上看
+	camera.CFrame = CFrame.new(Vector3.new(distance * 0.8, distance * 0.5, distance * 0.8), cf.Position)
+end
+
+-- =====================
 -- 怪物背包逻辑
 -- =====================
 local function refreshMonsterInventoryUI(payload)
@@ -62,18 +111,94 @@ local function refreshMonsterInventoryUI(payload)
 		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
 	end
 
+	-- 假设怪物模型放在 ReplicatedStorage.MonsterModels 下，命名为 "Monster1", "Monster2"...
+	local monsterFolder = ReplicatedStorage:FindFirstChild("MonsterModels")
+
 	for i, it in ipairs(payload or {}) do
 		local row = rowTemplate:Clone()
 		row.Visible = true
 		row.Parent = monsterInventoryList
+		
 		local label = row:FindFirstChild("Label")
 		if label and label:IsA("TextLabel") then
 			label.Text = string.format("怪Lv%d  价值:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
 		end
+		
+		-- [修改内容] 动态生成怪物 3D 预览
+		local imageContainer = row:FindFirstChild("ImageLabel")
+		if imageContainer and monsterFolder then
+			local model = monsterFolder:FindFirstChild("Monster" .. it.MonsterLevel)
+			loadViewportIcon(imageContainer, model)
+		end
+
 		local takeOutBtn = row:FindFirstChild("拿出按钮")
 		if takeOutBtn and takeOutBtn:IsA("GuiButton") then
 			takeOutBtn.Activated:Connect(function() requestTakeOutMonsterItem:FireServer(it.ItemId) end)
 		end
+	end
+end
+
+
+-- 武器背包逻辑
+local function refreshWeaponInventoryUI()
+	for _, ch in ipairs(weaponList:GetChildren()) do
+		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
+	end
+
+	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
+	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
+	-- 假设武器模型放在 ReplicatedStorage.WeaponModels 下，命名为 "Weapon1", "Weapon2"...
+	local weaponFolder = ReplicatedStorage:FindFirstChild("WeaponModels")
+
+	for i = 1, maxWeaponLevel do
+		local row = weaponTemplate:Clone()
+		row.Visible = true
+		row.Parent = weaponList
+		
+		local label = row:FindFirstChild("Label")
+		if label and label:IsA("TextLabel") then
+			label.Text = Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
+		end
+		
+		-- [修改内容] 动态生成武器 3D 预览
+		local imageContainer = row:FindFirstChild("ImageLabel")
+		if imageContainer and weaponFolder then
+			local model = weaponFolder:FindFirstChild("Weapon" .. i)
+			loadViewportIcon(imageContainer, model)
+		end
+
+		local equipBtn = row:FindFirstChild("装备按钮")
+		if equipBtn and equipBtn:IsA("GuiButton") then
+			local btnText = equipBtn:FindFirstChild("装备text")
+			if btnText and btnText:IsA("TextLabel") then
+				-- [修改内容] 实时判断装备状态
+				if i == equippedWeapon then
+					btnText.Text = "已装备"
+					equipBtn.AutoButtonColor = false -- 视觉上禁用已装备按钮
+				else
+					btnText.Text = "装备武器"
+					equipBtn.AutoButtonColor = true
+					equipBtn.Activated:Connect(function()
+						-- 向服务器发送装备请求
+						requestEquipWeapon:FireServer(i)
+					end)
+				end
+			end
+		end
+	end
+end
+
+-- =====================
+-- [修改内容] 选项卡切换逻辑
+-- =====================
+local function switchInventoryTab(tabName: string)
+	if tabName == "monster" then
+		monsterInventoryList.Visible = true
+		weaponList.Visible = false
+	elseif tabName == "weapon" then
+		monsterInventoryList.Visible = false
+		weaponList.Visible = true
+		refreshWeaponInventoryUI()
 	end
 end
 
@@ -192,10 +317,32 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	-- 3. 怪物背包同步
 	syncMonsterInventory.OnClientEvent:Connect(function(payload) refreshMonsterInventoryUI(payload) end)
 
-	-- 4. 背包按钮开关
+	-- 4. [修改内容] 背包按钮开关及选项卡逻辑
 	if backpackButton then
-		backpackButton.Activated:Connect(function() monsterInventoryWindow.Visible = not monsterInventoryWindow.Visible end)
+		backpackButton.Activated:Connect(function() 
+			local newState = not monsterInventoryWindow.Visible
+			monsterInventoryWindow.Visible = newState
+			if newState then
+				-- 打开背包时默认重置显示怪物页
+				switchInventoryTab("monster")
+			end
+		end)
 	end
+
+	-- [修改内容] 监听顶部选项卡按钮点击
+	if monsterTabBtn then
+		monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end)
+	end
+	if weaponTabBtn then
+		weaponTabBtn.Activated:Connect(function() switchInventoryTab("weapon") end)
+	end
+
+	-- [修改内容] 关键：监听装备属性变化，只要服务端一改，客户端立即重刷列表
+    player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
+        if monsterInventoryWindow.Visible and weaponList.Visible then
+            refreshWeaponInventoryUI()
+        end
+    end)
 
 	-- 5. 初始化商店 (此处应包含原脚本中 openWeaponShopUI 等监听器)
 	-- [逻辑流]：监听服务端事件 -> 显示对应的 Window -> 调用刷新函数渲染列表
