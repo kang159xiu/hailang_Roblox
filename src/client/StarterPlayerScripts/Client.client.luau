@@ -57,17 +57,10 @@ end)
 
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 
+-- [修改内容] 移除已被 UIController 接管的 UI Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local toastRemote = remotes:WaitForChild("PushClientToast") :: RemoteEvent
-local syncMonsterInventory = remotes:WaitForChild("SyncMonsterInventory") :: RemoteEvent
-local requestTakeOutMonsterItem = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
 local requestPromptInteraction = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
-local openWeaponShopUI = remotes:WaitForChild("OpenWeaponShopUI") :: RemoteEvent
-local openUpgradeShopUI = remotes:WaitForChild("OpenUpgradeShopUI") :: RemoteEvent
-local requestPurchaseWeapon = remotes:WaitForChild("RequestPurchaseWeapon") :: RemoteEvent
-local requestEquipWeapon = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
-local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent
 
 
 -- =====================
@@ -482,18 +475,7 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
--- =====================
--- 怪物背包 UI（MonsterInventoryWindow）
--- =====================
 
-type MonsterInvItem = {
-	ItemId: string,
-	MonsterLevel: number,
-	Value: number,
-	GoldPerSec: number,
-}
-
-local monsterInvItems: {MonsterInvItem} = {}
 
 
 
