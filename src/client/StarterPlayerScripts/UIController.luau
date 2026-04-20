@@ -234,10 +234,84 @@ local function createWindow(titleText: string)
 	frame.AnchorPoint = Vector2.new(0.5, 0.5)
 	frame.Position = UDim2.fromScale(0.5, 0.5)
 	frame.Size = UDim2.fromOffset(620, 420)
-	frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30) -- 稍微调亮一点背景色
+	frame.BorderSizePixel = 0
 	frame.Visible = false
 	frame.Parent = shopsGui
-	-- ... (此处省略部分 UI 创建代码，实际应包含 Title 和 Close 按钮逻辑)
+
+	-- [修改内容] 添加圆角让 UI 更好看
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = frame
+
+	-- [修改内容] 添加顶部标题栏
+	local topBar = Instance.new("Frame")
+	topBar.Name = "TopBar"
+	topBar.Size = UDim2.new(1, 0, 0, 40)
+	topBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	topBar.BorderSizePixel = 0
+	topBar.Parent = frame
+
+	local topBarCorner = Instance.new("UICorner")
+	topBarCorner.CornerRadius = UDim.new(0, 8)
+	topBarCorner.Parent = topBar
+
+	-- 填补直角（隐藏圆角带来的底部缺口）
+	local bottomFiller = Instance.new("Frame")
+	bottomFiller.Size = UDim2.new(1, 0, 0, 8)
+	bottomFiller.Position = UDim2.new(0, 0, 1, -8)
+	bottomFiller.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	bottomFiller.BorderSizePixel = 0
+	bottomFiller.Parent = topBar
+
+	-- [修改内容] 添加标题文字
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "TitleLabel"
+	titleLabel.Size = UDim2.new(1, -100, 1, 0)
+	titleLabel.Position = UDim2.new(0, 15, 0, 0)
+	titleLabel.BackgroundTransparency = 1
+	-- 自动判断是武器商店还是升级商店
+	titleLabel.Text = titleText == "Weapon" and "武器商店" or (titleText == "Upgrade" and "升级商店" or titleText)
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.TextSize = 20
+	titleLabel.Font = Enum.Font.SourceSansBold
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Parent = topBar
+
+	-- [修改内容] 添加关闭按钮
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseButton"
+	closeBtn.Size = UDim2.new(0, 40, 0, 40)
+	closeBtn.Position = UDim2.new(1, -40, 0, 0)
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = Color3.fromRGB(255, 85, 85)
+	closeBtn.TextSize = 24
+	closeBtn.Font = Enum.Font.SourceSansBold
+	closeBtn.Parent = topBar
+
+	-- [修改内容] 关闭按钮逻辑
+	closeBtn.Activated:Connect(function()
+		frame.Visible = false
+	end)
+
+	-- [修改内容] 添加商品列表容器，方便后续渲染商品条目
+	local contentList = Instance.new("ScrollingFrame")
+	contentList.Name = "ContentList"
+	contentList.Size = UDim2.new(1, -20, 1, -50)
+	contentList.Position = UDim2.new(0, 10, 0, 45)
+	contentList.BackgroundTransparency = 1
+	contentList.BorderSizePixel = 0
+	contentList.ScrollBarThickness = 6
+	contentList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	contentList.CanvasSize = UDim2.new(0, 0, 0, 0)
+	contentList.Parent = frame
+
+	local uiListLayout = Instance.new("UIListLayout")
+	uiListLayout.Padding = UDim.new(0, 5)
+	uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	uiListLayout.Parent = contentList
+
 	return frame
 end
 
