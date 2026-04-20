@@ -477,7 +477,7 @@ local function playGoldTextAnimation(difference: number)
 end
 
 -- =====================
--- [修改内容] 武器商店渲染逻辑
+-- [修改内容] 武器商店渲染逻辑 (修复无法滚动、按钮状态错误问题)
 -- =====================
 local function refreshWeaponShopUI()
 	if not weaponShopList or not weaponShopTemplate then return end
@@ -526,51 +526,57 @@ local function refreshWeaponShopUI()
 			end
 		end
 
-		-- D. 状态判断与按钮绑定
+		-- D. 状态判断与按钮绑定 (修复点)
 		local actionFrame = row:FindFirstChild("购买UIFrame")
-		local statusLabel = actionFrame and actionFrame:FindFirstChild("未购买/购买/装备")
+		-- 直接获取里面的 TextButton (你的组件名叫 "未购买/购买/装备")
+		local btn = actionFrame and actionFrame:FindFirstChild("未购买/购买/装备")
 		
-		-- 寻找可以点击的按钮组件 (防错：如果 购买UIFrame 本身不是按钮，就找它里面的按钮)
-		local btn = actionFrame
-		if actionFrame and not actionFrame:IsA("GuiButton") then
-			btn = actionFrame:FindFirstChildWhichIsA("GuiButton")
-		end
-
-		if btn and btn:IsA("GuiButton") and statusLabel and statusLabel:IsA("TextLabel") then
+		-- 因为它是 TextButton，直接判断它是否是一个 GuiButton 即可
+		if btn and btn:IsA("GuiButton") then
 			if i > maxWeaponLevel + 1 then
 				-- 超出当前可买等级，锁定
-				statusLabel.Text = "未解锁"
-				btn.Interactable = false
+				btn.Text = "未解锁"
+				btn.Interactable = false  -- 禁用交互（禁止变色和点击）
 				btn.Active = false
-				if btn:IsA("ImageButton") then btn.ImageTransparency = 0.5 end
 			elseif i == maxWeaponLevel + 1 then
 				-- 可以买的下一把
-				statusLabel.Text = "购买"
+				btn.Text = "购买"
 				btn.Interactable = true
 				btn.Active = true
-				if btn:IsA("ImageButton") then btn.ImageTransparency = 0 end
 				btn.Activated:Connect(function()
 					requestPurchaseWeapon:FireServer(i)
 				end)
 			elseif i <= maxWeaponLevel then
 				-- 已拥有
 				if i == equippedWeapon then
-					statusLabel.Text = "已装备"
+					btn.Text = "已装备"
 					btn.Interactable = false
 					btn.Active = false
-					if btn:IsA("ImageButton") then btn.ImageTransparency = 0.5 end
 				else
-					statusLabel.Text = "装备"
+					btn.Text = "装备"
 					btn.Interactable = true
 					btn.Active = true
-					if btn:IsA("ImageButton") then btn.ImageTransparency = 0 end
 					btn.Activated:Connect(function()
 						requestEquipWeapon:FireServer(i)
 					end)
 				end
 			end
+		else
+			warn("[UIController] 未在 购买UIFrame 中找到名为 '未购买/购买/装备' 的按钮组件！")
 		end
 	end
+
+	-- 3. [修复点] 强制重新计算滑动列表的高度，解决无法滚动的问题
+	task.defer(function()
+		if weaponShopList:IsA("ScrollingFrame") then
+			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			local gridLayout = weaponShopList:FindFirstChildWhichIsA("UIGridLayout")
+			if gridLayout then
+				-- 强制根据网格内容高度设定画布大小 (+20 是为了留一点底部边距)
+				weaponShopList.CanvasSize = UDim2.fromOffset(0, gridLayout.AbsoluteContentSize.Y + 20)
+			end
+		end
+	end)
 end
 
 function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
