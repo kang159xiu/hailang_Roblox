@@ -62,9 +62,8 @@ local function showToast(text: string)
 	print("[系统提示]:", text) -- [修改内容] 保持原有的静默输出逻辑
 end
 
--- =====================
--- [修改内容] 自动生成 ViewportFrame 并智能聚焦场景中的模型
--- =====================
+
+
 local function loadViewportFromScene(targetContainer: GuiObject, modelSource: Instance?)
 	if not modelSource then return end
 	
