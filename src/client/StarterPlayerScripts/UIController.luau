@@ -56,6 +56,10 @@ upgradeTemplate.Visible = false -- 隐藏原始模板，防止它作为实体显
 
 -- [修改内容] 武器商店引用
 local weaponWindow = shopsGui:FindFirstChild("武器商店Window")
+local weaponShopList = weaponWindow and weaponWindow:FindFirstChild("List")
+local weaponShopTemplate = weaponWindow and weaponWindow:FindFirstChild("单个武器背景")
+if weaponShopTemplate then weaponShopTemplate.Visible = false end -- 隐藏原始模板
+
 if weaponWindow then
 	local weaponCloseBtn = weaponWindow:FindFirstChild("Close")
 	if weaponCloseBtn and weaponCloseBtn:IsA("GuiButton") then
@@ -472,6 +476,103 @@ local function playGoldTextAnimation(difference: number)
 	end)
 end
 
+-- =====================
+-- [修改内容] 武器商店渲染逻辑
+-- =====================
+local function refreshWeaponShopUI()
+	if not weaponShopList or not weaponShopTemplate then return end
+
+	-- 1. 清理旧条目
+	for _, ch in ipairs(weaponShopList:GetChildren()) do
+		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" and not ch:IsA("UILayout") then
+			ch:Destroy()
+		end
+	end
+
+	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
+	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
+	local weaponFolder = workspace:FindFirstChild("weapon")
+
+	-- 2. 循环生成 20 级武器列表
+	for i = 1, 20 do
+		local price = Config.WEAPON_PRICE_BY_LEVEL and Config.WEAPON_PRICE_BY_LEVEL[i]
+		local attack = Config.WEAPON_ATTACK_BY_LEVEL and Config.WEAPON_ATTACK_BY_LEVEL[i]
+		if not price and i > 1 then continue end -- 如果没配置价格，说明到顶了
+
+		local row = weaponShopTemplate:Clone()
+		row.Name = "WeaponShopRow_" .. i
+		row.Visible = true
+		row.Parent = weaponShopList
+
+		-- A. 武器名称
+		local nameLabel = row:FindFirstChild("武器名称")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			nameLabel.Text = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
+		end
+
+		-- B. 价格与攻击力
+		local infoLabel = row:FindFirstChild("武器价格/武器攻击力")
+		if infoLabel and infoLabel:IsA("TextLabel") then
+			infoLabel.Text = string.format("价格: %s   攻击力: +%s", formatNumberShort(price or 0), formatNumberShort(attack or 0))
+		end
+
+		-- C. 加载3D形象 (ViewportFrame)
+		local imageContainer = row:FindFirstChild("武器形象")
+		if imageContainer and weaponFolder then
+			local iconName = string.format("武器%02d", i)
+			local model = weaponFolder:FindFirstChild(iconName)
+			if model then
+				loadViewportFromScene(imageContainer, model)
+			end
+		end
+
+		-- D. 状态判断与按钮绑定
+		local actionFrame = row:FindFirstChild("购买UIFrame")
+		local statusLabel = actionFrame and actionFrame:FindFirstChild("未购买/购买/装备")
+		
+		-- 寻找可以点击的按钮组件 (防错：如果 购买UIFrame 本身不是按钮，就找它里面的按钮)
+		local btn = actionFrame
+		if actionFrame and not actionFrame:IsA("GuiButton") then
+			btn = actionFrame:FindFirstChildWhichIsA("GuiButton")
+		end
+
+		if btn and btn:IsA("GuiButton") and statusLabel and statusLabel:IsA("TextLabel") then
+			if i > maxWeaponLevel + 1 then
+				-- 超出当前可买等级，锁定
+				statusLabel.Text = "未解锁"
+				btn.Interactable = false
+				btn.Active = false
+				if btn:IsA("ImageButton") then btn.ImageTransparency = 0.5 end
+			elseif i == maxWeaponLevel + 1 then
+				-- 可以买的下一把
+				statusLabel.Text = "购买"
+				btn.Interactable = true
+				btn.Active = true
+				if btn:IsA("ImageButton") then btn.ImageTransparency = 0 end
+				btn.Activated:Connect(function()
+					requestPurchaseWeapon:FireServer(i)
+				end)
+			elseif i <= maxWeaponLevel then
+				-- 已拥有
+				if i == equippedWeapon then
+					statusLabel.Text = "已装备"
+					btn.Interactable = false
+					btn.Active = false
+					if btn:IsA("ImageButton") then btn.ImageTransparency = 0.5 end
+				else
+					statusLabel.Text = "装备"
+					btn.Interactable = true
+					btn.Active = true
+					if btn:IsA("ImageButton") then btn.ImageTransparency = 0 end
+					btn.Activated:Connect(function()
+						requestEquipWeapon:FireServer(i)
+					end)
+				end
+			end
+		end
+	end
+end
+
 function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
 	-- [修改内容] 游戏启动时，隐藏用于克隆的原始模板，避免在列表中显示空白项
 	if rowTemplate then rowTemplate.Visible = false end
@@ -561,9 +662,18 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	openWeaponShopUI.OnClientEvent:Connect(function()
 		if weaponWindow then
 			weaponWindow.Visible = true
+			refreshWeaponShopUI() -- 打开时动态生成武器列表
 		else
 			warn("[UIController] 未在 ShopsUI 中找到 '武器商店Window'")
 		end
+	end)
+
+	-- [修改内容] 购买或装备后，商店界面实时更新状态
+	player:GetAttributeChangedSignal("WeaponLevel"):Connect(function()
+		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
+	end)
+	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
+		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
 	end)
 
 	-- [修改内容] 监听服务端发来的打开升级商店指令
