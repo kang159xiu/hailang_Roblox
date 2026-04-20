@@ -681,111 +681,7 @@ openWeaponShopUI.OnClientEvent:Connect(function()
 	refreshWeaponShop()
 end)
 
--- ===== 升级商店相关逻辑 =====
-local upgradeWindow = createWindow("升级商店")
-local upgradeList = Instance.new("Frame")
-upgradeList.Name = "List"
-upgradeList.Position = UDim2.fromOffset(16, 60)
-upgradeList.Size = UDim2.fromOffset(588, 344)
-upgradeList.BackgroundTransparency = 1
-upgradeList.Parent = upgradeWindow
 
-local upgradeLayout = Instance.new("UIListLayout")
-upgradeLayout.Padding = UDim.new(0, 10)
-upgradeLayout.Parent = upgradeList
-
-local function buildUpgradeRow(titleText: string, infoText: string, onBuy: () -> ())
-	local row = Instance.new("Frame")
-	row.Size = UDim2.fromOffset(588, 70)
-	row.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-	row.BorderSizePixel = 0
-	row.Parent = upgradeList
-
-	local title = Instance.new("TextLabel")
-	title.BackgroundTransparency = 1
-	title.Position = UDim2.fromOffset(14, 10)
-	title.Size = UDim2.fromOffset(320, 24)
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.Font = Enum.Font.GothamBold
-	title.TextScaled = true
-	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.Text = titleText
-	title.Parent = row
-
-	local info = Instance.new("TextLabel")
-	info.BackgroundTransparency = 1
-	info.Position = UDim2.fromOffset(14, 38)
-	info.Size = UDim2.fromOffset(420, 20)
-	info.TextXAlignment = Enum.TextXAlignment.Left
-	info.Font = Enum.Font.Gotham
-	info.TextScaled = true
-	info.TextColor3 = Color3.fromRGB(220, 220, 220)
-	info.Text = infoText
-	info.Parent = row
-
-	local btn = Instance.new("TextButton")
-	btn.AnchorPoint = Vector2.new(1, 0.5)
-	btn.Position = UDim2.new(1, -12, 0.5, 0)
-	btn.Size = UDim2.fromOffset(110, 44)
-	btn.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
-	btn.Font = Enum.Font.GothamBold
-	btn.TextScaled = true
-	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	btn.Text = "升级"
-	btn.Parent = row
-
-	btn.Activated:Connect(function() onBuy() end)
-end
-
-local function refreshUpgradeShop()
-	for _, ch in ipairs(upgradeList:GetChildren()) do
-		if not ch:IsA("UIListLayout") then ch:Destroy() end
-	end
-
-	local atkLevel = player:GetAttribute("AttackLevel") or 0
-	local hpLevel = player:GetAttribute("HealthLevel") or 0
-	local spdLevel = player:GetAttribute("SpeedLevel") or 0
-	local carryLevel = player:GetAttribute("CarryLevel") or 0
-
-	local nextAtkCost = Config.GetAttackUpgradeCost(atkLevel + 1)
-	local nextHpCost = Config.GetHealthUpgradeCost(hpLevel + 1)
-	local nextSpdCost = Config.GetSpeedUpgradeCost(spdLevel + 1)
-	local nextCarryCost = Config.GetCarryUpgradeCost(carryLevel + 1)
-
-	buildUpgradeRow(
-		"升级攻击力 (Lv." .. (atkLevel + 1) .. ")",
-		string.format("花费:%s   +%d 攻击力", formatNumberShort(nextAtkCost), Config.ATTACK_UPGRADE_ADD),
-		function() requestPurchaseUpgrade:FireServer("Attack") end
-	)
-
-	buildUpgradeRow(
-		"升级血量 (Lv." .. (hpLevel + 1) .. ")",
-		string.format("花费:%s   +%d 最大血量", formatNumberShort(nextHpCost), Config.HEALTH_PER_UPGRADE),
-		function() requestPurchaseUpgrade:FireServer("Health") end
-	)
-
-	buildUpgradeRow(
-		"升级速度 (Lv." .. (spdLevel + 1) .. ")",
-		string.format("花费:%s   +%d 速度", formatNumberShort(nextSpdCost), Config.WALK_SPEED_PER_UPGRADE),
-		function() requestPurchaseUpgrade:FireServer("Speed") end
-	)
-
-	local curMaxCarry = Config.GetCarryMax(carryLevel)
-	local nextMaxCarry = Config.GetCarryMax(carryLevel + 1)
-	local carryInfo = nextCarryCost == nil 
-		and string.format("当前可携带:%d（已满级）", curMaxCarry)
-		or string.format("花费:%s   可携带:%d → %d", formatNumberShort(nextCarryCost), curMaxCarry, nextMaxCarry)
-
-	buildUpgradeRow(
-		"升级携带数量", carryInfo,
-		function() requestPurchaseUpgrade:FireServer("Carry") end
-	)
-end
-
-openUpgradeShopUI.OnClientEvent:Connect(function()
-	upgradeWindow.Visible = true
-	refreshUpgradeShop()
-end)
 
 -- =====================
 -- Home 头像显示：离开出生点 20 单位后显示，回到范围内隐藏
@@ -985,7 +881,6 @@ end)
 -- [修改内容] 自动刷新监听
 local function hookRefreshOnAttr(attrName: string)
 	player:GetAttributeChangedSignal(attrName):Connect(function()
-		if upgradeWindow.Visible then refreshUpgradeShop() end
 		if weaponWindow.Visible then refreshWeaponShop() end
 	end)
 end
