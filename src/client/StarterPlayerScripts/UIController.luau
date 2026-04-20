@@ -63,38 +63,58 @@ local function showToast(text: string)
 end
 
 -- =====================
--- [修改内容] UI 形象加载辅助函数
+-- [修改内容] 自动生成 ViewportFrame 并智能聚焦场景中的模型
 -- =====================
--- =====================
--- [修改内容] 从玩家的 sucai 界面库中提取你手动摆好视角的 ViewportFrame
--- =====================
-local function loadViewportIcon(targetContainer: GuiObject, folderName: string, iconName: string)
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if not playerGui then return end
+local function loadViewportFromScene(targetContainer: GuiObject, modelSource: Instance?)
+	if not modelSource then return end
 	
-	-- 获取你预设好的素材库
-	local sucaiGui = playerGui:FindFirstChild("sucai")
-	if not sucaiGui then return end
-	
-	local folder = sucaiGui:FindFirstChild(folderName)
-	if not folder then return end
-	
-	-- 根据名字匹配（例如 "武器形象01"）
-	local vp = folder:FindFirstChild(iconName)
-	if vp and vp:IsA("ViewportFrame") then
-		-- 1. 清理格子里旧的形象
-		targetContainer:ClearAllChildren()
-		
-		-- 2. 直接克隆你手动摆好相机和模型的 ViewportFrame
-		local clone = vp:Clone()
-		clone.Size = UDim2.fromScale(1, 1)
-		clone.Position = UDim2.fromScale(0.5, 0.5)
-		clone.AnchorPoint = Vector2.new(0.5, 0.5)
-		clone.BackgroundTransparency = 1
-		clone.Parent = targetContainer
-	else
-		-- 如果你还没做某个等级的形象，这里静默跳过，不会报错
+	-- 1. 清理格子里旧的 UI 元素
+	targetContainer:ClearAllChildren()
+
+	-- 2. 自动创建 ViewportFrame
+	local viewport = Instance.new("ViewportFrame")
+	viewport.Size = UDim2.fromScale(1, 1)
+	viewport.BackgroundTransparency = 1
+	-- 增加环境光，防止展示出来的模型变黑
+	viewport.Ambient = Color3.fromRGB(150, 150, 150)
+	viewport.LightColor = Color3.fromRGB(255, 255, 255)
+	viewport.LightDirection = Vector3.new(-1, -1, -2)
+	viewport.Parent = targetContainer
+
+	-- 3. 克隆场景里的模型并放入 Viewport
+	local clone = modelSource:Clone()
+	if clone:IsA("Model") then
+		-- 将模型移动到虚拟空间的原点
+		clone:PivotTo(CFrame.new(0, 0, 0))
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = CFrame.new(0, 0, 0)
 	end
+	clone.Parent = viewport
+
+	-- 4. 自动创建摄像机
+	local camera = Instance.new("Camera")
+	viewport.CurrentCamera = camera
+	camera.Parent = viewport
+
+	-- 5. 核心算法：计算模型大小，自动将摄像机拉到完美距离
+	local cf, size
+	if clone:IsA("Model") then
+		cf, size = clone:GetBoundingBox()
+	else
+		cf = clone.CFrame
+		size = clone.Size
+	end
+
+	-- 找出模型最长的一边
+	local maxDim = math.max(size.X, size.Y, size.Z)
+	if maxDim == 0 then maxDim = 2 end -- 兜底防错
+
+	-- 根据视场角(FOV)计算刚好能看全模型的距离，乘 1.2 是为了留一点边缘空白
+	local distance = (maxDim / 2) / math.tan(math.rad(camera.FieldOfView) / 2) * 1.2
+	
+	-- 将摄像机放在模型的斜右前方，并让它看向模型的中心点
+	local camPos = cf.Position + Vector3.new(distance * 0.6, distance * 0.4, distance * 0.8)
+	camera.CFrame = CFrame.lookAt(camPos, cf.Position)
 end
 
 -- =====================
@@ -105,8 +125,8 @@ local function refreshMonsterInventoryUI(payload)
 		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
 	end
 
-	-- 假设怪物模型放在 ReplicatedStorage.MonsterModels 下，命名为 "Monster1", "Monster2"...
-	local monsterFolder = ReplicatedStorage:FindFirstChild("MonsterModels")
+	-- [修改内容] 精确定位到 Workspace 下的 "Monster image" 文件夹
+	local monsterFolder = workspace:FindFirstChild("Monster image")
 
 	for i, it in ipairs(payload or {}) do
 		local row = rowTemplate:Clone()
@@ -118,11 +138,12 @@ local function refreshMonsterInventoryUI(payload)
 			label.Text = string.format("怪Lv%d  价值:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
 		end
 		
-		-- [修改内容] 读取 sucai 库中的怪物形象
+		-- [修改内容] 根据命名规则 "怪物形象01-30" 匹配加载
 		local imageContainer = row:FindFirstChild("ImageLabel")
-		if imageContainer and imageContainer:IsA("GuiObject") then
+		if imageContainer and monsterFolder then
 			local iconName = string.format("怪物形象%02d", it.MonsterLevel)
-			loadViewportIcon(imageContainer, "monsterFrame", iconName)
+			local model = monsterFolder:FindFirstChild(iconName)
+			loadViewportFromScene(imageContainer, model)
 		end
 
 		local takeOutBtn = row:FindFirstChild("拿出按钮")
@@ -133,7 +154,9 @@ local function refreshMonsterInventoryUI(payload)
 end
 
 
+-- =====================
 -- 武器背包逻辑
+-- =====================
 local function refreshWeaponInventoryUI()
 	for _, ch in ipairs(weaponList:GetChildren()) do
 		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UIListLayout") then ch:Destroy() end
@@ -141,8 +164,9 @@ local function refreshWeaponInventoryUI()
 
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
-	-- 假设武器模型放在 ReplicatedStorage.WeaponModels 下，命名为 "Weapon1", "Weapon2"...
-	local weaponFolder = ReplicatedStorage:FindFirstChild("WeaponModels")
+	
+	-- [修改内容] 精确定位到 Workspace 下的 "weapon" 文件夹
+	local weaponFolder = workspace:FindFirstChild("weapon")
 
 	for i = 1, maxWeaponLevel do
 		local row = weaponTemplate:Clone()
@@ -154,26 +178,23 @@ local function refreshWeaponInventoryUI()
 			label.Text = Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
 		end
 		
-		-- [修改内容] 读取 sucai 库中的武器形象
+		-- [修改内容] 根据命名规则 "武器01-20" 匹配加载
 		local imageContainer = row:FindFirstChild("ImageLabel")
-		if imageContainer and imageContainer:IsA("GuiObject") then
-			local iconName = string.format("武器形象%02d", i)
-			loadViewportIcon(imageContainer, "weaponFrame", iconName)
+		if imageContainer and weaponFolder then
+			local iconName = string.format("武器%02d", i)
+			local model = weaponFolder:FindFirstChild(iconName)
+			loadViewportFromScene(imageContainer, model)
 		end
 
 		local equipBtn = row:FindFirstChild("装备按钮")
 		if equipBtn and equipBtn:IsA("GuiButton") then
 			local btnText = equipBtn:FindFirstChild("装备text")
 			if btnText and btnText:IsA("TextLabel") then
-				-- [修改内容] 实时判断装备状态
 				if i == equippedWeapon then
 					btnText.Text = "已装备"
-					equipBtn.AutoButtonColor = false -- 视觉上禁用已装备按钮
 				else
 					btnText.Text = "装备武器"
-					equipBtn.AutoButtonColor = true
 					equipBtn.Activated:Connect(function()
-						-- 向服务器发送装备请求
 						requestEquipWeapon:FireServer(i)
 					end)
 				end
