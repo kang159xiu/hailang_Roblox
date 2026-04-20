@@ -364,17 +364,6 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 		end)
 	end
 
-
-	-- [修改内容] 删除数据按钮逻辑
-	if deleteBtn then
-		deleteBtn.Activated:Connect(function()
-			-- 弹出二次确认弹窗（这里简单用 print，建议你之后加个确认 UI）
-			print("玩家请求清空所有数据")
-			requestClearPlayerData:FireServer()
-		end)
-	end
-
-	
 	-- [修改内容] 监听顶部选项卡按钮点击
 	if monsterTabBtn then
 		monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end)
@@ -384,15 +373,29 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	end
 
 	-- [修改内容] 关键：监听装备属性变化，只要服务端一改，客户端立即重刷列表
-    player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
-        if monsterInventoryWindow.Visible and weaponList.Visible then
-            refreshWeaponInventoryUI()
-        end
-    end)
+	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
+		if monsterInventoryWindow.Visible and weaponList.Visible then
+			refreshWeaponInventoryUI()
+		end
+	end)
 
 	-- 5. 初始化商店 (此处应包含原脚本中 openWeaponShopUI 等监听器)
 	-- [逻辑流]：监听服务端事件 -> 显示对应的 Window -> 调用刷新函数渲染列表
-    print("[UIController] 2D UI 逻辑已初始化")
+	print("[UIController] 2D UI 逻辑已初始化")
+
+	-- [修改内容] 删除按钮逻辑，带防卡死判断（终极唯一版）
+	local safeDeleteBtn = mainGui:FindFirstChild("delete")
+	-- 设置 5 秒超时，如果拿不到 RemoteEvent 就不死等，防止整个 UI 瘫痪
+	local safeRequestClear = remotes:WaitForChild("RequestClearPlayerData", 5)
+
+	if safeDeleteBtn and safeRequestClear then
+		safeDeleteBtn.Activated:Connect(function()
+			print("已向服务器发送清空数据指令！")
+			safeRequestClear:FireServer()
+		end)
+	elseif safeDeleteBtn then
+		warn("严重错误：RequestClearPlayerData 远程事件加载失败！")
+	end
 end
 
 return UIController

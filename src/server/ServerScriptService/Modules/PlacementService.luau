@@ -2014,7 +2014,7 @@ function PlacementService.TryHandlePromptInteraction(player: Player, promptInsta
 	return false
 end
 
--- [修改内容] 删档专用：彻底清理该玩家所有的放置怪物
+-- [修改内容] 彻底销毁该玩家放置在地上的所有怪物
 function PlacementService.Clear(player: Player)
 	local states = slotStatesByUserId[player.UserId]
 	if not states then return end
@@ -2031,6 +2031,8 @@ function PlacementService.Clear(player: Player)
 			st.PlacedData = nil
 		end
 	end
+	
+	local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 	DataDirtyService.MarkDirty(player)
 end
 return PlacementService

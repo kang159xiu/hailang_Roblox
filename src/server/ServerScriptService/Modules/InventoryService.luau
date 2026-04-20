@@ -796,4 +796,16 @@ function InventoryService.Cleanup(player: Player)
 	clearCarried(player)
 end
 
+
+-- [修改内容] 增加彻底清空背包的功能
+function InventoryService.Clear(player: Player)
+	if inventoryByUserId[player.UserId] then
+		inventoryByUserId[player.UserId] = {}
+	end
+	InventoryService.Sync(player)
+	
+	local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
+	DataDirtyService.MarkDirty(player)
+end
+
 return InventoryService

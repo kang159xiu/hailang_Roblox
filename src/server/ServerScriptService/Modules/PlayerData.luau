@@ -325,13 +325,12 @@ function PlayerData.ApplyLoaded(player: Player, loaded: PersistedPlayerData)
 	PlayerData.Sync(player)
 end
 
--- [修改内容] 强制重置玩家所有数据为默认值
+-- [修改内容] 强制重置玩家所有基础属性为 0 或 1 级
 function PlayerData.ResetData(player: Player)
 	local stats = data[player.UserId]
 	if not stats then return end
 	
-	-- 恢复默认值
-	stats.Gold = Config.PLAYER_START_GOLD or 0
+	stats.Gold = 0
 	stats.SpeedLevel = 0
 	stats.AttackLevel = 0
 	stats.HealthLevel = 0
@@ -342,7 +341,8 @@ function PlayerData.ResetData(player: Player)
 	stats.OwnedWeaponLevels = { 1 }
 	
 	PlayerData.Sync(player)
-	DataDirtyService.MarkDirty(player) -- 标记为脏数据，确保下一轮自动保存会覆盖旧存档
+	local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
+	DataDirtyService.MarkDirty(player)
 end
 
 

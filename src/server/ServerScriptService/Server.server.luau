@@ -79,7 +79,13 @@ ensureWeaponToolHasHandle()
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local takeOutRemote = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
-local clearDataRemote = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
+-- [修改内容] 自动创建清空数据事件
+local clearDataRemote = remotes:FindFirstChild("RequestClearPlayerData")
+if not clearDataRemote then
+	clearDataRemote = Instance.new("RemoteEvent")
+	clearDataRemote.Name = "RequestClearPlayerData"
+	clearDataRemote.Parent = remotes
+end
 local requestPromptInteractionRemote = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
 -- [修改内容] 引用装备武器事件
 local requestEquipWeaponRemote = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
@@ -155,25 +161,27 @@ takeOutRemote.OnServerEvent:Connect(function(player: Player, itemId: any)
 end)
 
 -- 测试：清空玩家数据（仅 Studio）
--- [修改内容] 处理玩家清空数据的请求（加强防错防卡死版）
+-- [修改内容] 处理玩家清空数据的请求（终极防崩溃版）
 clearDataRemote.OnServerEvent:Connect(function(player: Player)
-	warn(string.format("玩家 %s 正在清空数据...", player.Name))
+	warn(string.format("玩家 %s 正在执行删档清空...", player.Name))
 	
-	-- 1. 重置基础属性 (金币、各种等级恢复至 1 级)
-	PlayerData.ResetData(player)
+	-- 1. 重置金币和等级（带防错检测）
+	if PlayerData.ResetData then PlayerData.ResetData(player) end
 	
-	-- 2. 强行摧毁家园里放置的所有怪物，防止它们继续产出金币！
+	-- 2. 清理放置在房子里的怪物
 	local PlacementService = require(script.Parent.Modules.PlacementService)
-	PlacementService.Clear(player)
+	if PlacementService.Clear then PlacementService.Clear(player) end
 	
-	-- 3. 安全清空背包（使用 pcall 保护，防止你没写这个方法导致脚本崩溃）
-	pcall(function()
-		InventoryService.Clear(player)
-	end)
+	-- 3. 清理背包里的所有东西
+	local InventoryService = require(script.Parent.Modules.InventoryService)
+	if InventoryService.Clear then InventoryService.Clear(player) end
 	
-	-- 4. 踢出玩家以强制保存干净的数据。
-	-- (注：踢出的瞬间 UI 画面会直接定格，所以你肉眼看不到金币归 0，但只要重新进游戏就已经是全新的空号了)
-	player:Kick("\n你的数据已成功清空！\n请重新加入游戏开始新旅程。")
+	-- 4. 强制标记大保存
+	local DataDirtyService = require(script.Parent.Modules.DataDirtyService)
+	DataDirtyService.MarkDirty(player)
+	
+	-- 5. 必须踢出玩家！只有踢出才能阻断旧金币增加，并瞬间将空数据写入云端
+	player:Kick("\n数据已成功清空！\n请重新进入游戏，开始新旅程。")
 end)
 
 -- 普通攻击：客户端请求对某个怪造成一次伤害
