@@ -55,14 +55,16 @@ local function pickPatchCFrame(zone: BasePart): CFrame
 	return CFrame.new(Vector3.new(pos.X, y, pos.Z)) * CFrame.Angles(0, math.rad(zone.Orientation.Y), 0)
 end
 
-local function createWarning(cf: CFrame): BasePart
+-- [修改内容] 函数增加 patchSize 参数，接收生成的随机尺寸
+local function createWarning(cf: CFrame, patchSize: Vector3): BasePart
 	local w = Instance.new("Part")
 	w.Name = "LavaWarning"
 	w.Anchored = true
 	w.CanCollide = false
 	w.CanQuery = false
 	w.CanTouch = false
-	w.Size = LAVA_PATCH_SIZE
+	-- [修改内容] 使用传入的动态大小
+	w.Size = patchSize
 	w.CFrame = cf + Vector3.new(0, 0.05, 0)
 	w.Material = Enum.Material.SmoothPlastic
 	w.Color = Color3.fromRGB(255, 0, 0)
@@ -71,7 +73,8 @@ local function createWarning(cf: CFrame): BasePart
 	return w
 end
 
-local function createLava(cf: CFrame, finalHeightStuds: number): BasePart
+-- [修改内容] 函数增加 patchSize 参数，接收生成的随机尺寸
+local function createLava(cf: CFrame, finalHeightStuds: number, patchSize: Vector3): BasePart
 	local lava = Instance.new("Part")
 	lava.Name = "Lava"
 	lava.Anchored = true
@@ -79,13 +82,15 @@ local function createLava(cf: CFrame, finalHeightStuds: number): BasePart
 	lava.Material = Enum.Material.Neon
 	lava.Color = Color3.fromRGB(255, 80, 0)
 	lava.Transparency = 0.15
-	lava.Size = Vector3.new(LAVA_PATCH_SIZE.X, 0.2, LAVA_PATCH_SIZE.Z)
+	-- [修改内容] 初始厚度为 0.2，长宽使用传入的大小
+	lava.Size = Vector3.new(patchSize.X, 0.2, patchSize.Z)
 
 	-- 初始从地面下方开始（隐藏）
 	lava.CFrame = cf + Vector3.new(0, -finalHeightStuds * 0.5, 0)
 	lava.Parent = hazardsFolder
 
-	local goalSize = Vector3.new(LAVA_PATCH_SIZE.X, finalHeightStuds, LAVA_PATCH_SIZE.Z)
+	-- [修改内容] 目标尺寸的长宽使用传入的大小
+	local goalSize = Vector3.new(patchSize.X, finalHeightStuds, patchSize.Z)
 	local goalCF = cf + Vector3.new(0, finalHeightStuds * 0.5, 0)
 
 	local tween = TweenService:Create(
@@ -97,7 +102,6 @@ local function createLava(cf: CFrame, finalHeightStuds: number): BasePart
 
 	return lava
 end
-
 local function runLavaEvent(zone: BasePart, zoneLevel: number)
 	local range = Config.LAVA_HEIGHT_RANGE_GRIDS_BY_ZONE[zoneLevel]
 	if not range then
@@ -109,19 +113,24 @@ local function runLavaEvent(zone: BasePart, zoneLevel: number)
 	local maxStuds = maxG * Config.GRID_STUDS
 	local finalHeight = math.random() * (maxStuds - minStuds) + minStuds
 
+	-- [修改内容] 读取 Config 中的配置，随机生成这块岩浆的长宽大小
+	local sizeRange = Config.LAVA_SIZE_RANGE or {10, 10}
+	local randomLength = math.random(sizeRange[1], sizeRange[2])
+	local patchSize = Vector3.new(randomLength, 1, randomLength)
+
 	local cf = pickPatchCFrame(zone)
-	local warning = createWarning(cf)
+	-- [修改内容] 将计算出的随机大小传给预警块
+	local warning = createWarning(cf, patchSize)
 	
-	-- [修改内容] 获取我们在 Config 中设置的预警时间，如果没设置则默认保底 2 秒
 	local warningTime = Config.LAVA_WARNING_TIME or 2
 
-	-- [修改内容] 将原本写死的 2 改为使用 warningTime 变量
 	task.delay(warningTime, function()
 		if warning.Parent then
 			warning:Destroy()
 		end
 
-		local lava = createLava(cf, finalHeight)
+		-- [修改内容] 将计算出的随机大小传给岩浆块
+		local lava = createLava(cf, finalHeight, patchSize)
 		lava:SetAttribute("ZoneLevel", zoneLevel)
 		lava:SetAttribute("DPS", Config.LAVA_DAMAGE_PER_SEC_BY_ZONE[zoneLevel] or 100)
 
@@ -147,6 +156,7 @@ local function runLavaEvent(zone: BasePart, zoneLevel: number)
 				local dt = now - last
 				last = now
 
+				-- [修改内容] 碰撞检测的范围已经自动跟随 lava.Size，所以这里不需要改，会自动适应随机大小
 				local humanoids = getHumanoidsInBox(lava.CFrame, lava.Size + Vector3.new(0, 6, 0))
 				for _, hum in ipairs(humanoids) do
 					hum:TakeDamage(dps * dt)
