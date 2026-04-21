@@ -111,8 +111,12 @@ local function runLavaEvent(zone: BasePart, zoneLevel: number)
 
 	local cf = pickPatchCFrame(zone)
 	local warning = createWarning(cf)
+	
+	-- [修改内容] 获取我们在 Config 中设置的预警时间，如果没设置则默认保底 2 秒
+	local warningTime = Config.LAVA_WARNING_TIME or 2
 
-	task.delay(2, function()
+	-- [修改内容] 将原本写死的 2 改为使用 warningTime 变量
+	task.delay(warningTime, function()
 		if warning.Parent then
 			warning:Destroy()
 		end

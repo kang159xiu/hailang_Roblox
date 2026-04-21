@@ -176,6 +176,9 @@ Config.ZONE_MONSTER_WEIGHTS = {
 -- 岩浆（拿取区域危害）
 -- =====================
 
+-- [修改内容] 岩浆出现前的预警提示时间（秒），你可以在这里随时调整
+Config.LAVA_WARNING_TIME = 1
+
 -- 每个区域岩浆每秒伤害（DPS）
 Config.LAVA_DAMAGE_PER_SEC_BY_ZONE = {100,200,300,500,800,1000,1500,2000,2500,3000}
 
