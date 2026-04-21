@@ -21,18 +21,23 @@ type AnimationConfig = { Idle: string, Track: string, Attack: string }
 type GuardianData = { ModelName: string, Speed: number, Animations: AnimationConfig }
 local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 
+-- [修改内容] 新增：专属动画配置表。你可以在这里为每一级的守护者独立配置动画 ID
+local CUSTOM_ANIMATIONS = {
+	[1] = { Idle = "", Track = "", Attack = "" },
+	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://78735945899751", Attack = "" },
+	[3] = { Idle = "", Track = "", Attack = "" },
+	-- 你可以继续往下复制，最高写到 [30]
+}
+
 -- 自动初始化 1~30 级的配置
 for level = 1, 30 do
+	-- 如果你在上面的表里配了该等级的动画，就用你配的；如果没配，就自动生成空的兜底
+	local customAnim = CUSTOM_ANIMATIONS[level] or { Idle = "", Track = "", Attack = "" }
+	
 	GUARDIAN_CONFIG[level] = {
-		-- 对应模型名：守护者形象1, 守护者形象2 ...
 		ModelName = "守护者形象" .. tostring(level), 
-		-- 速度随等级提升：基础 12，每级增加 3
 		Speed = 20 + (level * 3), 
-		Animations = {
-			Idle = "75291175844780",   -- 发呆动画 ID
-			Track = "78735945899751",  -- 走动动画 ID
-			Attack = "" 
-		}
+		Animations = customAnim
 	}
 end
 
@@ -257,13 +262,13 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	clone.PrimaryPart = root
 
 	-- [修改内容] 强制全锚定模式：将模型内所有零件全部锚定
-	-- 这样可以防止没有焊接(Weld)的视觉零件掉落到虚空中被系统删除
+	-- [修改内容] 为了让 Motor6D 动画能生效，除了 RootPart 必须锚定外，其他所有外观零件绝对不能锚定！
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
-			d.Anchored = true -- [修改内容] 全部设为 true，不再区分 root
+			d.Anchored = (d == root)  -- 只有 RootPart 是 true，其他全是 false
 			d.CanTouch = (d == root)
 			d.CanCollide = false
-			d.Massless = true -- 减少物理引擎开销
+			d.Massless = true
 		end
 	end
 
