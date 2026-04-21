@@ -29,8 +29,8 @@ for level = 1, 30 do
 		-- 速度随等级提升：基础 12，每级增加 3
 		Speed = 20 + (level * 3), 
 		Animations = {
-			Idle = "",   -- 在此处填入你的动画 ID
-			Track = "", 
+			Idle = "75291175844780",   -- 发呆动画 ID
+			Track = "78735945899751",  -- 走动动画 ID
 			Attack = "" 
 		}
 	}
