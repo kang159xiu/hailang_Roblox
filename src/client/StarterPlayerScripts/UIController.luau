@@ -48,6 +48,13 @@ local inviteButton = mainGui:WaitForChild("ImageButton_邀请") :: ImageButton
 
 local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
+-- [新增内容] 引用正常速度切换按钮及内部组件
+local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度") :: ImageButton?
+local normalSpeedBgOn = speedToggleButton and speedToggleButton:FindFirstChild("开启常速背景") :: ImageLabel?
+local normalSpeedBgOff = speedToggleButton and speedToggleButton:FindFirstChild("关闭常速背景") :: ImageLabel?
+local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("开/关速度状态") :: TextLabel?
+local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升级后的加速状态）
+
 -- [修改内容] 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
 local shopsGui = playerGui:WaitForChild("ShopsUI")
@@ -785,6 +792,65 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 			-- 弹出 Roblox 系统原生的邀请界面
 			SocialService:PromptGameInvite(player)
 		end)
+	end
+
+	-- [新增内容] 正常速度切换按钮逻辑
+	if speedToggleButton then
+		-- 内部函数：根据当前状态应用玩家速度
+		local function applyCurrentSpeed()
+			local char = player.Character
+			if not char then return end
+			local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+			if not humanoid then return end
+
+			if isNormalSpeedActive then
+				-- 恢复正常速度：直接使用配置表中的基础速度
+				humanoid.WalkSpeed = Config.WALK_SPEED_BASE or 20
+			else
+				-- 使用加速状态：基础速度 + (速度等级 * 每级提升数值)
+				local speedLevel = player:GetAttribute("SpeedLevel") or 0
+				humanoid.WalkSpeed = (Config.WALK_SPEED_BASE or 20) + (speedLevel * (Config.WALK_SPEED_PER_UPGRADE or 1))
+			end
+		end
+
+		-- 内部函数：刷新按钮的 UI 视觉展现
+		local function updateSpeedUI()
+			if isNormalSpeedActive then
+				-- 开启常速模式：显示常速背景，隐藏关闭背景，提示玩家此时可以“开启加速”
+				if normalSpeedBgOn then normalSpeedBgOn.Visible = true end
+				if normalSpeedBgOff then normalSpeedBgOff.Visible = false end
+				if speedToggleText then speedToggleText.Text = "开启加速" end
+			else
+				-- 开启加速模式（默认）：隐藏常速背景，显示关闭背景，提示玩家此时可以“关闭加速”
+				if normalSpeedBgOn then normalSpeedBgOn.Visible = false end
+				if normalSpeedBgOff then normalSpeedBgOff.Visible = true end
+				if speedToggleText then speedToggleText.Text = "关闭加速" end
+			end
+		end
+
+		-- 初始化按钮状态
+		updateSpeedUI()
+
+		-- 监听按钮点击
+		speedToggleButton.Activated:Connect(function()
+			isNormalSpeedActive = not isNormalSpeedActive -- 翻转状态
+			updateSpeedUI()
+			applyCurrentSpeed()
+		end)
+
+		-- 监听角色重生（重生后重置一次速度，防止被系统还原）
+		player.CharacterAdded:Connect(function(char)
+			-- 等待 Humanoid 加载后再应用速度
+			char:WaitForChild("Humanoid", 5)
+			applyCurrentSpeed()
+		end)
+
+		-- 监听玩家速度等级升级（如果在商店点了升级，实时更新正确的速度）
+		player:GetAttributeChangedSignal("SpeedLevel"):Connect(function()
+			applyCurrentSpeed()
+		end)
+	else
+		warn("[UIController] 未找到名为 'ImageButton_正常速度' 的按钮组件！")
 	end
 
 	print("[UIController] 2D UI 逻辑已初始化")
