@@ -346,6 +346,7 @@ local function onHeartbeat(dt: number)
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
 				-- [修改内容] 距离判断：如果离目标点较远(>5)，说明是刚生成或被打断，直接瞬间归位，消除“开局滑行飞入”现象。
+				print(tostring(g), tostring(g.RootPart), tostring(g.SpawnCFrame))
 				local dist = (g.RootPart.Position - g.SpawnCFrame.Position).Magnitude
 				if dist > 5 then
 					g.Model:PivotTo(g.SpawnCFrame)
@@ -381,17 +382,26 @@ local function onHeartbeat(dt: number)
 					g.CurrentWaypointIdx = 2
 				end
 			end
-
 			if g.Waypoints and g.CurrentWaypointIdx <= #g.Waypoints then
-				local targetWP = g.Waypoints[g.CurrentWaypointIdx].Position
-				local moveVec = (targetWP - g.RootPart.Position)
-				local flatMoveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
-				if flatMoveVec.Magnitude < 1 then
-					g.CurrentWaypointIdx += 1
+				local currentWaypoint = g.Waypoints[g.CurrentWaypointIdx]
+				
+				-- [修改内容] 增加非空防御判断：确保当前路径点确实存在，再去获取 Position，防止报错崩溃
+				if currentWaypoint then
+					local targetWP = currentWaypoint.Position
+					local moveVec = (targetWP - g.RootPart.Position)
+					local flatMoveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
+					
+					if flatMoveVec.Magnitude < 1 then
+						g.CurrentWaypointIdx += 1
+					else
+						g.Model:PivotTo(g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt))
+					end
 				else
-					g.Model:PivotTo(g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt))
+					-- [修改内容] 如果因为极端情况发现路径点为 nil，则强制推进索引，让守护者在下一次心跳重新计算寻路
+					g.CurrentWaypointIdx += 1
 				end
 			end
+			
 		elseif g.State == "Attack" then
 			if now - g.AttackTimer > 1.5 then
 				g.State = "Return"
