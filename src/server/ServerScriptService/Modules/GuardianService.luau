@@ -237,6 +237,7 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	local root = clone:FindFirstChild("RootPart") 
 		or clone.PrimaryPart or clone:FindFirstChild("FakeRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	
+		--
 	if not root or not root:IsA("BasePart") then 
 		root = Instance.new("Part")
 		root.Name = "RootPart"  -- [修改内容] 兜底生成的部件名字也统一叫 RootPart
