@@ -48,8 +48,11 @@ local function getHumanoidsInBox(cframe: CFrame, size: Vector3): {Humanoid}
 	return humanoids
 end
 
-local function pickPatchCFrame(zone: BasePart): CFrame
-	local pos = Util.randomPointOnTop(zone, 2)
+-- [修改内容] 增加 patchSize 参数，动态计算边缘留白，防止超出区域
+local function pickPatchCFrame(zone: BasePart, patchSize: Vector3): CFrame
+	-- [修改内容] margin 为岩浆尺寸的一半，这样岩浆的中心点最多只能到达距离边缘 margin 的位置，绝不越界
+	local margin = patchSize.X / 2
+	local pos = Util.randomPointOnTop(zone, margin)
 	-- 把 patch 对齐到区域朝向
 	local y = zone.Position.Y + zone.Size.Y * 0.5
 	return CFrame.new(Vector3.new(pos.X, y, pos.Z)) * CFrame.Angles(0, math.rad(zone.Orientation.Y), 0)
@@ -116,9 +119,16 @@ local function runLavaEvent(zone: BasePart, zoneLevel: number)
 	-- [修改内容] 读取 Config 中的配置，随机生成这块岩浆的长宽大小
 	local sizeRange = Config.LAVA_SIZE_RANGE or {10, 10}
 	local randomLength = math.random(sizeRange[1], sizeRange[2])
+	
+	-- [修改内容] 限制岩浆大小：绝对不能超过拿取区域本身的最小宽度（防止小区域刷出超大岩浆）
+	local maxAllowed = math.min(zone.Size.X, zone.Size.Z)
+	-- 确保最终长度不会比区域大，最小也保证有 1 的大小
+	randomLength = math.max(1, math.min(randomLength, maxAllowed - 0.1))
+	
 	local patchSize = Vector3.new(randomLength, 1, randomLength)
 
-	local cf = pickPatchCFrame(zone)
+	-- [修改内容] 把岩浆尺寸传进去，方便底层算好距离
+	local cf = pickPatchCFrame(zone, patchSize)
 	-- [修改内容] 将计算出的随机大小传给预警块
 	local warning = createWarning(cf, patchSize)
 	
