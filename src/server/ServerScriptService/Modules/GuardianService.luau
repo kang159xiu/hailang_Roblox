@@ -232,9 +232,15 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	if not template then return end
 
 	local clone = template:Clone()
-	local root = clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
-	if not root then clone:Destroy() return end
+	-- [修改内容] 优先寻找 FakeRootPart，确保操作的是 Rig 的核心根节点，防止 Motor6D 偏移导致模型飞天
+	local root = clone:FindFirstChild("FakeRootPart") or clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
+	
+	if not root then 
+		clone:Destroy() 
+		return 
+	end
 
+	-- [修改内容] 强制将识别到的 root 设置为模型的 PrimaryPart，统一后续 PivotTo 的行为
 	clone.PrimaryPart = root
 
 	-- 清理调试颜色，开启触碰
