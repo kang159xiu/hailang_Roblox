@@ -124,6 +124,7 @@ local function runLavaEvent(zone: BasePart, zoneLevel: number)
 	local maxAllowed = math.min(zone.Size.X, zone.Size.Z)
 	-- 确保最终长度不会比区域大，最小也保证有 1 的大小
 	randomLength = math.max(1, math.min(randomLength, maxAllowed - 0.1))
+	---
 	
 	local patchSize = Vector3.new(randomLength, 1, randomLength)
 
