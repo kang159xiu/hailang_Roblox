@@ -268,8 +268,20 @@ end
 local refreshUpgradePromptEnabled: (Instance, Instance, BasePart) -> ()
 
 local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, upgradePart: BasePart)
-	local prompt = upgradePart:FindFirstChild("HomeUpgradePrompt")
+	-- [修改内容] 加上 true 允许在 Attachment 等子级中递归查找 prompt
+	local prompt = upgradePart:FindFirstChild("HomeUpgradePrompt", true) 
 	if not (prompt and prompt:IsA("ProximityPrompt")) then
+		
+		-- [修改内容] 创建一个 Attachment 作为高度的锚点
+		local attachment = upgradePart:FindFirstChild("PromptAttachment")
+		if not attachment then
+			attachment = Instance.new("Attachment")
+			attachment.Name = "PromptAttachment"
+			-- [修改内容] 调整这个 Vector3.new(0, 3, 0) 中的 3！数字越大，提示框位置越高。
+			attachment.Position = Vector3.new(0, 3, 0) 
+			attachment.Parent = upgradePart
+		end
+
 		prompt = Instance.new("ProximityPrompt")
 		prompt.Name = "HomeUpgradePrompt"
 		prompt.ActionText = "升级家园"
@@ -277,7 +289,8 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.HoldDuration = 0.5
 		prompt.RequiresLineOfSight = false
-		prompt.Parent = upgradePart
+		-- [修改内容] 将 prompt 的父级设为我们刚刚创建的 attachment，从而继承它的高度偏移
+		prompt.Parent = attachment
 
 
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
