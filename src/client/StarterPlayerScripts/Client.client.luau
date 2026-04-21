@@ -768,3 +768,57 @@ hookRefreshOnAttr("SpeedLevel")
 hookRefreshOnAttr("CarryLevel")
 hookRefreshOnAttr("WeaponLevel")
 hookRefreshOnAttr("EquippedWeaponLevel")
+
+-- =======================================================
+-- [修改内容] 增加：被守护者追逐时的屏幕抖动 (Camera Shake)
+-- =======================================================
+local currentCamera = workspace.CurrentCamera
+local shakeIntensity = 0
+
+-- 使用 BindToRenderStep 保证在默认相机脚本更新后，再叠加我们的抖动偏移
+RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Value + 1, function(dt)
+	local isChased = false
+	local minDistance = 100
+	
+	local guardiansFolder = workspace:FindFirstChild("Guardians")
+	if guardiansFolder then
+		for _, guardian in ipairs(guardiansFolder:GetChildren()) do
+			-- 检测是否有守护者的追击目标是 LocalPlayer
+			if guardian:GetAttribute("TargetPlayerName") == player.Name then
+				isChased = true
+				local hrp = getHRP()
+				if hrp and guardian.PrimaryPart then
+					local dist = (hrp.Position - guardian.PrimaryPart.Position).Magnitude
+					if dist < minDistance then
+						minDistance = dist
+					end
+				end
+			end
+		end
+	end
+
+	-- 计算目标抖动强度（距离越近抖动越强烈，距离 60 开始有感）
+	local targetIntensity = 0
+	if isChased and minDistance < 60 then
+		-- 当距离为 60 时强度为 0.1，完全贴脸时强度可达 1.5
+		targetIntensity = math.clamp(1 - (minDistance / 60), 0.1, 1) * 1.5 
+	end
+	
+	-- 平滑过渡抖动强度，防止开始和停止时画面突兀
+	shakeIntensity = shakeIntensity + (targetIntensity - shakeIntensity) * 8 * dt
+
+	-- 如果强度足够大，则计算相机抖动
+	if shakeIntensity > 0.02 then
+		local now = os.clock() * 25 -- 控制抖动频率(速度)
+		
+		-- 使用柏林噪声(math.noise)生成平缓随机的 XYZ 偏移
+		local xOffset = math.noise(now, 100, 0) * shakeIntensity
+		local yOffset = math.noise(now, 200, 0) * shakeIntensity
+		local rollOffset = math.noise(now, 300, 0) * (shakeIntensity * 0.25) -- 倾斜抖动减弱一点以防晕3D
+
+		-- 将抖动叠加到当前相机的 CFrame 上
+		currentCamera.CFrame = currentCamera.CFrame 
+			* CFrame.new(xOffset, yOffset, 0) 
+			* CFrame.Angles(0, 0, math.rad(rollOffset))
+	end
+end)

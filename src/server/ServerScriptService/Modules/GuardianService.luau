@@ -36,6 +36,7 @@ for level = 1, 30 do
 	
 	GUARDIAN_CONFIG[level] = {
 		ModelName = "守护者形象" .. tostring(level), 
+		-- 速度随等级提升：基础 20，每级增加 3
 		Speed = 20 + (level * 3), 
 		Animations = customAnim
 	}
@@ -184,6 +185,8 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	if guardian.State ~= "Track" then return end
 	guardian.State = "Attack"
 	guardian.TargetPlayer = nil 
+	-- [修改内容] 攻击时丢失目标，清除追逐标记
+	guardian.Model:SetAttribute("TargetPlayerName", "")
 	guardian.AttackTimer = os.clock()
 	playAnim(guardian, "Attack")
 
@@ -260,6 +263,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	-- 强制统一控制权
 	clone.PrimaryPart = root
+	-- [修改内容] 初始化追击标记
+	clone:SetAttribute("TargetPlayerName", "")
 
 	-- [修改内容] 强制全锚定模式：将模型内所有零件全部锚定
 	-- [修改内容] 为了让 Motor6D 动画能生效，除了 RootPart 必须锚定外，其他所有外观零件绝对不能锚定！
@@ -348,6 +353,8 @@ local function onHeartbeat(dt: number)
 					if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
 						if g.State == "Idle" or g.State == "Return" then
 							g.TargetPlayer = player
+							-- [修改内容] 标记模型正在追击该玩家，以便客户端识别
+							g.Model:SetAttribute("TargetPlayerName", player.Name)
 							g.State = "Track"
 							g.LastPathTime = 0
 							playAnim(g, "Track")
@@ -389,6 +396,8 @@ local function onHeartbeat(dt: number)
 
 			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 or isSafe then
 				g.TargetPlayer = nil
+				-- [修改内容] 玩家逃脱，清除追击标记
+				g.Model:SetAttribute("TargetPlayerName", "")
 				g.State = "Return"
 				playAnim(g, "Track")
 				continue
@@ -456,8 +465,10 @@ function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
 	local g = activeGuardians[zoneKey]
 	if g and (g.State == "Idle" or g.State == "Return") then
 		g.TargetPlayer = player
+		-- [修改内容] 触发追击，设置追击标记
+		g.Model:SetAttribute("TargetPlayerName", player.Name)
 		g.State = "Track"
-		g.LastPathTime = 0 
+		g.LastPathTime = 0
 		playAnim(g, "Track")
 		print(string.format("[GuardianService] %s 触发拾取！守护者正在追击...", player.Name))
 	end
