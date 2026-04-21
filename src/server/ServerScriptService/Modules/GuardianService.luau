@@ -304,10 +304,19 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	playAnim(activeGuardians[zoneKey], "Idle")
 end
 
+--【【
 local function onHeartbeat(dt: number)
 	local now = os.clock()
-	-- [修改内容] 将无用的 "_" 改为 "key" 键名，以便我们能在数据损坏时将其从字典中移除
 	for key, g in pairs(activeGuardians) do
+		
+		-- [修改内容] 听取你的排查结果：针对 g.SpawnCFrame 为 nil 的情况做终极兜底补全！
+		-- 如果它因为任何原因丢失了出生点数据，我们就直接把它的当前位置设为出生点，彻底消灭这个报错。
+		if g and g.RootPart and not g.SpawnCFrame then
+			g.SpawnCFrame = g.RootPart.CFrame
+			warn("⚠️ [GuardianService] 发现缺失 SpawnCFrame 的守护者，已自动为其补全坐标！")
+		end
+
+		-- 搜索最近玩家逻辑
 		
 		-- [修改内容] 增加核心存活检测：如果守护者的模型或 RootPart 已丢失（例如掉入虚空被系统销毁，或被其他脚本销毁）
 		if not g or not g.Model or not g.RootPart or not g.RootPart.Parent then
