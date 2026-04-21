@@ -26,8 +26,8 @@ for level = 1, 30 do
 	GUARDIAN_CONFIG[level] = {
 		-- 对应模型名：守护者形象1, 守护者形象2 ...
 		ModelName = "守护者形象" .. tostring(level), 
-		-- 速度随等级提升：基础 12，每级增加 1.5
-		Speed = 12 + (level * 1.5), 
+		-- 速度随等级提升：基础 12，每级增加 3
+		Speed = 20 + (level * 3), 
 		Animations = {
 			Idle = "",   -- 在此处填入你的动画 ID
 			Track = "", 
