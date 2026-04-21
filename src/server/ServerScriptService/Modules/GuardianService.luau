@@ -246,8 +246,9 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		end
 	end
 
-	-- 初始化位置
-	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + 4 + (root.Size.Y / 2), 0)
+	-- [修改内容] 以 RootPart 中心点为主。先定位到区域顶表面 (zonePart.Size.Y / 2)，然后再向上移动 RootPart 自身一半的高度 (root.Size.Y / 2)
+	-- 去除了原本写死的 '+ 4' 偏移，保证模型脚底精确贴合地面
+	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
 	clone:PivotTo(spawnCFrame)
 	clone.Parent = guardiansFolder
 
