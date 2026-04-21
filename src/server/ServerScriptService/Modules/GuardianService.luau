@@ -256,12 +256,14 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	-- 强制统一控制权
 	clone.PrimaryPart = root
 
-	-- 清理调试颜色，开启触碰
+	-- [修改内容] 强制全锚定模式：将模型内所有零件全部锚定
+	-- 这样可以防止没有焊接(Weld)的视觉零件掉落到虚空中被系统删除
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
-			d.Anchored = (d == root)
+			d.Anchored = true -- [修改内容] 全部设为 true，不再区分 root
 			d.CanTouch = (d == root)
 			d.CanCollide = false
+			d.Massless = true -- 减少物理引擎开销
 		end
 	end
 
