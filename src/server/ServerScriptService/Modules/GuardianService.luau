@@ -233,18 +233,17 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	local clone = template:Clone()
 	
-	-- [修改内容] 获取核心点。如果模型里根本没有合法的 BasePart，自动生成一个隐形核心，彻底杜绝 nil 报错
-	local root = clone:FindFirstChild("FakeRootPart") 
-		or clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
+	-- [修改内容] 优先寻找你指定的 RootPart。如果找不到，再尝试 PrimaryPart 或其他部件
+	local root = clone:FindFirstChild("RootPart") 
+		or clone.PrimaryPart or clone:FindFirstChild("FakeRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	
 	if not root or not root:IsA("BasePart") then 
 		root = Instance.new("Part")
-		root.Name = "FakeRootPart"
+		root.Name = "RootPart"  -- [修改内容] 兜底生成的部件名字也统一叫 RootPart
 		root.Size = Vector3.new(2, 2, 2)
 		root.Transparency = 1
 		root.CanCollide = false
 		root.Anchored = true
-		-- 如果没找到部位，就在区域正上方3个单位生成兜底核心
 		root.CFrame = zonePart.CFrame * CFrame.new(0, 3, 0)
 		root.Parent = clone
 	end
