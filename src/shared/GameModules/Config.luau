@@ -38,7 +38,8 @@ Config.REPLENISH_BATCH_INTERVAL_SECONDS = 5
 -- 新玩家初始金币（只在 PlayerAdded 初始化时生效）
 Config.PLAYER_START_GOLD = 100000000
 
-Config.WALK_SPEED_BASE = 16
+-- [修改内容] 玩家的初始移动速度。Roblox 默认值是 16，你可以把它改大，比如 25 或 30
+Config.WALK_SPEED_BASE = 25 
 Config.WALK_SPEED_PER_UPGRADE = 1
 
 -- 速度升级花费：level * (level * 50)

@@ -3,6 +3,8 @@ local UIController = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- [新增内容] 引入社交服务用于弹出邀请界面
+local SocialService = game:GetService("SocialService") 
 
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
@@ -40,6 +42,9 @@ local weaponList = monsterInventoryWindow:WaitForChild("weaponList") :: Scrollin
 local weaponTemplate = monsterInventoryWindow:WaitForChild("WeaponTemplate") :: GuiObject
 local monsterTabBtn = monsterInventoryWindow:WaitForChild("monster") :: GuiButton
 local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
+
+-- [修改内容] 引用邀请按钮
+local inviteButton = mainGui:WaitForChild("ImageButton_邀请") :: ImageButton 
 
 local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
@@ -95,8 +100,59 @@ local function formatNumberShort(n: number): string
 	return tostring(math.floor(n))
 end
 
+-- [新增内容] 提示消息显示的计数器，防止多个提示动画冲突
+local toastHideCounter = 0 
+
 local function showToast(text: string)
-	print("[系统提示]:", text) -- [修改内容] 保持原有的静默输出逻辑
+	-- 保留原本的控制台打印，方便调试
+	print("[系统提示]:", text) 
+	
+	-- 获取 UI 控件
+	local toastPanel = mainGui:FindFirstChild("提示消息")
+	if not toastPanel then return end
+	
+	local iconLabel = toastPanel:FindFirstChild("icon") :: ImageLabel?
+	local messageLabel = toastPanel:FindFirstChild("massage") :: TextLabel? 
+	
+	-- 1. 设置文字
+	if messageLabel then
+		messageLabel.Text = text
+	end
+	
+	-- 2. 匹配 Config 中的图标
+	local matchedIconId = nil
+	-- 确保 Config.TOAST_ICONS 存在（需要你在 Config.luau 中提前加好）
+	if Config.TOAST_ICONS then
+		for keyword, imageId in pairs(Config.TOAST_ICONS) do
+			if string.find(text, keyword) then
+				matchedIconId = imageId
+				break 
+			end
+		end
+	end
+	
+	-- 3. 控制图标显示
+	if iconLabel then
+		if matchedIconId and matchedIconId ~= "" and matchedIconId ~= "rbxassetid://0" then
+			iconLabel.Image = matchedIconId
+			iconLabel.Visible = true
+		else
+			iconLabel.Visible = false 
+		end
+	end
+	
+	-- 4. 弹窗显示与计时隐藏逻辑
+	toastHideCounter += 1
+	local currentCounter = toastHideCounter
+	
+	toastPanel.Visible = true
+	
+	task.spawn(function()
+		task.wait(2.5) -- 停留2.5秒后自动隐藏
+		if toastHideCounter == currentCounter then
+			toastPanel.Visible = false
+		end
+	end)
 end
 
 
@@ -722,6 +778,16 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	elseif safeDeleteBtn then
 		warn("严重错误：RequestClearPlayerData 远程事件加载失败！")
 	end
+
+	-- [新增内容] 绑定邀请功能逻辑
+	if inviteButton then
+		inviteButton.Activated:Connect(function()
+			-- 弹出 Roblox 系统原生的邀请界面
+			SocialService:PromptGameInvite(player)
+		end)
+	end
+
+	print("[UIController] 2D UI 逻辑已初始化")
 end
 
 return UIController
