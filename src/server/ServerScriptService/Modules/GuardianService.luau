@@ -103,15 +103,19 @@ local function isPlayerInZone(playerHRP: BasePart, zonePart: BasePart): boolean
 end
 
 -- 让守护者看向目标 (PivotTo 驱动)
--- [修改内容] 增加角度偏移参数，默认旋转 180 度以修正模型朝向相反的问题
+-- [修改内容] 增强版朝向逻辑：仅改变 XZ 平面旋转，并严格抵消 PivotOffset 带来的位置偏移
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
+	-- 强制目标点高度等于当前高度，防止模型“抬头”或“低头”
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
 
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面 Angles(0, math.pi, 0)
-		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, 0, 0)
-		model:PivotTo(targetCFrame)
+		-- 计算朝向 CFrame
+		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
+		
+		-- [修改内容] 核心修复：乘以 PivotOffset。
+		-- 这确保了无论 RootPart 的 Pivot 设在哪，RootPart 的中心点都会保持在 currentPos。
+		model:PivotTo(targetCFrame * rootPart.PivotOffset)
 	end
 end
 
@@ -405,8 +409,18 @@ local function onHeartbeat(dt: number)
 					if flatMoveVec.Magnitude < 1 then
 						g.CurrentWaypointIdx += 1
 					else
-						g.Model:PivotTo(g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt))
-					end
+					-- [修改内容] 1. 提取当前 RootPart 的纯旋转部分
+					local currentRotationOnly = g.RootPart.CFrame - g.RootPart.CFrame.Position
+					
+					-- [修改内容] 2. 计算下一帧的水平坐标
+					local nextHorizontalPos = g.RootPart.Position + (flatMoveVec.Unit * g.Speed * dt)
+					
+					-- [修改内容] 3. 强制锁定 Y 坐标为出生点的高度，彻底切断“飞天”的可能性
+					local lockedPos = Vector3.new(nextHorizontalPos.X, g.SpawnCFrame.Position.Y, nextHorizontalPos.Z)
+					
+					-- [修改内容] 4. 使用旋转 + 锁定坐标 + PivotOffset 补偿进行重构
+					g.Model:PivotTo((currentRotationOnly + lockedPos) * g.RootPart.PivotOffset)
+				end
 				else
 					g.CurrentWaypointIdx += 1
 				end
