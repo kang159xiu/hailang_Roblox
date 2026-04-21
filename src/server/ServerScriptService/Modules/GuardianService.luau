@@ -232,7 +232,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	if not template then return end
 
 	local clone = template:Clone()
-	-- [修改内容] 优先寻找 FakeRootPart，确保操作的是 Rig 的核心根节点，防止 Motor6D 偏移导致模型飞天
+	
+	-- [修改内容] 1. 优先寻找 FakeRootPart，确保抓取到正确的脚底板核心点，防止 Motor6D 偏移
 	local root = clone:FindFirstChild("FakeRootPart") or clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	
 	if not root then 
@@ -240,7 +241,7 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		return 
 	end
 
-	-- [修改内容] 强制将识别到的 root 设置为模型的 PrimaryPart，统一后续 PivotTo 的行为
+	-- 强制统一控制权
 	clone.PrimaryPart = root
 
 	-- 清理调试颜色，开启触碰
@@ -252,8 +253,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		end
 	end
 
-	-- [修改内容] 以 RootPart 中心点为主。先定位到区域顶表面 (zonePart.Size.Y / 2)，然后再向上移动 RootPart 自身一半的高度 (root.Size.Y / 2)
-	-- 去除了原本写死的 '+ 4' 偏移，保证模型脚底精确贴合地面
+	-- [修改内容] 2. 纯依靠 FakeRootPart(即这里的 root) 来定位。
+	-- 此时 FakeRootPart 的底面会刚刚好严丝合缝地贴在 ZonePart 的顶面上，绝不穿模也不浮空。
 	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
 	clone:PivotTo(spawnCFrame)
 	clone.Parent = guardiansFolder
@@ -334,7 +335,14 @@ local function onHeartbeat(dt: number)
 			if closestHRP then
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
+				-- [修改内容] 距离判断：如果离目标点较远(>5)，说明是刚生成或被打断，直接瞬间归位，消除“开局滑行飞入”现象。
+				local dist = (g.RootPart.Position - g.SpawnCFrame.Position).Magnitude
+				if dist > 5 then
+					g.Model:PivotTo(g.SpawnCFrame)
+				else
+					-- 距离很近时保留一点平滑微调效果
+					g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
+				end
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
 			local targetChar = g.TargetPlayer.Character
