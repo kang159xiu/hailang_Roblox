@@ -10,6 +10,7 @@ local StarterPack = game:GetService("StarterPack")
 -- =========
 
 local function ensureFolder(parent: Instance, name: string): Folder
+	-- 如果没这个 文件夹，就在这里用代码“自动新建”一个！
 	local f = parent:FindFirstChild(name)
 	if f and f:IsA("Folder") then
 		return f
@@ -20,11 +21,14 @@ local function ensureFolder(parent: Instance, name: string): Folder
 	return newF
 end
 
+
 local function ensureRemoteEvent(folder: Folder, name: string): RemoteEvent
+	-- 如果没这个 RemoteEvent，就在这里用代码“自动新建”一个！
 	local ev = folder:FindFirstChild(name)
 	if ev and ev:IsA("RemoteEvent") then
 		return ev
 	end
+	-- 如果找不到，就在这里用代码“自动新建”一个！
 	local newEv = Instance.new("RemoteEvent")
 	newEv.Name = name
 	newEv.Parent = folder
