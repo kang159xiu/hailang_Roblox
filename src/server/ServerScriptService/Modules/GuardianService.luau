@@ -110,11 +110,9 @@ local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
 
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		-- 计算朝向 CFrame
-		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
-		
-		-- [修改内容] 核心修复：乘以 PivotOffset。
-		-- 这确保了无论 RootPart 的 Pivot 设在哪，RootPart 的中心点都会保持在 currentPos。
+		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面 Angles(0, math.pi, 0)
+		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, 0, 0)
+		-- [修改内容] 必须乘以 rootPart.PivotOffset，否则每次转身都会导致坐标叠加偏移，引起跳动
 		model:PivotTo(targetCFrame * rootPart.PivotOffset)
 	end
 end
@@ -268,7 +266,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	end
 
 	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
-	clone:PivotTo(spawnCFrame)
+	-- [修改内容] 必须乘以 PivotOffset，消除生成时的坐标偏移
+	clone:PivotTo(spawnCFrame * root.PivotOffset)
 	clone.Parent = guardiansFolder
 
 	local controller = clone:FindFirstChildWhichIsA("AnimationController") or Instance.new("AnimationController", clone)
@@ -368,10 +367,12 @@ local function onHeartbeat(dt: number)
 				local dist = (g.RootPart.Position - targetIdleCFrame.Position).Magnitude
 				
 				if dist > 5 then
-					g.Model:PivotTo(targetIdleCFrame)
+					-- [修改内容] 强制拉回时乘以 PivotOffset 补偿
+					g.Model:PivotTo(targetIdleCFrame * g.RootPart.PivotOffset)
 				else
-					-- 平滑插值回到待机位置和旋转
-					g.Model:PivotTo(g.RootPart.CFrame:Lerp(targetIdleCFrame, 0.1))
+					-- [修改内容] 平滑插值后，乘以 PivotOffset 补偿，彻底切断“无限起飞再被拉回”的死循环
+					local lerpedCF = g.RootPart.CFrame:Lerp(targetIdleCFrame, 0.1)
+					g.Model:PivotTo(lerpedCF * g.RootPart.PivotOffset)
 				end
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
@@ -409,18 +410,10 @@ local function onHeartbeat(dt: number)
 					if flatMoveVec.Magnitude < 1 then
 						g.CurrentWaypointIdx += 1
 					else
-					-- [修改内容] 1. 提取当前 RootPart 的纯旋转部分
-					local currentRotationOnly = g.RootPart.CFrame - g.RootPart.CFrame.Position
-					
-					-- [修改内容] 2. 计算下一帧的水平坐标
-					local nextHorizontalPos = g.RootPart.Position + (flatMoveVec.Unit * g.Speed * dt)
-					
-					-- [修改内容] 3. 强制锁定 Y 坐标为出生点的高度，彻底切断“飞天”的可能性
-					local lockedPos = Vector3.new(nextHorizontalPos.X, g.SpawnCFrame.Position.Y, nextHorizontalPos.Z)
-					
-					-- [修改内容] 4. 使用旋转 + 锁定坐标 + PivotOffset 补偿进行重构
-					g.Model:PivotTo((currentRotationOnly + lockedPos) * g.RootPart.PivotOffset)
-				end
+						-- [修改内容] 提取出新的中心坐标，再应用 PivotOffset 补偿
+						local nextCF = g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt)
+						g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
+					end
 				else
 					g.CurrentWaypointIdx += 1
 				end
@@ -435,12 +428,13 @@ local function onHeartbeat(dt: number)
 			local moveVec = (targetIdleCFrame.Position - g.RootPart.Position)
 			
 			if moveVec.Magnitude < 1 then
-				g.Model:PivotTo(targetIdleCFrame)
+				g.Model:PivotTo(targetIdleCFrame * g.RootPart.PivotOffset)
 				g.State = "Idle"
 				playAnim(g, "Idle")
 			else
-				-- 移动时看向出生点
-				g.Model:PivotTo(g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt))
+				-- [修改内容] 移动时看向出生点，应用 PivotOffset 补偿
+				local nextCF = g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt)
+				g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
 				lookAtFlat(g.Model, g.RootPart, targetIdleCFrame.Position)
 			end
 		end
