@@ -103,12 +103,14 @@ local function isPlayerInZone(playerHRP: BasePart, zonePart: BasePart): boolean
 end
 
 -- 让守护者看向目标 (PivotTo 驱动)
+-- [修改内容] 增加角度偏移参数，默认旋转 180 度以修正模型朝向相反的问题
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
 
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		local targetCFrame = CFrame.lookAt(currentPos, flatTarget)
+		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面
+		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, math.pi, 0)
 		model:PivotTo(targetCFrame)
 	end
 end
@@ -354,13 +356,18 @@ local function onHeartbeat(dt: number)
 
 		if g.State == "Idle" then
 			if closestHRP then
+				-- [修改内容] 追踪附近的玩家时也会自动应用 lookAtFlat 里的 180 度修正
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				local dist = (g.RootPart.Position - g.SpawnCFrame.Position).Magnitude
+				-- [修改内容] 当玩家不在附近时，让守护者完美对齐地块的朝向（同样叠加 180 度修正）
+				local targetIdleCFrame = g.SpawnCFrame * CFrame.Angles(0, math.pi, 0)
+				local dist = (g.RootPart.Position - targetIdleCFrame.Position).Magnitude
+				
 				if dist > 5 then
-					g.Model:PivotTo(g.SpawnCFrame)
+					g.Model:PivotTo(targetIdleCFrame)
 				else
-					g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
+					-- 平滑插值回到待机位置和旋转
+					g.Model:PivotTo(g.RootPart.CFrame:Lerp(targetIdleCFrame, 0.1))
 				end
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
@@ -410,14 +417,17 @@ local function onHeartbeat(dt: number)
 				playAnim(g, "Track")
 			end
 		elseif g.State == "Return" then
-			local moveVec = (g.SpawnCFrame.Position - g.RootPart.Position)
+			local targetIdleCFrame = g.SpawnCFrame * CFrame.Angles(0, math.pi, 0)
+			local moveVec = (targetIdleCFrame.Position - g.RootPart.Position)
+			
 			if moveVec.Magnitude < 1 then
-				g.Model:PivotTo(g.SpawnCFrame)
+				g.Model:PivotTo(targetIdleCFrame)
 				g.State = "Idle"
 				playAnim(g, "Idle")
 			else
+				-- 移动时看向出生点
 				g.Model:PivotTo(g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt))
-				lookAtFlat(g.Model, g.RootPart, g.SpawnCFrame.Position)
+				lookAtFlat(g.Model, g.RootPart, targetIdleCFrame.Position)
 			end
 		end
 	end
