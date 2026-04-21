@@ -233,15 +233,17 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	local clone = template:Clone()
 	
-	-- [修改内容] 1. 优先寻找 FakeRootPart，确保抓取到正确的脚底板核心点，防止 Motor6D 偏移
-	local root = clone:FindFirstChild("FakeRootPart") or clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
+	-- [修改内容] 1. 严格锁定 RootPart，不抓取其他任何名字的零件
+	local root = clone:FindFirstChild("RootPart") :: BasePart?
 	
+	-- 兜底：如果没找到 RootPart，直接销毁并报红字警告
 	if not root then 
+		warn("[GuardianService] 错误：模组 " .. clone.Name .. " 缺失名为 'RootPart' 的零件！")
 		clone:Destroy() 
 		return 
 	end
 
-	-- 强制统一控制权
+	-- 强制将 RootPart 设为主部件
 	clone.PrimaryPart = root
 
 	-- 清理调试颜色，开启触碰
@@ -253,10 +255,18 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		end
 	end
 
-	-- [修改内容] 2. 纯依靠 FakeRootPart(即这里的 root) 来定位。
-	-- 此时 FakeRootPart 的底面会刚刚好严丝合缝地贴在 ZonePart 的顶面上，绝不穿模也不浮空。
-	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
-	clone:PivotTo(spawnCFrame)
+	-- [修改内容] 2. 纯数学对齐：只计算 RootPart 的尺寸
+	-- 第一步：找到刷怪区(ZonePart)的正上方顶面中心
+	local zoneTopCenter = zonePart.CFrame * CFrame.new(0, zonePart.Size.Y / 2, 0)
+	
+	-- 第二步：计算出 RootPart 的中心点该放在哪 (顶面再往上抬 RootPart 自身高度的一半)
+	local targetRootCenter = zoneTopCenter * CFrame.new(0, root.Size.Y / 2, 0)
+	
+	-- 第三步：PivotOffset 补偿 (消除 Studio 中 Pivot 圆圈不在中心带来的任何误差)
+	-- 最终效果：RootPart 的【绝对底面】完美贴在 ZonePart 的【绝对顶面】上
+	local finalPivotCF = targetRootCenter * root.PivotOffset
+	
+	clone:PivotTo(finalPivotCF)
 	clone.Parent = guardiansFolder
 
 	local controller = clone:FindFirstChildWhichIsA("AnimationController") or Instance.new("AnimationController", clone)
