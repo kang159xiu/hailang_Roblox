@@ -233,17 +233,23 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	local clone = template:Clone()
 	
-	-- [修改内容] 1. 严格锁定 RootPart，不抓取其他任何名字的零件
-	local root = clone:FindFirstChild("RootPart") :: BasePart?
+	-- [修改内容] 获取核心点。如果模型里根本没有合法的 BasePart，自动生成一个隐形核心，彻底杜绝 nil 报错
+	local root = clone:FindFirstChild("FakeRootPart") 
+		or clone.PrimaryPart or clone:FindFirstChild("RootPart") or clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	
-	-- 兜底：如果没找到 RootPart，直接销毁并报红字警告
-	if not root then 
-		warn("[GuardianService] 错误：模组 " .. clone.Name .. " 缺失名为 'RootPart' 的零件！")
-		clone:Destroy() 
-		return 
+	if not root or not root:IsA("BasePart") then 
+		root = Instance.new("Part")
+		root.Name = "FakeRootPart"
+		root.Size = Vector3.new(2, 2, 2)
+		root.Transparency = 1
+		root.CanCollide = false
+		root.Anchored = true
+		-- 如果没找到部位，就在区域正上方3个单位生成兜底核心
+		root.CFrame = zonePart.CFrame * CFrame.new(0, 3, 0)
+		root.Parent = clone
 	end
 
-	-- 强制将 RootPart 设为主部件
+	-- 强制统一控制权
 	clone.PrimaryPart = root
 
 	-- 清理调试颜色，开启触碰
@@ -255,18 +261,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		end
 	end
 
-	-- [修改内容] 2. 纯数学对齐：只计算 RootPart 的尺寸
-	-- 第一步：找到刷怪区(ZonePart)的正上方顶面中心
-	local zoneTopCenter = zonePart.CFrame * CFrame.new(0, zonePart.Size.Y / 2, 0)
-	
-	-- 第二步：计算出 RootPart 的中心点该放在哪 (顶面再往上抬 RootPart 自身高度的一半)
-	local targetRootCenter = zoneTopCenter * CFrame.new(0, root.Size.Y / 2, 0)
-	
-	-- 第三步：PivotOffset 补偿 (消除 Studio 中 Pivot 圆圈不在中心带来的任何误差)
-	-- 最终效果：RootPart 的【绝对底面】完美贴在 ZonePart 的【绝对顶面】上
-	local finalPivotCF = targetRootCenter * root.PivotOffset
-	
-	clone:PivotTo(finalPivotCF)
+	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
+	clone:PivotTo(spawnCFrame)
 	clone.Parent = guardiansFolder
 
 	local controller = clone:FindFirstChildWhichIsA("AnimationController") or Instance.new("AnimationController", clone)
@@ -280,7 +276,7 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 		RootPart = root,
 		Speed = config.Speed,
 		AnimTracks = loadAnimations(animator, config.Animations),
-		State = "Idle",          
+		State = "Idle",      
 		SpawnCFrame = spawnCFrame,
 		TargetPlayer = nil,
 		Waypoints = {},
@@ -292,7 +288,8 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	-- 绑定碰撞抓捕
 	root.Touched:Connect(function(hit)
 		local g = activeGuardians[zoneKey]
-		if g.State == "Track" and g.TargetPlayer then
+		-- [修改内容] 增加 g 存在的判断，防止异步触发时 g 已经被清理
+		if g and g.State == "Track" and g.TargetPlayer then
 			local char = g.TargetPlayer.Character
 			if char and hit:IsDescendantOf(char) then
 				local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -304,44 +301,36 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	playAnim(activeGuardians[zoneKey], "Idle")
 end
 
---【【
+
 local function onHeartbeat(dt: number)
 	local now = os.clock()
 	for key, g in pairs(activeGuardians) do
 		
-		-- [修改内容] 听取你的排查结果：针对 g.SpawnCFrame 为 nil 的情况做终极兜底补全！
-		-- 如果它因为任何原因丢失了出生点数据，我们就直接把它的当前位置设为出生点，彻底消灭这个报错。
-		if g and g.RootPart and not g.SpawnCFrame then
-			g.SpawnCFrame = g.RootPart.CFrame
-			warn("⚠️ [GuardianService] 发现缺失 SpawnCFrame 的守护者，已自动为其补全坐标！")
-		end
-
-		-- 搜索最近玩家逻辑
-		
-		-- [修改内容] 增加核心存活检测：如果守护者的模型或 RootPart 已丢失（例如掉入虚空被系统销毁，或被其他脚本销毁）
-		if not g or not g.Model or not g.RootPart or not g.RootPart.Parent then
-			-- 尝试清理可能残留的空壳模型
-			if g and g.Model then 
+		-- [修改内容] 1. 终极存活检测：如果模型被引擎意外销毁，安全剔除，防止崩溃
+		if type(g) ~= "table" or not g.Model or not g.RootPart or not g.RootPart:IsA("BasePart") or not g.RootPart.Parent then
+			if type(g) == "table" and g.Model then 
 				pcall(function() g.Model:Destroy() end) 
 			end
-			-- 从活跃字典中彻底注销该守护者，停止对其寻路计算，防止无限报错
 			activeGuardians[key] = nil
 			continue
 		end
-		
+
+		-- [修改内容] 2. 出生点兜底：如果数据表中丢失了 SpawnCFrame，用当前位置补全
+		if not g.SpawnCFrame then
+			g.SpawnCFrame = g.RootPart.CFrame
+		end
+
 		-- 搜索最近玩家逻辑
 		local closestHRP = nil
-		local minDist = 999
+		local minDist = 999 
 		for _, player in ipairs(Players:GetPlayers()) do
 			local char = player.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if hrp and isPlayerInZone(hrp, g.ZonePart) then
 				
 				local carriedLevel = getPlayerCarriedMaxLevel(player)
-				-- [修改内容] 每帧检测该玩家脚底是否是安全区
 				local isSafe = isPlayerOnSafeGround(char)
 				
-				-- [修改内容] 只有当玩家【不在安全区】时，守护者才会锁定并追击他
 				if not isSafe then
 					-- 核心跨区追踪逻辑
 					if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
@@ -367,25 +356,18 @@ local function onHeartbeat(dt: number)
 			if closestHRP then
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				-- [修改内容] 距离判断：如果离目标点较远(>5)，说明是刚生成或被打断，直接瞬间归位，消除“开局滑行飞入”现象。
-				print("打印，",tostring(g),"//", tostring(g.RootPart), "//",tostring(g.SpawnCFrame))
-				 	
 				local dist = (g.RootPart.Position - g.SpawnCFrame.Position).Magnitude
 				if dist > 5 then
 					g.Model:PivotTo(g.SpawnCFrame)
 				else
-					-- 距离很近时保留一点平滑微调效果
 					g.Model:PivotTo(g.RootPart.CFrame:Lerp(g.SpawnCFrame, 0.1))
 				end
 			end
 		elseif g.State == "Track" and g.TargetPlayer then
 			local targetChar = g.TargetPlayer.Character
 			local targetHrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-			
-			-- [修改内容] 检测正在被追的人是不是踩进了安全区
 			local isSafe = targetChar and isPlayerOnSafeGround(targetChar)
 
-			-- [修改内容] 如果玩家不存在、头顶怪没了、或者【跑进了安全区(isSafe)】，守护者立刻回头放弃追踪
 			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 or isSafe then
 				g.TargetPlayer = nil
 				g.State = "Return"
@@ -405,26 +387,23 @@ local function onHeartbeat(dt: number)
 					g.CurrentWaypointIdx = 2
 				end
 			end
-			if g.Waypoints and g.CurrentWaypointIdx <= #g.Waypoints then
-				local currentWaypoint = g.Waypoints[g.CurrentWaypointIdx]
-				
-				-- [修改内容] 增加非空防御判断：确保当前路径点确实存在，再去获取 Position，防止报错崩溃
-				if currentWaypoint then
-					local targetWP = currentWaypoint.Position
+
+			-- [修改内容] 3. 寻路点安全检测：防止 g.Waypoints[idx] 为 nil 导致崩溃
+			if g.Waypoints and #g.Waypoints > 0 and g.CurrentWaypointIdx <= #g.Waypoints then
+				local currentWP = g.Waypoints[g.CurrentWaypointIdx]
+				if currentWP then
+					local targetWP = currentWP.Position
 					local moveVec = (targetWP - g.RootPart.Position)
 					local flatMoveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
-					
 					if flatMoveVec.Magnitude < 1 then
 						g.CurrentWaypointIdx += 1
 					else
 						g.Model:PivotTo(g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt))
 					end
 				else
-					-- [修改内容] 如果因为极端情况发现路径点为 nil，则强制推进索引，让守护者在下一次心跳重新计算寻路
 					g.CurrentWaypointIdx += 1
 				end
 			end
-
 		elseif g.State == "Attack" then
 			if now - g.AttackTimer > 1.5 then
 				g.State = "Return"
