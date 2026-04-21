@@ -306,10 +306,23 @@ end
 
 local function onHeartbeat(dt: number)
 	local now = os.clock()
-	for _, g in pairs(activeGuardians) do
+	-- [修改内容] 将无用的 "_" 改为 "key" 键名，以便我们能在数据损坏时将其从字典中移除
+	for key, g in pairs(activeGuardians) do
+		
+		-- [修改内容] 增加核心存活检测：如果守护者的模型或 RootPart 已丢失（例如掉入虚空被系统销毁，或被其他脚本销毁）
+		if not g or not g.Model or not g.RootPart or not g.RootPart.Parent then
+			-- 尝试清理可能残留的空壳模型
+			if g and g.Model then 
+				pcall(function() g.Model:Destroy() end) 
+			end
+			-- 从活跃字典中彻底注销该守护者，停止对其寻路计算，防止无限报错
+			activeGuardians[key] = nil
+			continue
+		end
+		
 		-- 搜索最近玩家逻辑
 		local closestHRP = nil
-		local minDist = 999 
+		local minDist = 999
 		for _, player in ipairs(Players:GetPlayers()) do
 			local char = player.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -346,7 +359,8 @@ local function onHeartbeat(dt: number)
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
 				-- [修改内容] 距离判断：如果离目标点较远(>5)，说明是刚生成或被打断，直接瞬间归位，消除“开局滑行飞入”现象。
-				print(tostring(g), tostring(g.RootPart), tostring(g.SpawnCFrame))
+				print("打印，",tostring(g),"//", tostring(g.RootPart), "//",tostring(g.SpawnCFrame))
+				 	
 				local dist = (g.RootPart.Position - g.SpawnCFrame.Position).Magnitude
 				if dist > 5 then
 					g.Model:PivotTo(g.SpawnCFrame)
@@ -401,7 +415,7 @@ local function onHeartbeat(dt: number)
 					g.CurrentWaypointIdx += 1
 				end
 			end
-			
+
 		elseif g.State == "Attack" then
 			if now - g.AttackTimer > 1.5 then
 				g.State = "Return"
