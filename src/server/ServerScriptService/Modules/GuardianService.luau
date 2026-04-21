@@ -109,8 +109,8 @@ local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
 
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面
-		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, math.pi, 0)
+		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面 Angles(0, math.pi, 0)
+		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, 0, 0)
 		model:PivotTo(targetCFrame)
 	end
 end
