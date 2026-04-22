@@ -23,7 +23,7 @@ local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 
 -- [修改内容] 新增：专属动画配置表。你可以在这里为每一级的守护者独立配置动画 ID
 local CUSTOM_ANIMATIONS = {
-	[1] = { Idle = "", Track = "", Attack = "" },
+	[1] = { Idle = "rbxassetid://81551578379988", Track = "rbxassetid://132222392379713", Attack = "" },
 	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://78735945899751", Attack = "" },
 	[3] = { Idle = "", Track = "", Attack = "" },
 	-- 你可以继续往下复制，最高写到 [30]
