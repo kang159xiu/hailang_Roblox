@@ -1353,6 +1353,34 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		placed:SetAttribute("UpgradeLevel", upLevel)
 		placed:SetAttribute("BaseValue", baseV)
 		placed:SetAttribute("BaseGoldPerSec", baseGps)
+
+		-- [修改内容] 查找并播放放置特效
+		local vfxFolder = Workspace:FindFirstChild("放置特效")
+		local vfxTemplate = vfxFolder and vfxFolder:FindFirstChild("放置特效01")
+		
+		if vfxTemplate then
+			-- [修改内容] 克隆特效模板
+			local vfxClone = vfxTemplate:Clone()
+			
+			-- [修改内容] 根据特效是模型还是基础零件，对齐到刚放置的怪物的空间位置
+			if vfxClone:IsA("Model") then
+				vfxClone:PivotTo(placed.CFrame)
+			elseif vfxClone:IsA("BasePart") then
+				vfxClone.CFrame = placed.CFrame
+			end
+			
+			-- [修改内容] 将克隆出的特效放入 Workspace 使其可见
+			vfxClone.Parent = Workspace
+			
+			-- [修改内容] 延迟 0.8s 后自动销毁特效
+			task.delay(2, function()
+				if vfxClone and vfxClone.Parent then
+					vfxClone:Destroy()
+				end
+			end)
+		else
+			warn("[PlacementService] 未找到放置特效，路径应为: Workspace.放置特效.放置特效01")
+		end
 	end
 
 	-- 放置后立即刷新收益显示牌子
