@@ -25,7 +25,14 @@ local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 local CUSTOM_ANIMATIONS = {
 	[1] = { Idle = "rbxassetid://81551578379988", Track = "rbxassetid://132222392379713", Attack = "" },
 	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://78735945899751", Attack = "" },
-	[3] = { Idle = "", Track = "", Attack = "" },
+	[3] = { Idle = "rbxassetid://114979548917103", Track = "rbxassetid://97381162200240", Attack = "" },
+	[4] = { Idle = "rbxassetid://112545660735763", Track = "rbxassetid://107357919201909", Attack = "" },
+	[5] = { Idle = "rbxassetid://100537385040728", Track = "rbxassetid://96222636503887", Attack = "" },
+	[6] = { Idle = "rbxassetid://92084664894159", Track = "rbxassetid://97627296401053", Attack = "" },
+	[7] = { Idle = "rbxassetid://86144328246135", Track = "rbxassetid://135043731853331", Attack = "" },
+	[8] = { Idle = "rbxassetid://89574551671070", Track = "rbxassetid://123374707041935", Attack = "" },
+	[9] = { Idle = "rbxassetid://113172908675912", Track = "rbxassetid://117253206075071", Attack = "" },
+	[10] = { Idle = "rbxassetid://115990250502932", Track = "rbxassetid://109359462253664", Attack = "" },
 	-- 你可以继续往下复制，最高写到 [30]
 }
 
