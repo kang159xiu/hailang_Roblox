@@ -457,8 +457,11 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 			-- 克隆金币UI
 			local coin = moneyImageSource:Clone()
 			
-			-- [修改内容] 强制设置金币的绝对像素大小，例如宽 40，高 40。您可以根据实际观感调整这两个数值。
-			coin.Size = UDim2.fromOffset(50, 50) 
+			-- [终极修复] 强制让克隆体显示出来！素材库里的图通常是隐藏的，必须解除隐藏！
+			coin.Visible = true
+			
+			-- [修改内容] 强制设置金币的绝对像素大小，例如宽 40，高 40。
+			coin.Size = UDim2.fromOffset(50, 50)
 			
 			coin.AnchorPoint = Vector2.new(0.5, 0.5)
 			coin.Position = UDim2.fromScale(0.5, 0.5) -- 初始从屏幕中心爆出
