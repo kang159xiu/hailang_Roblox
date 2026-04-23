@@ -989,6 +989,11 @@ local function createPlacedMonsterPart(
 			end)
 		end
 
+		-- [修改内容] 新增监听：接收来自踩踏地块发出的显示信号
+		p:GetAttributeChangedSignal("TriggerPromptReveal"):Connect(function()
+			revealPlacedMonsterPrompts(3)
+		end)
+
 		local sell = Instance.new("ProximityPrompt")
 		sell.Name = "SellPrompt"
 		sell.ActionText = "卖出"
@@ -1161,6 +1166,11 @@ local function createPlacedMonsterPart(
 			setPlacedMonsterPromptVisible(false)
 		end)
 	end
+
+	-- [修改内容] 新增监听：接收来自踩踏地块发出的显示信号
+	p:GetAttributeChangedSignal("TriggerPromptReveal"):Connect(function()
+		revealPlacedMonsterPrompts(3)
+	end)
 
 	-- 卖出 prompt
 	local sell = Instance.new("ProximityPrompt")
@@ -1740,6 +1750,16 @@ function PlacementService.Init()
 
 					tryPlaceFromEquippedTool(player, slot.Part)
 					payoutIfAny(player, slot.Part)
+
+					-- [修改内容] 当玩家踩在金币区(Collector)时，向当前槽位的怪物发送“显示弹框”的信号
+					local stateMap = slotStatesByUserId[player.UserId]
+					if stateMap then
+						local state = stateMap[idx]
+						if state and state.PlacedMonster and state.PlacedMonster.Parent then
+							-- 改变属性值，触发上方新增的监听，使弹框显示 3 秒
+							state.PlacedMonster:SetAttribute("TriggerPromptReveal", now)
+						end
+					end
 				end
 
 				slot.Part.Touched:Connect(handleSlotTouch)
