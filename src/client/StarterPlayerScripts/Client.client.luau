@@ -424,10 +424,29 @@ RunService.Heartbeat:Connect(function(dt)
 		acc = 0
 
 		untrackDestroyed()
+		
+		-- [修改内容] 计算最近的活体怪物距离，用于控制攻击按钮
+		local closestDist = 9999
+		local hrp = getHRP()
+		
 		for _, t in ipairs(tracked) do
 			updateMonsterText(t.Part)
+			
+			-- 只有当玩家存在，且该怪物还没死的情况下，才计算是否要弹出攻击按钮
+			if hrp and t.Part:GetAttribute("Dead") ~= true then
+				local dist = (hrp.Position - t.Part.Position).Magnitude
+				if dist < closestDist then
+					closestDist = dist
+				end
+			end
+		end
+		
+		-- [修改内容] 如果最近的活怪距离 <= 10，显示攻击按钮，否则隐藏
+		if UIController.SetAttackButtonVisible then
+			UIController.SetAttackButtonVisible(closestDist <= 10)
 		end
 	end
+	
 
 	local visiblePromptCount = 0
 	for _ in pairs(visiblePrompts) do

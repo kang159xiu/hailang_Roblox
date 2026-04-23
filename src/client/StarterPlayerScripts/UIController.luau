@@ -49,6 +49,8 @@ local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
 local inviteButton = mainGui:FindFirstChild("ImageButton_邀请", true) :: ImageButton 
 local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton 
 local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
+-- [新增内容] 引用攻击按钮 (使用 true 递归查找，无论你把它放在哪都能找到)
+local attackButton = mainGui:FindFirstChild("ImageButton_攻击", true) :: ImageButton?
 
 -- [修改内容] 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
 local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度", true) :: ImageButton?
@@ -733,6 +735,30 @@ function UIController.Init()
 		end)
 	end
 
+	-- [新增内容] 攻击按钮逻辑
+	if attackButton then
+		attackButton.Visible = false -- 默认隐藏
+		attackButton.Activated:Connect(function()
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if not hum then return end
+
+			local equippedTool = char:FindFirstChildOfClass("Tool")
+			if equippedTool then
+				-- 如果已经拿在手上，直接调用工具的 Activate 方法触发攻击
+				-- 这个 API 会自动触发 WeaponClient 里的 tool.Activated 事件，完美兼容原版攻击判定
+				equippedTool:Activate()
+			else
+				-- 如果没拿在手上，去背包里找出来装备上
+				local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
+				if backpackTool then
+					hum:EquipTool(backpackTool)
+				end
+			end
+		end)
+	end
+
+
 	-- 正常速度切换按钮逻辑
 	if speedToggleButton then
 		local function applyCurrentSpeed()
@@ -779,5 +805,16 @@ function UIController.Init()
 
 	print("[UIController] 2D UI 逻辑加载完毕！")
 end
+
+-- [新增内容] 暴露设置攻击按钮显示状态的方法给 Client.client.luau 调用
+function UIController.SetAttackButtonVisible(visible: boolean)
+	if attackButton then
+		if attackButton.Visible ~= visible then
+			attackButton.Visible = visible
+		end
+	end
+end
+
+
 
 return UIController
