@@ -1347,39 +1347,51 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		type(v) == "number" and v or 0,
 		type(gps) == "number" and gps or 0
 	)
-
 	-- 【新增】将强化属性继承给放置到地上的怪
 	if placed then
+		-- [修改内容] 同步强化属性到实体怪
 		placed:SetAttribute("UpgradeLevel", upLevel)
 		placed:SetAttribute("BaseValue", baseV)
 		placed:SetAttribute("BaseGoldPerSec", baseGps)
 
-		-- [修改内容] 查找并播放放置特效
+		-- [修改内容] 放置特效逻辑开始
 		local vfxFolder = Workspace:FindFirstChild("放置特效")
-		local vfxTemplate = vfxFolder and vfxFolder:FindFirstChild("放置特效01")
-		
-		if vfxTemplate then
-			-- [修改内容] 克隆特效模板
-			local vfxClone = vfxTemplate:Clone()
-			
-			-- [修改内容] 根据特效是模型还是基础零件，对齐到刚放置的怪物的空间位置
-			if vfxClone:IsA("Model") then
-				vfxClone:PivotTo(placed.CFrame)
-			elseif vfxClone:IsA("BasePart") then
-				vfxClone.CFrame = placed.CFrame
-			end
-			
-			-- [修改内容] 将克隆出的特效放入 Workspace 使其可见
-			vfxClone.Parent = Workspace
-			
-			-- [修改内容] 延迟 0.8s 后自动销毁特效
-			task.delay(2, function()
-				if vfxClone and vfxClone.Parent then
-					vfxClone:Destroy()
+		if vfxFolder then
+			local vfxTemplate = vfxFolder:FindFirstChild("放置特效01")
+			if vfxTemplate then
+				-- [修改内容] 确保模板可克隆（防止游戏运行时 Archivable 属性被默认关闭导致克隆出空物体）
+				vfxTemplate.Archivable = true 
+				local vfxClone = vfxTemplate:Clone()
+				
+				-- [修改内容] 根据特效是模型还是基础零件，对齐到刚放置的怪物的空间位置
+				if vfxClone:IsA("Model") then
+					vfxClone:PivotTo(placed.CFrame)
+				elseif vfxClone:IsA("BasePart") then
+					vfxClone.CFrame = placed.CFrame
 				end
-			end)
+				
+				-- [修改内容] 将克隆出的特效放入 Workspace 使其可见
+				vfxClone.Parent = Workspace
+				print("[VFX Debug] 放置特效已成功创建在: " .. tostring(placed.Position))
+				
+				-- [修改内容] 遍历特效内的所有粒子发射器，强制喷发粒子（解决特效不自动播放的问题）
+				for _, desc in ipairs(vfxClone:GetDescendants()) do
+					if desc:IsA("ParticleEmitter") then
+						desc:Emit(30) -- 瞬间强制喷发 30 个粒子，数量可按需调整
+					end
+				end
+				
+				-- [修改内容] 延迟 0.8s 后自动销毁特效
+				task.delay(1.5, function()
+					if vfxClone and vfxClone.Parent then
+						vfxClone:Destroy()
+					end
+				end)
+			else
+				warn("[VFX Debug] 警告：在 Workspace.放置特效 下找不到 '放置特效01'！")
+			end
 		else
-			warn("[PlacementService] 未找到放置特效，路径应为: Workspace.放置特效.放置特效01")
+			warn("[VFX Debug] 警告：在 Workspace 下找不到 '放置特效' 文件夹！")
 		end
 	end
 
