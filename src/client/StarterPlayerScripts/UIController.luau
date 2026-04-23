@@ -45,13 +45,10 @@ local weaponTemplate = monsterInventoryWindow:WaitForChild("WeaponTemplate") :: 
 local monsterTabBtn = monsterInventoryWindow:WaitForChild("monster") :: GuiButton
 local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
 
--- [修改内容] 引用邀请按钮
-local inviteButton = mainGui:WaitForChild("ImageButton_邀请") :: ImageButton 
-
--- [新增内容] 引用 VIP 购买按钮
-local vipButton = mainGui:WaitForChild("ImageButton_VIP") :: ImageButton 
-
-local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
+-- [终极修复] 使用递归查找(true)，瞬间搜遍整个UI层级，彻底消灭16秒的假死卡顿！
+local inviteButton = mainGui:FindFirstChild("ImageButton_邀请", true) :: ImageButton 
+local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton 
+local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
 
 -- [新增内容] 引用正常速度切换按钮及内部组件
 local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度") :: ImageButton?
@@ -422,26 +419,19 @@ end
 
 
 -- =====================
--- [修改内容] 金币爆点飞行动效逻辑
+-- [最终版] 金币爆点飞行动效逻辑
 -- =====================
 local TweenService = game:GetService("TweenService")
 local rng = Random.new()
 
 local function playGoldFlyingAnimation(increaseAmount: number)
-	print("[UI-特效测试] 1. playGoldFlyingAnimation 被触发！准备爆出的金币价值:", increaseAmount)
-	
 	local playerGui = player:WaitForChild("PlayerGui")
-	
 	local sucaiGui = playerGui:FindFirstChild("sucai")
-	if not sucaiGui then warn("[UI-特效测试] ❌ 失败：找不到 sucai 界面！") return end
-	
+	if not sucaiGui then return end
 	local moneyFrame = sucaiGui:FindFirstChild("money_Frame")
-	if not moneyFrame then warn("[UI-特效测试] ❌ 失败：找不到 money_Frame！") return end
-	
+	if not moneyFrame then return end
 	local moneyImageSource = moneyFrame:FindFirstChild("money_image")
-	if not moneyImageSource then warn("[UI-特效测试] ❌ 失败：找不到 money_image 原始素材！") return end
-	
-	print("[UI-特效测试] 2. 成功找到金币 UI 素材，准备生成容器...")
+	if not moneyImageSource then return end
 
 	local fxContainer = mainGui:FindFirstChild("FXContainer")
 	if not fxContainer then
@@ -451,11 +441,10 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 		fxContainer.Size = UDim2.fromScale(1, 1)
 		fxContainer.ZIndex = 100 
 		fxContainer.Parent = mainGui
-		print("[UI-特效测试] 3. 新建了特效顶层容器 FXContainer")
 	end
 
+	-- 动态计算生成数量: 基础10个，每多100金币多生成1个，上限20个
 	local count = math.clamp(10 + math.floor(increaseAmount / 100), 10, 20)
-	print("[UI-特效测试] 4. 计算完毕，即将爆出金币个数:", count)
 
 	for i = 1, count do
 		task.spawn(function()
@@ -486,49 +475,40 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 			flyTween.Completed:Wait() 
 
 			coin:Destroy()
-			if i == count then
-				print("[UI-特效测试] 5. 所有金币动画播放并销毁完毕！")
-			end
 		end)
+		-- 极短延迟，让金币有先有后
 		task.wait(rng:NextNumber(0, 0.02))
 	end
 end
 
--- [修改内容] 添加金币增减文字动画逻辑
+-- 添加金币增减文字动画逻辑
 local function playGoldTextAnimation(difference: number)
 	if difference == 0 or not addGoldUI then return end
 	
-	-- 克隆一个现有的 addGoldUI，避免金币快速变化时动画互相干扰和覆盖
 	local textClone = addGoldUI:Clone()
 	textClone.Visible = true
 	textClone.Parent = addGoldUI.Parent
 	
-	-- 根据增减判断文本与颜色
 	if difference > 0 then
 		textClone.Text = "+" .. formatNumberShort(difference)
-		textClone.TextColor3 = Color3.fromRGB(238, 255, 0) -- 绿色代表增加
+		textClone.TextColor3 = Color3.fromRGB(238, 255, 0)
 	else
 		textClone.Text = "-" .. formatNumberShort(math.abs(difference))
-		textClone.TextColor3 = Color3.fromRGB(255, 85, 85) -- 红色代表减少
+		textClone.TextColor3 = Color3.fromRGB(255, 85, 85)
 	end
 	
-	-- 初始化透明度和位置（保持为模板原位置）
 	textClone.TextTransparency = 0
 	if textClone:FindFirstChild("UIStroke") then
 		textClone.UIStroke.Transparency = 0
 	end
 	
-	-- 创建向上移动并淡出的动画 (向上偏移 30 像素)
 	local targetPos = textClone.Position - UDim2.fromOffset(0, 30)
-	
-	-- 对 TextLabel 自身进行动画
 	local tweenInfo = TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	local tween = TweenService:Create(textClone, tweenInfo, {
 		Position = targetPos,
 		TextTransparency = 1
 	})
 	
-	-- 如果带有描边 (UIStroke)，也让描边一起淡出
 	if textClone:FindFirstChild("UIStroke") then
 		local strokeTween = TweenService:Create(textClone.UIStroke, tweenInfo, {
 			Transparency = 1
@@ -537,20 +517,17 @@ local function playGoldTextAnimation(difference: number)
 	end
 	
 	tween:Play()
-	
-	-- 动画结束后销毁克隆体释放内存
 	tween.Completed:Connect(function()
 		textClone:Destroy()
 	end)
 end
 
 -- =====================
--- [修改内容] 武器商店渲染逻辑 (修复无法滚动、按钮状态错误问题)
+-- 武器商店渲染逻辑 
 -- =====================
 local function refreshWeaponShopUI()
 	if not weaponShopList or not weaponShopTemplate then return end
 
-	-- 1. 清理旧条目
 	for _, ch in ipairs(weaponShopList:GetChildren()) do
 		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" and not ch:IsA("UILayout") then
 			ch:Destroy()
@@ -561,30 +538,26 @@ local function refreshWeaponShopUI()
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
 	local weaponFolder = workspace:FindFirstChild("weapon")
 
-	-- 2. 循环生成 20 级武器列表
 	for i = 1, 20 do
 		local price = Config.WEAPON_PRICE_BY_LEVEL and Config.WEAPON_PRICE_BY_LEVEL[i]
 		local attack = Config.WEAPON_ATTACK_BY_LEVEL and Config.WEAPON_ATTACK_BY_LEVEL[i]
-		if not price and i > 1 then continue end -- 如果没配置价格，说明到顶了
+		if not price and i > 1 then continue end
 
 		local row = weaponShopTemplate:Clone()
 		row.Name = "WeaponShopRow_" .. i
 		row.Visible = true
 		row.Parent = weaponShopList
 
-		-- A. 武器名称
 		local nameLabel = row:FindFirstChild("武器名称")
 		if nameLabel and nameLabel:IsA("TextLabel") then
 			nameLabel.Text = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
 		end
 
-		-- B. 价格与攻击力
 		local infoLabel = row:FindFirstChild("武器价格/武器攻击力")
 		if infoLabel and infoLabel:IsA("TextLabel") then
 			infoLabel.Text = string.format("价格: %s   攻击力: +%s", formatNumberShort(price or 0), formatNumberShort(attack or 0))
 		end
 
-		-- C. 加载3D形象 (ViewportFrame)
 		local imageContainer = row:FindFirstChild("武器形象")
 		if imageContainer and weaponFolder then
 			local iconName = string.format("武器%02d", i)
@@ -594,20 +567,15 @@ local function refreshWeaponShopUI()
 			end
 		end
 
-		-- D. 状态判断与按钮绑定 (修复点)
 		local actionFrame = row:FindFirstChild("购买UIFrame")
-		-- 直接获取里面的 TextButton (你的组件名叫 "未购买/购买/装备")
 		local btn = actionFrame and actionFrame:FindFirstChild("未购买/购买/装备")
 		
-		-- 因为它是 TextButton，直接判断它是否是一个 GuiButton 即可
 		if btn and btn:IsA("GuiButton") then
 			if i > maxWeaponLevel + 1 then
-				-- 超出当前可买等级，锁定
 				btn.Text = "未解锁"
-				btn.Interactable = false  -- 禁用交互（禁止变色和点击）
+				btn.Interactable = false  
 				btn.Active = false
 			elseif i == maxWeaponLevel + 1 then
-				-- 可以买的下一把
 				btn.Text = "购买"
 				btn.Interactable = true
 				btn.Active = true
@@ -615,7 +583,6 @@ local function refreshWeaponShopUI()
 					requestPurchaseWeapon:FireServer(i)
 				end)
 			elseif i <= maxWeaponLevel then
-				-- 已拥有
 				if i == equippedWeapon then
 					btn.Text = "已装备"
 					btn.Interactable = false
@@ -630,29 +597,25 @@ local function refreshWeaponShopUI()
 				end
 			end
 		else
-			warn("[UIController] 未在 购买UIFrame 中找到名为 '未购买/购买/装备' 的按钮组件！")
+			warn("[UIController] 未在 购买UIFrame 中找到按钮组件！")
 		end
 	end
 
-	-- 3. [修复点] 强制重新计算滑动列表的高度，解决无法滚动的问题
 	task.defer(function()
 		if weaponShopList:IsA("ScrollingFrame") then
 			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 			local gridLayout = weaponShopList:FindFirstChildWhichIsA("UIGridLayout")
 			if gridLayout then
-				-- 强制根据网格内容高度设定画布大小 (+20 是为了留一点底部边距)
 				weaponShopList.CanvasSize = UDim2.fromOffset(0, gridLayout.AbsoluteContentSize.Y + 20)
 			end
 		end
 	end)
 end
 
-function UIController.Init() -- [修改内容] 暴露初始化接口供外部调用
-	-- [修改内容] 游戏启动时，隐藏用于克隆的原始模板，避免在列表中显示空白项
+function UIController.Init() 
 	if rowTemplate then rowTemplate.Visible = false end
 	if weaponTemplate then weaponTemplate.Visible = false end
 
-	-- [修改内容] 强制开启两个滑动列表的 Y 轴（上下）自动画布大小，并将基础 CanvasSize 归零。彻底修复无法滑动的问题。
 	if monsterInventoryList then
 		monsterInventoryList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 		monsterInventoryList.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -662,40 +625,25 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 		weaponList.CanvasSize = UDim2.new(0, 0, 0, 0)
 	end
 
-	-- 1. [修改内容] 金币同步与飞行动效触发
+	-- 1. 金币同步与飞行动效触发 (纯净版)
 	local lastGold = player:GetAttribute("Gold") or 0
 	goldLabel.Text = formatNumberShort(lastGold)
 	
-	-- [修改内容] 隐藏原始的增减提示 UI 作为模板
 	if addGoldUI then addGoldUI.Visible = false end
 	
 	local function onGoldChanged()
 		local currentGold = player:GetAttribute("Gold") or 0
-		print(string.format("[UI-数据测试] 监听到服务端发来金币更新！原金币: %d，现金币: %d", lastGold, currentGold))
-		
 		goldLabel.Text = formatNumberShort(currentGold)
-		
 		local difference = currentGold - lastGold
 		
 		if difference ~= 0 then
-			print("[UI-数据测试] 金币发生了差值变动，触发 (+/-) 文字动画")
 			playGoldTextAnimation(difference)
 		end
-		
 		if currentGold > lastGold then
-			print("[UI-数据测试] 判断为正向收入，准备触发满屏飞金币动画！")
 			playGoldFlyingAnimation(difference)
-		elseif currentGold == lastGold then
-			warn("[UI-数据测试] 金币数量根本没变，不触发特效！")
-		else
-			print("[UI-数据测试] 判断为消费行为（扣钱），不触发满屏飞金币。")
 		end
-		
 		lastGold = currentGold
 	end
-	
-	-- 检查事件是否成功绑定
-	print("[UI-系统] 金币监听事件已成功绑定！当前玩家属性中的初始金币为:", player:GetAttribute("Gold"))
 	player:GetAttributeChangedSignal("Gold"):Connect(onGoldChanged)
 
 	-- 2. Toast 监听
@@ -704,53 +652,38 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	-- 3. 怪物背包同步
 	syncMonsterInventory.OnClientEvent:Connect(function(payload) refreshMonsterInventoryUI(payload) end)
 
-	-- 4. [修改内容] 背包按钮开关及选项卡逻辑
+	-- 4. 按钮事件绑定
 	if backpackButton then
 		backpackButton.Activated:Connect(function() 
 			local newState = not monsterInventoryWindow.Visible
 			monsterInventoryWindow.Visible = newState
-			if newState then
-				-- 打开背包时默认重置显示怪物页
-				switchInventoryTab("monster")
-			end
+			if newState then switchInventoryTab("monster") end
 		end)
 	end
 
-	-- [修改内容] 监听顶部选项卡按钮点击
-	if monsterTabBtn then
-		monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end)
-	end
-	if weaponTabBtn then
-		weaponTabBtn.Activated:Connect(function() switchInventoryTab("weapon") end)
-	end
+	if monsterTabBtn then monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end) end
+	if weaponTabBtn then weaponTabBtn.Activated:Connect(function() switchInventoryTab("weapon") end) end
 
-	-- [修改内容] 关键：监听装备属性变化，只要服务端一改，客户端立即重刷列表
 	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
 		if monsterInventoryWindow.Visible and weaponList.Visible then
 			refreshWeaponInventoryUI()
 		end
 	end)
 
-	-- 5. 初始化商店 (此处应包含原脚本中 openWeaponShopUI 等监听器)
-	-- [逻辑流]：监听服务端事件 -> 显示对应的 Window -> 调用刷新函数渲染列表
-	-- [修改内容] 初始化 shopsGui 容器（如果不存在的话）
+	-- 5. 初始化商店
 	if not shopsGui then
 		shopsGui = Instance.new("ScreenGui")
 		shopsGui.Name = "ShopsGui"
 		shopsGui.Parent = playerGui
 	end
 
-	-- [修改内容] 修复打开武器商店报错的问题，直接显示已存在的 UI
 	openWeaponShopUI.OnClientEvent:Connect(function()
 		if weaponWindow then
 			weaponWindow.Visible = true
-			refreshWeaponShopUI() -- 打开时动态生成武器列表
-		else
-			warn("[UIController] 未在 ShopsUI 中找到 '武器商店Window'")
+			refreshWeaponShopUI() 
 		end
 	end)
 
-	-- [修改内容] 购买或装备后，商店界面实时更新状态
 	player:GetAttributeChangedSignal("WeaponLevel"):Connect(function()
 		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
 	end)
@@ -758,68 +691,50 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
 	end)
 
-	-- [修改内容] 监听服务端发来的打开升级商店指令
 	openUpgradeShopUI.OnClientEvent:Connect(function()
 		if upgradeWindow then
 			upgradeWindow.Visible = true
-			refreshUpgradeShopUI() -- 每次打开刷新一次数据
+			refreshUpgradeShopUI()
 		end
 	end)
 
-	-- [修改内容] 绑定升级商店关闭按钮
 	if upgradeCloseBtn then
-		upgradeCloseBtn.Activated:Connect(function()
-			upgradeWindow.Visible = false
-		end)
+		upgradeCloseBtn.Activated:Connect(function() upgradeWindow.Visible = false end)
 	end
 
-	-- [修改内容] 属性变化时实时刷新（可选，为了让购买后文字立即变动）
 	local attributes = {"AttackLevel", "SpeedLevel", "HealthLevel", "CarryLevel"}
 	for _, attr in ipairs(attributes) do
 		player:GetAttributeChangedSignal(attr):Connect(function()
-			if upgradeWindow.Visible then
-				refreshUpgradeShopUI()
-			end
+			if upgradeWindow.Visible then refreshUpgradeShopUI() end
 		end)
 	end
 
-	print("[UIController] 2D UI 逻辑已初始化")
-
-	-- [修改内容] 删除按钮逻辑，带防卡死判断（终极唯一版）
-	local safeDeleteBtn = mainGui:FindFirstChild("delete")
-	-- 设置 5 秒超时，如果拿不到 RemoteEvent 就不死等，防止整个 UI 瘫痪
+	-- 删除数据按钮逻辑
+	local safeDeleteBtn = mainGui:FindFirstChild("delete", true)
 	local safeRequestClear = remotes:WaitForChild("RequestClearPlayerData", 5)
 
 	if safeDeleteBtn and safeRequestClear then
 		safeDeleteBtn.Activated:Connect(function()
-			print("已向服务器发送清空数据指令！")
 			safeRequestClear:FireServer()
 		end)
-	elseif safeDeleteBtn then
-		warn("严重错误：RequestClearPlayerData 远程事件加载失败！")
 	end
 
-	-- [新增内容] 绑定邀请功能逻辑
+	-- 邀请按钮逻辑
 	if inviteButton then
 		inviteButton.Activated:Connect(function()
-			-- 弹出 Roblox 系统原生的邀请界面
 			SocialService:PromptGameInvite(player)
 		end)
 	end
 
-	-- [新增内容] 绑定 VIP 购买按钮逻辑
+	-- VIP 按钮逻辑
 	if vipButton then
 		vipButton.Activated:Connect(function()
-			-- 弹出通行证购买界面 (ID: 1806675692)
 			MarketplaceService:PromptGamePassPurchase(player, 1806675692)
 		end)
-	else
-		warn("[UIController] 未找到名为 'ImageButton_VIP' 的按钮组件！")
 	end
 
-	-- [新增内容] 正常速度切换按钮逻辑
+	-- 正常速度切换按钮逻辑
 	if speedToggleButton then
-		-- 内部函数：根据当前状态应用玩家速度
 		local function applyCurrentSpeed()
 			local char = player.Character
 			if not char then return end
@@ -827,56 +742,42 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 			if not humanoid then return end
 
 			if isNormalSpeedActive then
-				-- 恢复正常速度：直接使用配置表中的基础速度
 				humanoid.WalkSpeed = Config.WALK_SPEED_BASE or 20
 			else
-				-- 使用加速状态：基础速度 + (速度等级 * 每级提升数值)
 				local speedLevel = player:GetAttribute("SpeedLevel") or 0
 				humanoid.WalkSpeed = (Config.WALK_SPEED_BASE or 20) + (speedLevel * (Config.WALK_SPEED_PER_UPGRADE or 1))
 			end
 		end
 
-		-- 内部函数：刷新按钮的 UI 视觉展现
 		local function updateSpeedUI()
 			if isNormalSpeedActive then
-				-- 开启常速模式：显示常速背景，隐藏关闭背景，提示玩家此时可以“开启加速”
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = true end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = false end
 				if speedToggleText then speedToggleText.Text = "开启加速" end
 			else
-				-- 开启加速模式（默认）：隐藏常速背景，显示关闭背景，提示玩家此时可以“关闭加速”
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = false end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = true end
 				if speedToggleText then speedToggleText.Text = "关闭加速" end
 			end
 		end
 
-		-- 初始化按钮状态
 		updateSpeedUI()
 
-		-- 监听按钮点击
 		speedToggleButton.Activated:Connect(function()
-			isNormalSpeedActive = not isNormalSpeedActive -- 翻转状态
+			isNormalSpeedActive = not isNormalSpeedActive 
 			updateSpeedUI()
 			applyCurrentSpeed()
 		end)
 
-		-- 监听角色重生（重生后重置一次速度，防止被系统还原）
 		player.CharacterAdded:Connect(function(char)
-			-- 等待 Humanoid 加载后再应用速度
 			char:WaitForChild("Humanoid", 5)
 			applyCurrentSpeed()
 		end)
 
-		-- 监听玩家速度等级升级（如果在商店点了升级，实时更新正确的速度）
-		player:GetAttributeChangedSignal("SpeedLevel"):Connect(function()
-			applyCurrentSpeed()
-		end)
-	else
-		warn("[UIController] 未找到名为 'ImageButton_正常速度' 的按钮组件！")
+		player:GetAttributeChangedSignal("SpeedLevel"):Connect(function() applyCurrentSpeed() end)
 	end
 
-	print("[UIController] 2D UI 逻辑已初始化")
+	print("[UIController] 2D UI 逻辑加载完毕！")
 end
 
 return UIController
