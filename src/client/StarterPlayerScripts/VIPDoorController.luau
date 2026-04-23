@@ -1,6 +1,5 @@
 -- ==========================================
 -- 脚本位置：StarterPlayerScripts.VIPDoorController
--- 功能：处理 VIP Part 穿透逻辑及购买后立即生效
 -- ==========================================
 
 local Players = game:GetService("Players")
@@ -10,56 +9,69 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local VIP_GAMEPASS_ID = 1806675692
 
--- 开启 VIP 穿墙功能的核心函数
-local function enableVIPDoors()
-	-- 1. 获取当前场景中所有被打上 "VIPPart" 标签的零件
-	local vipParts = CollectionService:GetTagged("VIPPart")
-	for _, part in ipairs(vipParts) do
-		if part:IsA("BasePart") then
-			-- [修改内容] 仅在客户端关闭碰撞，实现无缝穿墙
-			part.CanCollide = false 
-		end
-	end
+print("[VIPDoor-日志] VIP控制器已启动，正在监听玩家...")
 
-	-- 2. 监听后续可能动态生成的 VIP Part（例如地图动态加载）
-	CollectionService:GetInstanceAddedSignal("VIPPart"):Connect(function(part)
-		if part:IsA("BasePart") then
-			part.CanCollide = false
-		end
-	end)
-	
-	print("[VIPDoor] 已为玩家开启 VIP 专属通道！")
+local function disableCollisionRecursive(instance)
+	if instance:IsA("BasePart") then
+		instance.CanCollide = false
+	end
+	for _, child in ipairs(instance:GetChildren()) do
+		disableCollisionRecursive(child)
+	end
 end
 
--- ==========================================
--- 逻辑 1：玩家刚进游戏时，检查是否已经拥有该通行证
--- ==========================================
+local function enableVIPDoors()
+	local vipObjects = CollectionService:GetTagged("VIPPart")
+	local count = 0
+	for _, obj in ipairs(vipObjects) do
+		disableCollisionRecursive(obj)
+		count += 1
+	end
+
+	CollectionService:GetInstanceAddedSignal("VIPPart"):Connect(function(obj)
+		disableCollisionRecursive(obj)
+	end)
+	
+	-- 这里的打印加了数量统计，方便你确认标签是否真的打上了
+	print("[VIPDoor-成功] 穿墙已开启！共找到了 " .. count .. " 个 VIPPart。")
+end
+
+-- 1. 进游戏时的检查
 task.spawn(function()
-	-- 使用 pcall 防止网络问题导致脚本报错中断
+	print("[VIPDoor-日志] 正在向服务器请求确认玩家是否拥有通行证...")
 	local success, hasPass = pcall(function()
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, VIP_GAMEPASS_ID)
 	end)
 
-	if success and hasPass then
-		-- 如果已经拥有，直接开启穿墙
-		enableVIPDoors()
-	elseif not success then
-		warn("[VIPDoor] 检查 VIP 权限失败，请检查网络连接。")
+	if success then
+		print("[VIPDoor-日志] 服务器返回结果：玩家是否拥有 = " .. tostring(hasPass))
+		if hasPass then
+			enableVIPDoors()
+		end
+	else
+		warn("[VIPDoor-警告] 请求失败，请检查网络或通行证ID是否正确！")
 	end
 end)
 
--- ==========================================
--- 逻辑 2：玩家在游戏中购买成功时，立即生效
--- ==========================================
+-- 2. 点击购买后的检查
 MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(promptPlayer, gamePassId, wasPurchased)
-	-- 确保是当前玩家购买了，购买的是 VIP 通行证，并且购买成功了
-	if promptPlayer == player and gamePassId == VIP_GAMEPASS_ID and wasPurchased then
-		enableVIPDoors()
-		
-		-- 如果你有类似于全局提示的模块，可以在这里调用，例如：
-		-- local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
-		-- if remotes and remotes:FindFirstChild("PushClientToast") then
-		-- 	remotes.PushClientToast:Fire("购买 VIP 成功！专属通道已开启！")
-		-- end
+	print("[VIPDoor-日志] 收到购买窗口关闭的回调！")
+	print("[VIPDoor-日志] 弹窗的通行证ID: " .. tostring(gamePassId))
+	print("[VIPDoor-日志] 玩家是否成功付款: " .. tostring(wasPurchased))
+	
+	if promptPlayer == player and gamePassId == VIP_GAMEPASS_ID then
+		if wasPurchased then
+			print("[VIPDoor-日志] 判定：这是一次全新的成功购买，立即开门！")
+			enableVIPDoors()
+		else
+			warn("[VIPDoor-警告] 判定：玩家取消了购买，或者玩家本身就已经拥有该物品(没扣钱)。")
+			-- 如果玩家已经拥有，Roblox会把 wasPurchased 设为 false。
+			-- 我们补一刀，再次查一下是不是因为本来就有
+			local hasPass = MarketplaceService:UserOwnsGamePassAsync(player.UserId, VIP_GAMEPASS_ID)
+			if hasPass then
+				print("[VIPDoor-补救] 确认玩家其实早就拥有了，立刻开门！")
+				enableVIPDoors()
+			end
+		end
 	end
 end)

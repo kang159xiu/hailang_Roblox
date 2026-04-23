@@ -754,20 +754,7 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
--- [修改内容] 自动刷新监听
-local function hookRefreshOnAttr(attrName: string)
-	player:GetAttributeChangedSignal(attrName):Connect(function()
-		if weaponWindow.Visible then refreshWeaponShop() end
-	end)
-end
 
-hookRefreshOnAttr("Gold")
-hookRefreshOnAttr("AttackLevel")
-hookRefreshOnAttr("HealthLevel")
-hookRefreshOnAttr("SpeedLevel")
-hookRefreshOnAttr("CarryLevel")
-hookRefreshOnAttr("WeaponLevel")
-hookRefreshOnAttr("EquippedWeaponLevel")
 
 -- =======================================================
 -- [修改内容] 增加：被守护者追逐时的屏幕抖动 (Camera Shake)
