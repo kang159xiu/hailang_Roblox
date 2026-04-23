@@ -989,7 +989,7 @@ local function createPlacedMonsterPart(
 			end)
 		end
 
-		-- [修改内容] 新增监听：接收来自踩踏地块发出的显示信号
+		-- [修改内容] 新增监听：接收玩家踩踏地块后发出的弹框显示信号
 		p:GetAttributeChangedSignal("TriggerPromptReveal"):Connect(function()
 			revealPlacedMonsterPrompts(3)
 		end)
@@ -1167,7 +1167,7 @@ local function createPlacedMonsterPart(
 		end)
 	end
 
-	-- [修改内容] 新增监听：接收来自踩踏地块发出的显示信号
+	-- [修改内容] 新增监听：接收玩家踩踏地块后发出的弹框显示信号
 	p:GetAttributeChangedSignal("TriggerPromptReveal"):Connect(function()
 		revealPlacedMonsterPrompts(3)
 	end)
@@ -1749,14 +1749,15 @@ function PlacementService.Init()
 					lastTouchAt[key] = now
 
 					tryPlaceFromEquippedTool(player, slot.Part)
+					
+					-- 【千万注意保留这行！】这是触发收钱并播放 UI 飞金币特效的核心函数！
 					payoutIfAny(player, slot.Part)
 
-					-- [修改内容] 当玩家踩在金币区(Collector)时，向当前槽位的怪物发送“显示弹框”的信号
+					-- [修改内容] 当玩家踩在金币区(Collector)时，向当前槽位的怪物模型发送信号，唤醒弹框
 					local stateMap = slotStatesByUserId[player.UserId]
 					if stateMap then
 						local state = stateMap[idx]
 						if state and state.PlacedMonster and state.PlacedMonster.Parent then
-							-- 改变属性值，触发上方新增的监听，使弹框显示 3 秒
 							state.PlacedMonster:SetAttribute("TriggerPromptReveal", now)
 						end
 					end
