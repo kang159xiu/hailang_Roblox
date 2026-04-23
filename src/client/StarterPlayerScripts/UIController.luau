@@ -50,8 +50,8 @@ local inviteButton = mainGui:FindFirstChild("ImageButton_邀请", true) :: Image
 local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton 
 local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
 
--- [新增内容] 引用正常速度切换按钮及内部组件
-local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度") :: ImageButton?
+-- [修改内容] 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
+local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度", true) :: ImageButton?
 local normalSpeedBgOn = speedToggleButton and speedToggleButton:FindFirstChild("开启常速背景") :: ImageLabel?
 local normalSpeedBgOff = speedToggleButton and speedToggleButton:FindFirstChild("关闭常速背景") :: ImageLabel?
 local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("开/关速度状态") :: TextLabel?

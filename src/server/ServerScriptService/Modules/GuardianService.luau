@@ -44,7 +44,7 @@ for level = 1, 30 do
 	GUARDIAN_CONFIG[level] = {
 		ModelName = "守护者形象" .. tostring(level), 
 		-- 速度随等级提升：基础 20，每级增加 3
-		Speed = 20 + (level * 3), 
+		Speed = 20 + (level * 5), 
 		Animations = customAnim
 	}
 end
