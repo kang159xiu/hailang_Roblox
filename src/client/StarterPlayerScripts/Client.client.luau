@@ -60,13 +60,6 @@ local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChil
 -- [修改内容] 移除已被 UIController 接管的 UI Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestPromptInteraction = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
--- 替换为（添加商店相关的 5 个 RemoteEvent）：
-local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
-local openWeaponShopUI = remotes:WaitForChild("OpenWeaponShopUI") :: RemoteEvent -- [修改内容] 监听打开武器商店
-local openUpgradeShopUI = remotes:WaitForChild("OpenUpgradeShopUI") :: RemoteEvent -- [修改内容] 监听打开升级商店
-local requestPurchaseWeapon = remotes:WaitForChild("RequestPurchaseWeapon") :: RemoteEvent -- [修改内容] 请求购买武器
-local requestEquipWeapon = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent -- [修改内容] 请求装备武器
-local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent -- [修改内容] 请求升级属性
 
 
 -- =====================
@@ -80,22 +73,6 @@ type TrackedMonster = {
 local tracked: {TrackedMonster} = {}
 local trackedSet: {[BasePart]: true} = {}
 
-local function findMonsterLabel(monsterPart: BasePart): TextLabel?
-	local bb = monsterPart:FindFirstChild("MonsterBillboard")
-	if not bb or not bb:IsA("BillboardGui") then
-		return nil
-	end
-	local label = bb:FindFirstChild("Label")
-	if label and label:IsA("TextLabel") then
-		return label
-	end
-	for _, child in ipairs(bb:GetDescendants()) do
-		if child:IsA("TextLabel") then
-			return child
-		end
-	end
-	return nil
-end
 
 local function trackMonster(monsterPart: BasePart)
 	if monsterPart:GetAttribute("IsMonster") ~= true then
