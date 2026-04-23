@@ -428,46 +428,45 @@ local TweenService = game:GetService("TweenService")
 local rng = Random.new()
 
 local function playGoldFlyingAnimation(increaseAmount: number)
+	print("[UI-特效测试] 1. playGoldFlyingAnimation 被触发！准备爆出的金币价值:", increaseAmount)
+	
 	local playerGui = player:WaitForChild("PlayerGui")
 	
-	-- 1. 获取用户指定的素材图片
 	local sucaiGui = playerGui:FindFirstChild("sucai")
-	if not sucaiGui then return end
+	if not sucaiGui then warn("[UI-特效测试] ❌ 失败：找不到 sucai 界面！") return end
+	
 	local moneyFrame = sucaiGui:FindFirstChild("money_Frame")
-	if not moneyFrame then return end
+	if not moneyFrame then warn("[UI-特效测试] ❌ 失败：找不到 money_Frame！") return end
+	
 	local moneyImageSource = moneyFrame:FindFirstChild("money_image")
-	if not moneyImageSource then return end
+	if not moneyImageSource then warn("[UI-特效测试] ❌ 失败：找不到 money_image 原始素材！") return end
+	
+	print("[UI-特效测试] 2. 成功找到金币 UI 素材，准备生成容器...")
 
-	-- 2. 创建一个全局特效容器，保证在屏幕最上层，防止被其他UI裁剪
 	local fxContainer = mainGui:FindFirstChild("FXContainer")
 	if not fxContainer then
 		fxContainer = Instance.new("Frame")
 		fxContainer.Name = "FXContainer"
 		fxContainer.BackgroundTransparency = 1
 		fxContainer.Size = UDim2.fromScale(1, 1)
-		fxContainer.ZIndex = 100 -- 置于顶层
+		fxContainer.ZIndex = 100 
 		fxContainer.Parent = mainGui
+		print("[UI-特效测试] 3. 新建了特效顶层容器 FXContainer")
 	end
 
-	-- 3. 动态计算生成数量: 基础10个，每多100金币多生成1个，上限20个
 	local count = math.clamp(10 + math.floor(increaseAmount / 100), 10, 20)
+	print("[UI-特效测试] 4. 计算完毕，即将爆出金币个数:", count)
 
 	for i = 1, count do
 		task.spawn(function()
-			-- 克隆金币UI
 			local coin = moneyImageSource:Clone()
-			
-			-- [终极修复] 强制让克隆体显示出来！素材库里的图通常是隐藏的，必须解除隐藏！
-			coin.Visible = true
-			
-			-- [修改内容] 强制设置金币的绝对像素大小，例如宽 40，高 40。
-			coin.Size = UDim2.fromOffset(50, 50)
-			
+			coin.Visible = true -- 强制显示！
+			coin.Size = UDim2.fromOffset(50, 50) 
 			coin.AnchorPoint = Vector2.new(0.5, 0.5)
-			coin.Position = UDim2.fromScale(0.5, 0.5) -- 初始从屏幕中心爆出
+			coin.Position = UDim2.fromScale(0.5, 0.5) 
 			coin.Parent = fxContainer
 
-			-- 第一阶段：散开动画 (时间节奏: 0.3秒，半径: 50~200)
+			-- 散开动画
 			local angle = rng:NextNumber(0, math.pi * 2)
 			local radius = rng:NextNumber(50, 400)
 			local scatterPos = UDim2.new(0.5, math.cos(angle) * radius, 0.5, math.sin(angle) * radius)
@@ -476,23 +475,21 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 				Position = scatterPos
 			})
 			scatterTween:Play()
-			scatterTween.Completed:Wait() -- 阻塞当前协程，等待0.3秒散开结束
+			scatterTween.Completed:Wait() 
 
-			-- 第二阶段：飞向目标 (时间节奏: 0.4秒)
-			-- 获取金币文本框在屏幕上的绝对中心位置
+			-- 飞向目标
 			local targetAbsPos = goldLabel.AbsolutePosition + (goldLabel.AbsoluteSize / 2)
 			local flyTween = TweenService:Create(coin, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-				-- 直接使用 Offset 精确锁定屏幕像素坐标
 				Position = UDim2.fromOffset(targetAbsPos.X, targetAbsPos.Y)
 			})
 			flyTween:Play()
-			flyTween.Completed:Wait() -- 阻塞当前协程，等待0.4秒飞行结束
+			flyTween.Completed:Wait() 
 
-			-- 动画完成，销毁克隆体
 			coin:Destroy()
+			if i == count then
+				print("[UI-特效测试] 5. 所有金币动画播放并销毁完毕！")
+			end
 		end)
-		
-		-- [修改内容] 添加极短的随机延迟，让爆出的金币有先后的层次感
 		task.wait(rng:NextNumber(0, 0.02))
 	end
 end
@@ -674,23 +671,31 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 	
 	local function onGoldChanged()
 		local currentGold = player:GetAttribute("Gold") or 0
+		print(string.format("[UI-数据测试] 监听到服务端发来金币更新！原金币: %d，现金币: %d", lastGold, currentGold))
+		
 		goldLabel.Text = formatNumberShort(currentGold)
 		
-		-- 计算金币差值
 		local difference = currentGold - lastGold
 		
-		-- [修改内容] 无论金币是增加还是减少，都播放文字飘动提示
 		if difference ~= 0 then
+			print("[UI-数据测试] 金币发生了差值变动，触发 (+/-) 文字动画")
 			playGoldTextAnimation(difference)
 		end
 		
-		-- 判断是收获金币（增加）才播放全屏飞行动画
 		if currentGold > lastGold then
+			print("[UI-数据测试] 判断为正向收入，准备触发满屏飞金币动画！")
 			playGoldFlyingAnimation(difference)
+		elseif currentGold == lastGold then
+			warn("[UI-数据测试] 金币数量根本没变，不触发特效！")
+		else
+			print("[UI-数据测试] 判断为消费行为（扣钱），不触发满屏飞金币。")
 		end
 		
 		lastGold = currentGold
 	end
+	
+	-- 检查事件是否成功绑定
+	print("[UI-系统] 金币监听事件已成功绑定！当前玩家属性中的初始金币为:", player:GetAttribute("Gold"))
 	player:GetAttributeChangedSignal("Gold"):Connect(onGoldChanged)
 
 	-- 2. Toast 监听
