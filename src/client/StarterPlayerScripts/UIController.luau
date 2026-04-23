@@ -5,6 +5,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- [新增内容] 引入社交服务用于弹出邀请界面
 local SocialService = game:GetService("SocialService") 
+-- [新增内容] 引入市场服务用于处理通行证购买
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
@@ -45,6 +47,9 @@ local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
 
 -- [修改内容] 引用邀请按钮
 local inviteButton = mainGui:WaitForChild("ImageButton_邀请") :: ImageButton 
+
+-- [新增内容] 引用 VIP 购买按钮
+local vipButton = mainGui:WaitForChild("ImageButton_VIP") :: ImageButton 
 
 local backpackButton = mainGui:WaitForChild("BackpackButton", 10)
 
@@ -792,6 +797,16 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 			-- 弹出 Roblox 系统原生的邀请界面
 			SocialService:PromptGameInvite(player)
 		end)
+	end
+
+	-- [新增内容] 绑定 VIP 购买按钮逻辑
+	if vipButton then
+		vipButton.Activated:Connect(function()
+			-- 弹出通行证购买界面 (ID: 1806675692)
+			MarketplaceService:PromptGamePassPurchase(player, 1806675692)
+		end)
+	else
+		warn("[UIController] 未找到名为 'ImageButton_VIP' 的按钮组件！")
 	end
 
 	-- [新增内容] 正常速度切换按钮逻辑
