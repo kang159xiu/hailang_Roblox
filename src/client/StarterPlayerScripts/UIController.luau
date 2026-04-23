@@ -466,7 +466,7 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 
 			-- 第一阶段：散开动画 (时间节奏: 0.3秒，半径: 50~200)
 			local angle = rng:NextNumber(0, math.pi * 2)
-			local radius = rng:NextNumber(50, 200)
+			local radius = rng:NextNumber(50, 400)
 			local scatterPos = UDim2.new(0.5, math.cos(angle) * radius, 0.5, math.sin(angle) * radius)
 			
 			local scatterTween = TweenService:Create(coin, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
