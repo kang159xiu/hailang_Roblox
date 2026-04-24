@@ -978,6 +978,8 @@ function MonsterService.Init()
 	for _, z in ipairs(zones) do
 		local key = getZoneKey(z.Part)
 		pickupZonesByKey[key] = z
+		-- [修改内容] 在区域 Part 上记录等级属性，方便 GuardianService 读取配置
+		z.Part:SetAttribute("ZoneLevel", z.Level)
 
 		-- 初始化：先保底到最小值
 		local minDesired = Config.MIN_MONSTERS_PER_ZONE or 2

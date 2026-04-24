@@ -468,17 +468,30 @@ end
 -- 6. 对外接口与初始化
 --------------------------------------------------------------------------------
 function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
-	local zoneKey = zonePart:GetFullName()
-	local g = activeGuardians[zoneKey]
-	if g and (g.State == "Idle" or g.State == "Return") then
-		g.TargetPlayer = player
-		-- [修改内容] 触发追击，设置追击标记
-		g.Model:SetAttribute("TargetPlayerName", player.Name)
-		g.State = "Track"
-		g.LastPathTime = 0
-		playAnim(g, "Track")
-		print(string.format("[GuardianService] %s 触发拾取！守护者正在追击...", player.Name))
-	end
+    local zoneKey = zonePart:GetFullName()
+    local g = activeGuardians[zoneKey]
+    
+    if g and (g.State == "Idle" or g.State == "Return") then
+        -- [修改原因: 从 zonePart 读取等级并匹配 Config 中的移动速度]
+        local zoneLevel = zonePart:GetAttribute("ZoneLevel") or 1
+        local targetSpeed = Config.GUARDIAN_SPEED_BY_ZONE_LEVEL and Config.GUARDIAN_SPEED_BY_ZONE_LEVEL[zoneLevel] or 16
+        
+        -- [修改原因: 动态设置守护者的 Humanoid.WalkSpeed]
+        local humanoid = g.Model:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = targetSpeed
+        end
+
+        g.TargetPlayer = player
+        -- [修改内容] 触发追击，设置追击标记
+        g.Model:SetAttribute("TargetPlayerName", player.Name)
+        g.State = "Track"
+        g.LastPathTime = 0
+        playAnim(g, "Track")
+        
+        -- [修改内容: 在日志中增加等级和速度信息]
+        print(string.format("[GuardianService] %s 触发拾取！(等级:%d 速度:%d) 守护者正在追击...", player.Name, zoneLevel, targetSpeed))
+    end
 end
 
 function GuardianService.Init()
