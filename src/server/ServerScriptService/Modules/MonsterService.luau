@@ -776,6 +776,38 @@ local function playMonsterJumpEffect(monsterPart: BasePart, monsterModel: Model)
 	jumpTween:Play()
 end
 
+-- [新增内容] 处理怪物受击时的变红特效
+local function playMonsterDamageColorEffect(monsterPart: BasePart, monsterModel: Model)
+	-- [修改原因: 防抖锁。如果怪物已经在变色倒计时中，则忽略，防止覆盖原有颜色记录]
+	if monsterPart:GetAttribute("IsColorChanging") == true then
+		return
+	end
+	monsterPart:SetAttribute("IsColorChanging", true)
+
+	local originalColors = {}
+	
+	-- 遍历模型下所有基础部件，记录原色并将其染红
+	for _, descendant in ipairs(monsterModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			originalColors[descendant] = descendant.Color
+			descendant.Color = Color3.fromRGB(255, 0, 0) -- [修改原因: 受击瞬间将各个部件变为红色]
+		end
+	end
+
+	-- 0.2秒后恢复原本颜色
+	task.delay(0.2, function()
+		for part, origColor in pairs(originalColors) do
+			if part and part.Parent then
+				part.Color = origColor -- [修改原因: 恢复记录的初始颜色]
+			end
+		end
+		
+		if monsterPart and monsterPart.Parent then
+			monsterPart:SetAttribute("IsColorChanging", false) -- [修改原因: 解除变色锁定状态]
+		end
+	end)
+end
+
 function MonsterService.DamageMonster(player: Player, hit: Instance)
 	-- 处理玩家对怪物造成伤害。
 	--
@@ -844,6 +876,7 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	local monsterModel = getMonsterInstanceFromRoot(monsterPart)
 	if monsterModel and monsterModel:IsA("Model") then
 		playMonsterJumpEffect(monsterPart, monsterModel)
+		playMonsterDamageColorEffect(monsterPart, monsterModel) -- [修改原因: 在触发跳跃的同时，增加模型受击变红特效]
 	end
 
 	-- [修改内容] 触发武器命中特效（保持原样，特效本就不受血量限制）
