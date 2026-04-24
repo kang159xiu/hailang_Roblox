@@ -472,25 +472,32 @@ function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
     local g = activeGuardians[zoneKey]
     
     if g and (g.State == "Idle" or g.State == "Return") then
-        -- [修改原因: 从 zonePart 读取等级并匹配 Config 中的移动速度]
-        local zoneLevel = zonePart:GetAttribute("ZoneLevel") or 1
-        local targetSpeed = Config.GUARDIAN_SPEED_BY_ZONE_LEVEL and Config.GUARDIAN_SPEED_BY_ZONE_LEVEL[zoneLevel] or 16
+        -- [修改原因: 强制转为数字(tonumber)，防止因读取到字符串导致查表失败或后续崩溃]
+        local rawLevel = zonePart:GetAttribute("ZoneLevel")
+        local zoneLevel = tonumber(rawLevel) or 1
         
-        -- [修改原因: 动态设置守护者的 Humanoid.WalkSpeed]
-        local humanoid = g.Model:FindFirstChildOfClass("Humanoid")
+        -- [修改原因: 安全获取 Config，防止上下文未正确引入导致报错]
+        local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("GameModules"):WaitForChild("Config"))
+        local targetSpeed = (Config.GUARDIAN_SPEED_BY_ZONE_LEVEL and Config.GUARDIAN_SPEED_BY_ZONE_LEVEL[zoneLevel]) or 16
+        
+        local humanoid = g.Model and g.Model:FindFirstChildOfClass("Humanoid")
         if humanoid then
             humanoid.WalkSpeed = targetSpeed
         end
 
         g.TargetPlayer = player
-        -- [修改内容] 触发追击，设置追击标记
-        g.Model:SetAttribute("TargetPlayerName", player.Name)
+        -- 触发追击，设置追击标记
+        if g.Model then
+            g.Model:SetAttribute("TargetPlayerName", player.Name)
+        end
         g.State = "Track"
         g.LastPathTime = 0
-        playAnim(g, "Track")
+        if type(playAnim) == "function" then
+            playAnim(g, "Track")
+        end
         
-        -- [修改内容: 在日志中增加等级和速度信息]
-        print(string.format("[GuardianService] %s 触发拾取！(等级:%d 速度:%d) 守护者正在追击...", player.Name, zoneLevel, targetSpeed))
+        -- [修改原因: 使用 %s 作为容错占位符，防止类型不符导致 string.format 中断守护者线程]
+        print(string.format("[GuardianService] %s 触发拾取！(等级:%s 速度:%s) 守护者正在追击...", player.Name, tostring(zoneLevel), tostring(targetSpeed)))
     end
 end
 

@@ -324,15 +324,19 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 		if type(zoneKey) == "string" then
 			local zoneInfo = pickupZonesByKey[zoneKey]
 			if zoneInfo and zoneInfo.Part then
-				-- 【关键修改】在这里局部引入，完美避开死循环！
-				local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
-				GuardianService.TriggerAlert(player, zoneInfo.Part)
+				-- [修改原因: 放入独立线程 task.spawn，防止 GuardianService 内部任何报错导致后续怪物尸体不消失的连锁 Bug]
+				task.spawn(function()
+					local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
+					GuardianService.TriggerAlert(player, zoneInfo.Part)
+				end)
 			end
 		end
 
 		aliveMonsters[monsterPart] = nil
 		local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
-		monsterInstance:Destroy()
+		if monsterInstance then
+			monsterInstance:Destroy()
+		end
 		return true
 	end
 
