@@ -11,19 +11,27 @@ local mainUI = PlayerGui:WaitForChild("MainUI")
 -- 绑定 UI 节点
 local btnEntry = mainUI:WaitForChild("抽奖入口")
 local frameGacha = mainUI:WaitForChild("抽奖界面")
+
+-- [修改原因] 将界面开关逻辑移到最前面，确保即使后面等待节点或网络通信延迟，也不会影响玩家打开/关闭UI
+btnEntry.MouseButton1Click:Connect(function()
+	frameGacha.Visible = not frameGacha.Visible
+end)
+
 local btnGold = frameGacha:WaitForChild("钱抽奖")
 local btnRbx = frameGacha:WaitForChild("R币抽奖")
 local btnFast = frameGacha:WaitForChild("快速转")
 local frameDisplay = frameGacha:WaitForChild("显示抽奖内容_Fram")
 
+-- [注意] 这里请确保你的5个框名字真的是 "01", "02"... 如果不是，请修改这里的字符串
 local vpfList = {
-	frameDisplay:WaitForChild("01"),
-	frameDisplay:WaitForChild("02"),
-	frameDisplay:WaitForChild("03"),
-	frameDisplay:WaitForChild("04"),
-	frameDisplay:WaitForChild("05"),
+	frameDisplay:WaitForChild("ImageLabel_01"),
+	frameDisplay:WaitForChild("ImageLabel_02"),
+	frameDisplay:WaitForChild("ImageLabel_03"),
+	frameDisplay:WaitForChild("ImageLabel_04"),
+	frameDisplay:WaitForChild("ImageLabel_05"),
 }
 
+-- 提示：如果服务端脚本报错没有运行，这里也会卡住
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestEvent = remotes:WaitForChild("GachaRequest")
 local resultEvent = remotes:WaitForChild("GachaResult")
