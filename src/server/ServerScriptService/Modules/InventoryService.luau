@@ -798,7 +798,6 @@ function InventoryService.Cleanup(player: Player)
 end
 
 
--- [修改内容] 增加彻底清空背包的功能
 function InventoryService.Clear(player: Player)
 	if inventoryByUserId[player.UserId] then
 		inventoryByUserId[player.UserId] = {}
@@ -807,6 +806,46 @@ function InventoryService.Clear(player: Player)
 	
 	local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 	DataDirtyService.MarkDirty(player)
+end
+
+-- [修改原因] 增加直接发放怪物 Tool 的接口，供抽奖系统调用，并支持自动装备最高级怪物
+function InventoryService.GiveGachaMonsterTool(player: Player, monsterLevel: number, autoEquip: boolean)
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		backpack = player:WaitForChild("Backpack", 3) :: any
+	end
+	if not backpack or not backpack:IsA("Backpack") then return end
+
+	-- 安全获取配置表中的数值，防止超出索引
+	local value = Config.MONSTER_VALUE_BY_LEVEL[monsterLevel] or (monsterLevel * 10)
+	local gps = Config.MONSTER_GOLD_PER_SEC_BY_LEVEL[monsterLevel] or monsterLevel
+
+	-- 复用现有的 Tool 烘焙核心逻辑
+	local tool = createMonsterToolFromData(
+		monsterLevel,
+		value,
+		gps,
+		"" -- 抽到的怪直接是 Tool，不进入 UI 背包体系
+	)
+	
+	tool:SetAttribute("UpgradeLevel", 1)
+	tool:SetAttribute("BaseValue", value)
+	tool:SetAttribute("BaseGoldPerSec", gps)
+	
+	tool.Parent = backpack
+
+	-- [修改原因] 满足需求：如果需要装备，延迟一帧确保 Tool 进入 Backpack 后再让 Humanoid 装备
+	if autoEquip then
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			task.defer(function()
+				if tool and tool.Parent == backpack then
+					humanoid:EquipTool(tool)
+				end
+			end)
+		end
+	end
 end
 
 return InventoryService
