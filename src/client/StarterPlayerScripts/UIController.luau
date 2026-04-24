@@ -530,6 +530,56 @@ end
 local function refreshWeaponShopUI()
 	if not weaponShopList or not weaponShopTemplate then return end
 
+	local function safeFullName(instance: Instance?): string
+		if not instance then
+			return "nil"
+		end
+		local ok, fullName = pcall(function()
+			return instance:GetFullName()
+		end)
+		return ok and fullName or instance.Name
+	end
+
+	print("[WeaponShopDebug] ===== 开始刷新武器商店 =====")
+	print(string.format(
+		"[WeaponShopDebug] weaponWindow=%s | weaponShopList=%s | weaponShopTemplate=%s",
+		safeFullName(weaponWindow),
+		safeFullName(weaponShopList),
+		safeFullName(weaponShopTemplate)
+	))
+	print(string.format(
+		"[WeaponShopDebug] weaponShopTemplate.Parent=%s | weaponShopList.Parent=%s",
+		safeFullName(weaponShopTemplate and weaponShopTemplate.Parent),
+		safeFullName(weaponShopList and weaponShopList.Parent)
+	))
+	if weaponShopList and weaponShopList:IsA("GuiObject") then
+		print(string.format(
+			"[WeaponShopDebug] List.Visible=%s | Size=%s | Position=%s | ClipsDescendants=%s",
+			tostring(weaponShopList.Visible),
+			tostring(weaponShopList.Size),
+			tostring(weaponShopList.Position),
+			tostring(weaponShopList.ClipsDescendants)
+		))
+	end
+	if weaponShopList and weaponShopList:IsA("ScrollingFrame") then
+		print(string.format(
+			"[WeaponShopDebug] CanvasPosition=%s | CanvasSize=%s | AbsoluteCanvasSize=%s | AutomaticCanvasSize=%s",
+			tostring(weaponShopList.CanvasPosition),
+			tostring(weaponShopList.CanvasSize),
+			tostring(weaponShopList.AbsoluteCanvasSize),
+			tostring(weaponShopList.AutomaticCanvasSize)
+		))
+	end
+	print(string.format(
+		"[WeaponShopDebug] 当前玩家武器属性: WeaponLevel=%s | EquippedWeaponLevel=%s",
+		tostring(player:GetAttribute("WeaponLevel")),
+		tostring(player:GetAttribute("EquippedWeaponLevel"))
+	))
+
+	if weaponShopList:IsA("ScrollingFrame") then
+		weaponShopList.CanvasPosition = Vector2.new(0, 0)
+	end
+
 	for _, ch in ipairs(weaponShopList:GetChildren()) do
 		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" and not ch:IsA("UILayout") then
 			ch:Destroy()
@@ -539,16 +589,32 @@ local function refreshWeaponShopUI()
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
 	local weaponFolder = workspace:FindFirstChild("weapon")
+	local createdCount = 0
 
 	for i = 1, 20 do
 		local price = Config.WEAPON_PRICE_BY_LEVEL and Config.WEAPON_PRICE_BY_LEVEL[i]
 		local attack = Config.WEAPON_ATTACK_BY_LEVEL and Config.WEAPON_ATTACK_BY_LEVEL[i]
-		if not price and i > 1 then continue end
+		if not price and i > 1 then
+			warn(string.format("[WeaponShopDebug] 跳过武器 %d：未找到价格配置", i))
+			continue
+		end
 
 		local row = weaponShopTemplate:Clone()
 		row.Name = "WeaponShopRow_" .. i
+		row.AnchorPoint = Vector2.new(0, 0)
+		row.Position = UDim2.fromOffset(0, 0)
+		row.LayoutOrder = i
 		row.Visible = true
 		row.Parent = weaponShopList
+		createdCount += 1
+		print(string.format(
+			"[WeaponShopDebug] 创建条目 #%d -> %s | Parent=%s | LayoutOrder=%s | Visible=%s",
+			i,
+			safeFullName(row),
+			safeFullName(row.Parent),
+			tostring(row.LayoutOrder),
+			tostring(row.Visible)
+		))
 
 		local nameLabel = row:FindFirstChild("武器名称")
 		if nameLabel and nameLabel:IsA("TextLabel") then
@@ -605,11 +671,90 @@ local function refreshWeaponShopUI()
 
 	task.defer(function()
 		if weaponShopList:IsA("ScrollingFrame") then
+			weaponShopList.CanvasPosition = Vector2.new(0, 0)
 			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+			for _, layoutChild in ipairs(weaponShopList:GetChildren()) do
+				if layoutChild:IsA("UIListLayout") or layoutChild:IsA("UIGridLayout") or layoutChild:IsA("UIPadding") then
+					print(string.format(
+						"[WeaponShopDebug] 布局子节点: %s | Class=%s",
+						layoutChild.Name,
+						layoutChild.ClassName
+					))
+				end
+			end
+
 			local gridLayout = weaponShopList:FindFirstChildWhichIsA("UIGridLayout")
+			local listLayout = weaponShopList:FindFirstChildWhichIsA("UIListLayout")
 			if gridLayout then
 				weaponShopList.CanvasSize = UDim2.fromOffset(0, gridLayout.AbsoluteContentSize.Y + 20)
+				print(string.format(
+					"[WeaponShopDebug] UIGridLayout.AbsoluteContentSize=%s | 更新后 CanvasSize=%s",
+					tostring(gridLayout.AbsoluteContentSize),
+					tostring(weaponShopList.CanvasSize)
+				))
+			elseif listLayout then
+					listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+				weaponShopList.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 20)
+				print(string.format(
+						"[WeaponShopDebug] UIListLayout.AbsoluteContentSize=%s | 更新后 CanvasSize=%s | Padding=%s | VerticalAlignment=%s | HorizontalAlignment=%s | FillDirection=%s | SortOrder=%s",
+					tostring(listLayout.AbsoluteContentSize),
+					tostring(weaponShopList.CanvasSize),
+						tostring(listLayout.Padding),
+						tostring(listLayout.VerticalAlignment),
+						tostring(listLayout.HorizontalAlignment),
+						tostring(listLayout.FillDirection),
+						tostring(listLayout.SortOrder)
+				))
+			else
+				warn("[WeaponShopDebug] weaponShopList 下未找到 UIGridLayout")
 			end
+
+			local visibleRows = 0
+			local printedRows = 0
+			local listTop = weaponShopList.AbsolutePosition.Y
+			local listBottom = listTop + weaponShopList.AbsoluteSize.Y
+			for _, child in ipairs(weaponShopList:GetChildren()) do
+				if child:IsA("GuiObject") and child.Name ~= "单个武器背景" and child.Visible then
+					visibleRows += 1
+					if string.find(child.Name, "WeaponShopRow_") and printedRows < 10 then
+						printedRows += 1
+						local childTop = child.AbsolutePosition.Y
+						local childBottom = childTop + child.AbsoluteSize.Y
+						local isInsideViewport = childBottom > listTop and childTop < listBottom
+						print(string.format(
+							"[WeaponShopDebug] 条目位置: %s | Position=%s | AbsolutePosition=%s | Size=%s | AbsoluteSize=%s | LayoutOrder=%s | ZIndex=%s | InViewport=%s",
+							child.Name,
+							tostring(child.Position),
+							tostring(child.AbsolutePosition),
+							tostring(child.Size),
+							tostring(child.AbsoluteSize),
+							tostring(child.LayoutOrder),
+							tostring(child.ZIndex),
+							tostring(isInsideViewport)
+						))
+					end
+				end
+			end
+
+			print(string.format(
+				"[WeaponShopDebug] List可视区域: AbsolutePosition=%s | AbsoluteSize=%s | Top=%d | Bottom=%d | CanvasPosition=%s",
+				tostring(weaponShopList.AbsolutePosition),
+				tostring(weaponShopList.AbsoluteSize),
+				listTop,
+				listBottom,
+				tostring(weaponShopList.CanvasPosition)
+			))
+
+			print(string.format(
+				"[WeaponShopDebug] 刷新完成: 创建=%d | List子节点总数=%d | 可见条目=%d | CanvasPosition=%s | AbsoluteCanvasSize=%s",
+				createdCount,
+				#weaponShopList:GetChildren(),
+				visibleRows,
+				tostring(weaponShopList.CanvasPosition),
+				tostring(weaponShopList.AbsoluteCanvasSize)
+			))
+			print("[WeaponShopDebug] ===== 武器商店刷新结束 =====")
 		end
 	end)
 end
@@ -682,6 +827,9 @@ function UIController.Init()
 	openWeaponShopUI.OnClientEvent:Connect(function()
 		if weaponWindow then
 			weaponWindow.Visible = true
+			if weaponShopList and weaponShopList:IsA("ScrollingFrame") then
+				weaponShopList.CanvasPosition = Vector2.new(0, 0)
+			end
 			refreshWeaponShopUI() 
 		end
 	end)
@@ -749,7 +897,6 @@ function UIController.Init()
 			end
 		end
 		
-		print("[UIController] ✅ 成功捕获到攻击按钮，已正式接管逻辑！")
 		attackButton = btn :: ImageButton
 		attackButton.Visible = false -- 初始状态强制隐藏
 		
