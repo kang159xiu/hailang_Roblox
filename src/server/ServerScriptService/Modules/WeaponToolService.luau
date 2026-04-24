@@ -262,31 +262,6 @@ function WeaponToolService.Sync(player: Player, forceEquip: boolean?, dontEquip:
 	end
 end
 
-function WeaponToolService.Init()
-	local function hookPlayer(player: Player)
-		player.CharacterAdded:Connect(function()
-			-- 等 Backpack 和 StarterPack Tool 下发完成
-			task.delay(0.25, function()
-				ensureSingleWeaponTool(player, PlayerData.Get(player).EquippedWeaponLevel or 1)
-				WeaponToolService.Sync(player)
-			end)
-		end)
-
-		-- 初次进来补一次（有时 CharacterAdded 前 Backpack 已存在）
-		task.delay(0.1, function()
-			ensureSingleWeaponTool(player, PlayerData.Get(player).EquippedWeaponLevel or 1)
-			WeaponToolService.Sync(player)
-		end)
-
-		-- 不监听 Backpack.ChildAdded：避免因排序/重入导致报错
-	end
-
-	Players.PlayerAdded:Connect(hookPlayer)
-	for _, p in ipairs(Players:GetPlayers()) do
-		hookPlayer(p)
-	end
-end
-
 
 
 -- [修改内容] 引入 CollectionService 用于监听场景中的标签 Part
