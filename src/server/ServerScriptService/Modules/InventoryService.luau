@@ -675,6 +675,7 @@ function InventoryService.DropAllCarried(player: Player): {CarriedMonster}
 			MonsterLevel = v.MonsterLevel,
 			Value = v.Value,
 			GoldPerSec = v.GoldPerSec,
+			UpgradeLevel = (v :: any).UpgradeLevel or 1, -- [修改内容] 确保掉落时继承强化等级，防止数值丢失
 		})
 	end
 

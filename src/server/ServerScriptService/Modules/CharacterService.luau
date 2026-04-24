@@ -31,11 +31,43 @@ local function applyStats(player: Player, humanoid: Humanoid, fullHeal: boolean?
 	end
 end
 
+-- [新增内容] 处理玩家死亡掉落头顶怪物的逻辑
+local function hookCharacterDied(player: Player, character: Model, humanoid: Humanoid)
+	humanoid.Died:Connect(function()
+		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local dropPos = hrp and hrp.Position or Vector3.new(0, 5, 0)
+		
+		-- 局部引入避免循环依赖
+		local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
+		local MonsterService = require(script.Parent:WaitForChild("MonsterService"))
+		
+		-- 获取并清空头顶携带的怪物
+		local droppedMonsters = InventoryService.DropAllCarried(player)
+		if droppedMonsters and #droppedMonsters > 0 then
+			for _, monsterData in ipairs(droppedMonsters) do
+				-- 在玩家尸体周围随机散落
+				local offset = Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
+				local spawnPos = dropPos + offset
+				
+				MonsterService.SpawnDroppedMonster(
+					monsterData.MonsterLevel,
+					monsterData.Value,
+					monsterData.GoldPerSec,
+					spawnPos,
+					"PlayerDeathDrop", -- 掉落怪的特殊ZoneKey标识
+					(monsterData :: any).UpgradeLevel or 1
+				)
+			end
+		end
+	end)
+end
+
 function CharacterService.Init()
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function(character)
 			local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 			applyStats(player, humanoid, true)
+			hookCharacterDied(player, character, humanoid) -- [修改内容] 绑定死亡事件
 		end)
 	end)
 
@@ -45,11 +77,13 @@ function CharacterService.Init()
 			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
 			if humanoid then
 				applyStats(player, humanoid, false)
+				hookCharacterDied(player, player.Character, humanoid) -- [修改内容] 绑定死亡事件
 			end
 		end
 		player.CharacterAdded:Connect(function(character)
 			local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 			applyStats(player, humanoid, true)
+			hookCharacterDied(player, character, humanoid) -- [修改内容] 绑定死亡事件
 		end)
 	end
 end
