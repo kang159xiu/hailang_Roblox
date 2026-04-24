@@ -49,8 +49,8 @@ local weaponTabBtn = monsterInventoryWindow:WaitForChild("weapon") :: GuiButton
 local inviteButton = mainGui:FindFirstChild("ImageButton_邀请", true) :: ImageButton 
 local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton 
 local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
--- [新增内容] 引用攻击按钮 (使用 true 递归查找，无论你把它放在哪都能找到)
-local attackButton = mainGui:FindFirstChild("ImageButton_攻击", true) :: ImageButton?
+-- [终极修复] 先声明攻击按钮变量，但不立刻查找，避免由于 UI 加载延迟导致永远为 nil
+local attackButton: ImageButton? = nil
 
 -- [修改内容] 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
 local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度", true) :: ImageButton?
@@ -735,9 +735,24 @@ function UIController.Init()
 		end)
 	end
 
-	-- [新增内容] 攻击按钮逻辑
-	if attackButton then
-		attackButton.Visible = false -- 默认隐藏
+	-- [终极修复] 攻击按钮逻辑（加入强力异步等待机制，100% 确保找到加载缓慢的按钮）
+	task.spawn(function()
+		-- 优先使用 WaitForChild 死等 5 秒，如果由于层级深没拿到，再使用递归全局寻找
+		local btn = mainGui:WaitForChild("ImageButton_攻击", 5) or mainGui:FindFirstChild("ImageButton_攻击", true)
+		
+		-- 如果 5 秒后网络还没把按钮发过来，开启后台无限扫描直到它出现为止
+		if not btn then
+			warn("[UIController] 5秒内未找到 ImageButton_攻击，正在后台持续扫描...")
+			while not btn do
+				task.wait(1)
+				btn = mainGui:FindFirstChild("ImageButton_攻击", true)
+			end
+		end
+		
+		print("[UIController] ✅ 成功捕获到攻击按钮，已正式接管逻辑！")
+		attackButton = btn :: ImageButton
+		attackButton.Visible = false -- 初始状态强制隐藏
+		
 		attackButton.Activated:Connect(function()
 			local char = player.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -745,18 +760,17 @@ function UIController.Init()
 
 			local equippedTool = char:FindFirstChildOfClass("Tool")
 			if equippedTool then
-				-- 如果已经拿在手上，直接调用工具的 Activate 方法触发攻击
-				-- 这个 API 会自动触发 WeaponClient 里的 tool.Activated 事件，完美兼容原版攻击判定
+				-- 已经手持武器则直接挥砍
 				equippedTool:Activate()
 			else
-				-- 如果没拿在手上，去背包里找出来装备上
+				-- 未手持武器则自动找到背包的武器并装备
 				local backpackTool = player.Backpack:FindFirstChildOfClass("Tool")
 				if backpackTool then
 					hum:EquipTool(backpackTool)
 				end
 			end
 		end)
-	end
+	end)
 
 
 	-- 正常速度切换按钮逻辑
