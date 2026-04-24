@@ -580,11 +580,19 @@ local function refreshWeaponShopUI()
 		weaponShopList.CanvasPosition = Vector2.new(0, 0)
 	end
 
+	-- [修改原因] 彻底清理：不仅删除条目，还要删除可能存在冲突设置的旧布局(UILayout)和边距(UIPadding)组件
 	for _, ch in ipairs(weaponShopList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" and not ch:IsA("UILayout") then
+		if (ch:IsA("GuiObject") and ch.Name ~= "单个武器背景") or ch:IsA("UILayout") or ch:IsA("UIPadding") then
 			ch:Destroy()
 		end
 	end
+
+	-- [修改原因] 重新创建一个纯净的 UIListLayout，确保 VerticalAlignment 强制为 Top（置顶）
+	local newListLayout = Instance.new("UIListLayout")
+	newListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	newListLayout.VerticalAlignment = Enum.VerticalAlignment.Top -- 核心修复：确保从最顶端开始排
+	newListLayout.Padding = UDim.new(0, 10) -- 设定一个固定的间距
+	newListLayout.Parent = weaponShopList
 
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
@@ -600,7 +608,8 @@ local function refreshWeaponShopUI()
 		end
 
 		local row = weaponShopTemplate:Clone()
-		row.Name = "WeaponShopRow_" .. i
+		-- [修改原因] 使用 %02d 补零格式化名称 (例如 WeaponShopRow_01)，防止 UI 布局组件意外按 Name 排序导致错乱
+		row.Name = string.format("WeaponShopRow_%02d", i)
 		row.AnchorPoint = Vector2.new(0, 0)
 		row.Position = UDim2.fromOffset(0, 0)
 		row.LayoutOrder = i
@@ -669,92 +678,24 @@ local function refreshWeaponShopUI()
 		end
 	end
 
+	-- [修改原因] 使用延时确保 UI 渲染树已更新，彻底解决“前几项不见”和“底部留白”的问题
 	task.defer(function()
 		if weaponShopList:IsA("ScrollingFrame") then
+			-- 1. 暂时关闭自动尺寸，手动重置一次画布
+			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.None
+			weaponShopList.CanvasSize = UDim2.new(0, 0, 0, 0)
 			weaponShopList.CanvasPosition = Vector2.new(0, 0)
+			
+			-- 2. 强制 UI 刷新一次位置计算
+			task.wait() 
+			
+			-- 3. 重新启用自动尺寸，让它根据刚才创建的 newListLayout 重新计算
 			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-
-			for _, layoutChild in ipairs(weaponShopList:GetChildren()) do
-				if layoutChild:IsA("UIListLayout") or layoutChild:IsA("UIGridLayout") or layoutChild:IsA("UIPadding") then
-					print(string.format(
-						"[WeaponShopDebug] 布局子节点: %s | Class=%s",
-						layoutChild.Name,
-						layoutChild.ClassName
-					))
-				end
-			end
-
-			local gridLayout = weaponShopList:FindFirstChildWhichIsA("UIGridLayout")
-			local listLayout = weaponShopList:FindFirstChildWhichIsA("UIListLayout")
-			if gridLayout then
-				weaponShopList.CanvasSize = UDim2.fromOffset(0, gridLayout.AbsoluteContentSize.Y + 20)
-				print(string.format(
-					"[WeaponShopDebug] UIGridLayout.AbsoluteContentSize=%s | 更新后 CanvasSize=%s",
-					tostring(gridLayout.AbsoluteContentSize),
-					tostring(weaponShopList.CanvasSize)
-				))
-			elseif listLayout then
-					listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-				weaponShopList.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 20)
-				print(string.format(
-						"[WeaponShopDebug] UIListLayout.AbsoluteContentSize=%s | 更新后 CanvasSize=%s | Padding=%s | VerticalAlignment=%s | HorizontalAlignment=%s | FillDirection=%s | SortOrder=%s",
-					tostring(listLayout.AbsoluteContentSize),
-					tostring(weaponShopList.CanvasSize),
-						tostring(listLayout.Padding),
-						tostring(listLayout.VerticalAlignment),
-						tostring(listLayout.HorizontalAlignment),
-						tostring(listLayout.FillDirection),
-						tostring(listLayout.SortOrder)
-				))
-			else
-				warn("[WeaponShopDebug] weaponShopList 下未找到 UIGridLayout")
-			end
-
-			local visibleRows = 0
-			local printedRows = 0
-			local listTop = weaponShopList.AbsolutePosition.Y
-			local listBottom = listTop + weaponShopList.AbsoluteSize.Y
-			for _, child in ipairs(weaponShopList:GetChildren()) do
-				if child:IsA("GuiObject") and child.Name ~= "单个武器背景" and child.Visible then
-					visibleRows += 1
-					if string.find(child.Name, "WeaponShopRow_") and printedRows < 10 then
-						printedRows += 1
-						local childTop = child.AbsolutePosition.Y
-						local childBottom = childTop + child.AbsoluteSize.Y
-						local isInsideViewport = childBottom > listTop and childTop < listBottom
-						print(string.format(
-							"[WeaponShopDebug] 条目位置: %s | Position=%s | AbsolutePosition=%s | Size=%s | AbsoluteSize=%s | LayoutOrder=%s | ZIndex=%s | InViewport=%s",
-							child.Name,
-							tostring(child.Position),
-							tostring(child.AbsolutePosition),
-							tostring(child.Size),
-							tostring(child.AbsoluteSize),
-							tostring(child.LayoutOrder),
-							tostring(child.ZIndex),
-							tostring(isInsideViewport)
-						))
-					end
-				end
-			end
-
-			print(string.format(
-				"[WeaponShopDebug] List可视区域: AbsolutePosition=%s | AbsoluteSize=%s | Top=%d | Bottom=%d | CanvasPosition=%s",
-				tostring(weaponShopList.AbsolutePosition),
-				tostring(weaponShopList.AbsoluteSize),
-				listTop,
-				listBottom,
-				tostring(weaponShopList.CanvasPosition)
-			))
-
-			print(string.format(
-				"[WeaponShopDebug] 刷新完成: 创建=%d | List子节点总数=%d | 可见条目=%d | CanvasPosition=%s | AbsoluteCanvasSize=%s",
-				createdCount,
-				#weaponShopList:GetChildren(),
-				visibleRows,
-				tostring(weaponShopList.CanvasPosition),
-				tostring(weaponShopList.AbsoluteCanvasSize)
-			))
-			print("[WeaponShopDebug] ===== 武器商店刷新结束 =====")
+			
+			-- 4. 最终复位滚动条到最上方
+			weaponShopList.CanvasPosition = Vector2.new(0, 0)
+			
+			print(string.format("[WeaponShopDebug] 深度重置完成。最终画布高度: %.2f", weaponShopList.AbsoluteCanvasSize.Y))
 		end
 	end)
 end
@@ -944,7 +885,7 @@ function UIController.Init()
 			else
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = false end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = true end
-				if speedToggleText then speedToggleText.Text = "关闭加速" end
+				if speedToggleText then speedToggleText.Text = "关闭加速" end --UI显示关闭加速文字
 			end
 		end
 
