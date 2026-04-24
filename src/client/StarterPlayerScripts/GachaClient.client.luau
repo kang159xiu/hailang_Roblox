@@ -40,10 +40,18 @@ local PRODUCT_ID_10_PULL = 3580035858
 local isFastMode = false
 local isAnimating = false
 
+-- [修改原因] 获取“快速开”UI节点，并默认隐藏
+local fastOpenIndicator = btnFast:WaitForChild("快速开")
+fastOpenIndicator.Visible = false
+
 -- 快速抽奖反馈
 btnFast.MouseButton1Click:Connect(function()
 	isFastMode = not isFastMode
-	btnFast.ImageColor3 = isFastMode and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(255, 255, 255)
+	-- [修改原因] 控制快速开节点的显示与隐藏
+	fastOpenIndicator.Visible = isFastMode
+	
+	-- [修改原因] 将客户端的快速模式状态同步给服务端，以便服务端计算发奖延迟
+	requestEvent:FireServer("ToggleFastMode", isFastMode)
 end)
 
 -- 发起抽奖
@@ -91,13 +99,15 @@ local function setupViewport(vpf: Instance, modelTemplate: Instance?)
 end
 
 -- 监听抽奖结果并执行老虎机滚动动画
-resultEvent.OnClientEvent:Connect(function(results)
+-- [修改原因] 新增 serverDuration 参数，确保客户端动画时间与服务端发奖时间完美对齐
+resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	if isAnimating then return end
 	isAnimating = true
 
 	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	
-	local duration = isFastMode and 0.5 or 2.5
+	-- [修改原因] 优先使用服务端下发的时间，普通1秒，快速0.3秒
+	local duration = serverDuration or (isFastMode and 0.3 or 1.0)
 	local startTime = os.clock()
 	local frameCounter = 0
 

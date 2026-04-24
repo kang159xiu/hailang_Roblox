@@ -45,6 +45,9 @@ local function getRandomMonsterLevel()
 	return 1
 end
 
+-- [修改原因] 新增一个表来记录每个玩家是否开启了快速模式
+local playerFastModeCache = {}
+
 -- [修改原因] 执行抽奖、发奖与结果广播
 local function performGacha(player: Player, times: number)
 	local results = {}
@@ -58,33 +61,46 @@ local function performGacha(player: Player, times: number)
 		end
 	end
 
-	local hasEquippedMax = false
-	for _, lvl in ipairs(results) do
-		-- [修改原因] 需求：当次抽奖获得怪物的最高级在玩家手中拿着
-		local shouldEquip = false
-		if lvl == maxLevel and not hasEquippedMax then
-			shouldEquip = true
-			hasEquippedMax = true
-		end
-		
-		InventoryService.GiveGachaMonsterTool(player, lvl, shouldEquip)
-	end
+	-- [修改原因] 获取该玩家的快速模式状态，计算延迟时间（普通1秒，快速0.3秒）
+	local isFast = playerFastModeCache[player]
+	local delayTime = isFast and 0.3 or 1.0
 
-	-- 下发结果给客户端做动画展示
-	resultEvent:FireClient(player, results)
+	-- [修改原因] 下发结果给客户端做动画展示，并将延迟时间一同下发保证同步
+	resultEvent:FireClient(player, results, delayTime)
+
+	-- [修改原因] 开启异步延迟，动画结束后再把怪物给玩家
+	task.delay(delayTime, function()
+		-- 安全校验：防止玩家在等待期间退出了游戏
+		if not player.Parent then return end
+
+		local hasEquippedMax = false
+		for _, lvl in ipairs(results) do
+			-- 需求：当次抽奖获得怪物的最高级在玩家手中拿着
+			local shouldEquip = false
+			if lvl == maxLevel and not hasEquippedMax then
+				shouldEquip = true
+				hasEquippedMax = true
+			end
+			
+			InventoryService.GiveGachaMonsterTool(player, lvl, shouldEquip)
+		end
+	end)
 end
 
--- 监听金币抽奖
-requestEvent.OnServerEvent:Connect(function(player, action)
-	if action == "Gold1" then
-		-- [修改原因] 校验并扣除 1M 钱币
+-- 监听金币抽奖及模式切换
+requestEvent.OnServerEvent:Connect(function(player, action, extraData)
+	-- [修改原因] 接收并记录客户端发来的快速模式状态
+	if action == "ToggleFastMode" then
+		playerFastModeCache[player] = extraData == true
+	elseif action == "Gold1" then
+		-- 校验并扣除 1M 钱币
 		if PlayerData.TrySpendGold(player, COST_1_PULL_GOLD) then
 			performGacha(player, 1)
 		else
 			local toastEvent = remotes:FindFirstChild("PushClientToast")
 			if toastEvent then toastEvent:FireClient(player, "金币不足") end
 		end
-	end
+	end -- [修改原因] 修复结构：这个 end 才是结束 if...elseif 语句的正确位置
 end)
 
 -- [修改原因] 监听 Robux 支付回调

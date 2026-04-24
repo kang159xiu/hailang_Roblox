@@ -881,11 +881,11 @@ function UIController.Init()
 			if isNormalSpeedActive then
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = true end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = false end
-				if speedToggleText then speedToggleText.Text = "开启加速" end
+				if speedToggleText then speedToggleText.Text = "Speed-" end
 			else
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = false end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = true end
-				if speedToggleText then speedToggleText.Text = "关闭加速" end --UI显示关闭加速文字
+				if speedToggleText then speedToggleText.Text = "Speed+" end --UI显示关闭加速文字
 			end
 		end
 
