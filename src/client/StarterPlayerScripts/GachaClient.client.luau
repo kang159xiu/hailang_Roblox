@@ -90,7 +90,7 @@ end)
 
 -- 3D 模型渲染辅助函数
 local function setupViewport(vpf: Instance, modelTemplate: Instance?)
-	-- [重大修改原因] 安全拦截！ImageLabel 不能显示 3D 模型
+	-- 安全拦截！ImageLabel 不能显示 3D 模型
 	if not vpf:IsA("ViewportFrame") then
 		warn("⚠️ 错误：" .. vpf.Name .. " 是一个 " .. vpf.ClassName .. "，无法显示3D怪物！请在 Studio 中右键它 -> 替换为 ViewportFrame。")
 		return
@@ -112,12 +112,36 @@ local function setupViewport(vpf: Instance, modelTemplate: Instance?)
 	elseif clone:IsA("BasePart") then
 		cf = clone.CFrame
 		size = clone.Size
+	-- [修改原因] 兼容性修复：如果怪物是个 Tool（工具），原代码无法读取大小会导致相机罢工，从而产生白屏！
+	elseif clone:IsA("Tool") then
+		local handle = clone:FindFirstChild("Handle") or clone:FindFirstChildWhichIsA("BasePart")
+		if handle then
+			cf = handle.CFrame
+			size = handle.Size
+		else
+			-- 如果 Tool 里没有任何可见的实体零件，给个默认坐标防崩溃
+			cf = CFrame.new(0, 0, 0)
+			size = Vector3.new(2, 2, 2)
+		end
 	end
 
 	if cf and size then
 		local maxDim = math.max(size.X, size.Y, size.Z)
 		if maxDim == 0 then maxDim = 5 end
-		camera.CFrame = CFrame.new(cf.Position + (cf.LookVector * (maxDim * 1.5)) + Vector3.new(0, maxDim * 0.2, 0), cf.Position)
+		
+		-- ==========================================
+		-- 🛠️ 在这里调整显示怪物的大小和位置 🛠️
+		-- ==========================================
+		local ZOOM_MULTIPLIER = 0.8  -- 【控制大小】数值越小，怪物显得越大；数值越大，相机离得越远（怪物显得越小）。建议在 0.8 到 2.5 之间微调。
+		local HEIGHT_OFFSET = 0.2    -- 【控制高低】数值越大，相机抬得越高（怪物看起来在画面偏下方）。
+		
+		-- 获取朝向，防止有些模型没有朝向导致报错
+		local lookDir = cf.LookVector
+		if lookDir.Magnitude < 0.01 then lookDir = Vector3.new(0, 0, -1) end 
+		
+		camera.CFrame = CFrame.new(cf.Position + (lookDir * (maxDim * ZOOM_MULTIPLIER)) + Vector3.new(0, maxDim * HEIGHT_OFFSET, 0), cf.Position)
+	else
+		warn("⚠️ 报错：无法计算 " .. clone.Name .. " 的大小，请确保它是 Model、BasePart 或包含零件的 Tool。")
 	end
 end
 
@@ -138,17 +162,24 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	connection = RunService.RenderStepped:Connect(function()
 		local elapsed = os.clock() - startTime
 		frameCounter += 1
---【【【【【
+
 		if elapsed >= duration then
 			connection:Disconnect()
 			-- [修改原因] 动画结束，展示真实抽中的怪物
-			for i, vpf in ipairs(vpfList) do
-				-- [修改原因] 精准匹配：如果是1抽，只有 results[1] 有值，只在 ViewportFrame01 显示结果。
-				-- 剩余的框 (02-05) 将保留它们最后一次滚动时的随机怪物图像。
+            for i, vpf in ipairs(vpfList) do
 				local resLevel = results[i] 
 				if resLevel then
 					local template = monsterFolder and (monsterFolder:FindFirstChild("怪物形象" .. resLevel) or monsterFolder:FindFirstChild("Lv" .. resLevel) or monsterFolder:FindFirstChild("怪物形象 " .. resLevel))
-					setupViewport(vpf, template)
+					
+					if template then
+						-- 找到了模型，正常渲染
+						setupViewport(vpf, template)
+					else
+						-- [修改原因] 找不到模型时的安全拦截！不要调用 setupViewport 去清空它，而是发出警告
+						warn("⚠️ 报错：玩家抽中了等级为 " .. resLevel .. " 的怪物，但在文件夹里找不到它的模型！")
+						warn("请检查文件夹中是否有名为 '怪物形象" .. resLevel .. "' 的模型。")
+						-- 因为没有执行清空操作，ViewportFrame01 会保留动画最后一帧的画面，不会变成白板
+					end
 				end
 			end
 			
