@@ -89,18 +89,18 @@ end
 
 -- 监听金币抽奖及模式切换
 requestEvent.OnServerEvent:Connect(function(player, action, extraData)
-	-- [修改原因] 接收并记录客户端发来的快速模式状态
+	-- 接收并记录客户端发来的快速模式状态
 	if action == "ToggleFastMode" then
 		playerFastModeCache[player] = extraData == true
 	elseif action == "Gold1" then
-		-- 校验并扣除 1M 钱币
+		-- [修改原因] 修复之前的语法错误，确保扣费逻辑在正确的 action 判断分支内
 		if PlayerData.TrySpendGold(player, COST_1_PULL_GOLD) then
 			performGacha(player, 1)
 		else
 			local toastEvent = remotes:FindFirstChild("PushClientToast")
 			if toastEvent then toastEvent:FireClient(player, "金币不足") end
 		end
-	end -- [修改原因] 修复结构：这个 end 才是结束 if...elseif 语句的正确位置
+	end
 end)
 
 -- [修改原因] 监听 Robux 支付回调

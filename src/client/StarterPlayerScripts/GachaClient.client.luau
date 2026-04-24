@@ -21,6 +21,8 @@ end)
 local btnGold = frameGacha:WaitForChild("钱抽奖")
 local btnRbx = frameGacha:WaitForChild("R币抽奖")
 local btnFast = frameGacha:WaitForChild("快速转")
+-- [修改原因] 需求2：新增关闭按钮绑定
+local btnClose = frameGacha:WaitForChild("关闭")
 local frameDisplay = frameGacha:WaitForChild("显示抽奖内容_Fram")
 
 -- 获取 5 个展示框
@@ -35,6 +37,27 @@ local vpfList = {
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestEvent = remotes:WaitForChild("GachaRequest")
 local resultEvent = remotes:WaitForChild("GachaResult")
+
+-- [修改原因] 需求1：初始化显示。开局时为 5 个槽位随机填充怪兽图像，避免界面空白
+task.spawn(function()
+    local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+    if monsterFolder then
+        for _, vpf in ipairs(vpfList) do
+            -- 默认显示 1 级或随机低级怪物
+            local randomLevel = math.random(1, 5)
+            local template = monsterFolder:FindFirstChild("怪物形象" .. randomLevel) or monsterFolder:FindFirstChild("Lv" .. randomLevel)
+            if template then
+                setupViewport(vpf, template)
+            end
+        end
+    end
+end)
+
+-- [修改原因] 需求2：点击关闭按钮隐藏界面
+btnClose.MouseButton1Click:Connect(function()
+    frameGacha.Visible = false
+    print("❌ 抽奖界面已关闭")
+end)
 
 local PRODUCT_ID_10_PULL = 3580035858
 local isFastMode = false
@@ -115,17 +138,22 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	connection = RunService.RenderStepped:Connect(function()
 		local elapsed = os.clock() - startTime
 		frameCounter += 1
-
+--【【【【【
 		if elapsed >= duration then
 			connection:Disconnect()
-			-- 动画结束，展示真实抽中的怪物
+			-- [修改原因] 动画结束，展示真实抽中的怪物
 			for i, vpf in ipairs(vpfList) do
-				local resLevel = (#results > 1) and results[i] or results[1]
+				-- [修改原因] 精准匹配：如果是1抽，只有 results[1] 有值，只在 ViewportFrame01 显示结果。
+				-- 剩余的框 (02-05) 将保留它们最后一次滚动时的随机怪物图像。
+				local resLevel = results[i] 
 				if resLevel then
 					local template = monsterFolder and (monsterFolder:FindFirstChild("怪物形象" .. resLevel) or monsterFolder:FindFirstChild("Lv" .. resLevel) or monsterFolder:FindFirstChild("怪物形象 " .. resLevel))
 					setupViewport(vpf, template)
 				end
 			end
+			
+			-- [修改原因] 增加极短暂的延迟，确保模型渲染彻底完成，防止玩家狂点导致的视觉闪烁Bug
+			task.wait(0.1)
 			isAnimating = false
 			return
 		end
