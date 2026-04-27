@@ -102,7 +102,6 @@ findMonsterTemplate = function(folder, level)
 	for _, name in ipairs(names) do
 		local found = folder:FindFirstChild(name)
 		if found then 
-			print("🔍 [查找成功] 目标等级:", level, " 找到了名字匹配的模型:", found.Name)
 			return found 
 		end
 	end
@@ -159,7 +158,6 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 
 	-- 3. 精准架设摄像机
 	if anchorPart then
-		if isDebug then print("✅ 成功锁定定位 Part:", anchorPart.Name, "坐标:", anchorPart.Position) end
 		
 		-- 直接拿你的定位 Part 的大小和位置来对焦
 		local cf = anchorPart.CFrame
@@ -211,7 +209,6 @@ end)
 
 btnGold.MouseButton1Click:Connect(function()
 	if isAnimating then return end
-	print("🔘 点击单抽按钮，发送请求给服务端...")
 	requestEvent:FireServer("Gold1")
 end)
 
