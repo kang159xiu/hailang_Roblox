@@ -125,11 +125,25 @@ function MerchantService.Init()
 			return
 		end
 		
+		
+
 		if not PlayerData.TrySpendGold(player, price) then
 			pushToast(player, string.format("金币不足，需要 %s", Util.FormatMoney(price)))
 			return
 		end
 		
+		-- [修改原因] 经济埋点：上报武器购买造成的金币消耗
+		local AnalyticsService = game:GetService("AnalyticsService")
+		AnalyticsService:LogEconomyEvent(
+			player,
+			Enum.AnalyticsEconomyAction.Spend,
+			"Gold", 
+			price,
+			PlayerData.Get(player).Gold, 
+			Enum.AnalyticsEconomyTransactionType.Shop,
+			"Weapon_Purchase_Lv" .. tostring(nextLevel)
+		)
+
 		WeaponToolService.GrantWeapon(player, nextLevel, true)
 		DataDirtyService.MarkDirty(player, 5)
 		pushToast(player, string.format("购买成功：武器Lv.%d（花费%s）", nextLevel, Util.FormatMoney(price)))
@@ -156,11 +170,23 @@ function MerchantService.Init()
 
 		local t = tostring(upgradeType)
 		local stats = PlayerData.Get(player)
-
+		---【【【【
 		if t == "Attack" then
 			local nextLevel = stats.AttackLevel + 1
 			local cost = Config.GetAttackUpgradeCost(nextLevel)
 			if PlayerData.TrySpendGold(player, cost) then
+				-- [修改原因] 经济埋点：上报攻击力升级造成的金币消耗
+				local AnalyticsService = game:GetService("AnalyticsService")
+				AnalyticsService:LogEconomyEvent(
+					player,
+					Enum.AnalyticsEconomyAction.Spend,
+					"Gold",
+					cost,
+					PlayerData.Get(player).Gold,
+					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Upgrade_Attack"
+				)
+				
 				PlayerData.AddAttackLevel(player, 1)
 				DataDirtyService.MarkDirty(player, 5)
 				pushToast(player, string.format("攻击力升级成功！花费：%s", Util.FormatMoney(cost)))

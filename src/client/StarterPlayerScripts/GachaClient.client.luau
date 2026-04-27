@@ -63,6 +63,13 @@ end
 -- [修改原因] 打开抽奖界面时，如果预览还是空的，就立即补刷 5 个怪物形象
 btnEntry.MouseButton1Click:Connect(function()
 	frameGacha.Visible = not frameGacha.Visible
+	if frameGacha.Visible then
+		-- [修改原因] 漏斗埋点：记录玩家打开了抽奖界面
+		local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+		if analyticsRemote then
+			analyticsRemote:FireServer("Funnel", "Gacha_UI_Opened")
+		end
+	end
 	if frameGacha.Visible and not hasGachaPreview() then
 		refreshGachaPreview(false)
 	end

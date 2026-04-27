@@ -306,11 +306,23 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 				updateUpgradeGui(upgradeArea, curLevel)
 				return
 			end
-
+			--【【
 			if not PlayerData.TrySpendGold(triggerPlayer, cost) then
 				toast(triggerPlayer, string.format("金币不足，需要 %s", formatUpgradeCostText(cost)))
 				return
 			end
+
+			-- [修改原因] 经济埋点：上报家园升级造成的金币消耗
+			local AnalyticsService = game:GetService("AnalyticsService")
+			AnalyticsService:LogEconomyEvent(
+				triggerPlayer,
+				Enum.AnalyticsEconomyAction.Spend,
+				"Gold",
+				cost,
+				PlayerData.Get(triggerPlayer).Gold,
+				Enum.AnalyticsEconomyTransactionType.Gameplay,
+				"Home_Upgrade"
+			)
 
 			local newLevel = math.min(3, curLevel + 1)
 			PlayerData.SetHomeLevel(triggerPlayer, newLevel)

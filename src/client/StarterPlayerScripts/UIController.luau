@@ -764,15 +764,17 @@ function UIController.Init()
 		shopsGui.Name = "ShopsGui"
 		shopsGui.Parent = playerGui
 	end
-
+	-------------------------
 	openWeaponShopUI.OnClientEvent:Connect(function()
-		if weaponWindow then
-			weaponWindow.Visible = true
-			if weaponShopList and weaponShopList:IsA("ScrollingFrame") then
-				weaponShopList.CanvasPosition = Vector2.new(0, 0)
-			end
-			refreshWeaponShopUI() 
+	if weaponWindow then
+		weaponWindow.Visible = true
+		-- [修改原因] 漏斗埋点：记录玩家打开了武器商店界面
+		local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+		if analyticsRemote then
+			analyticsRemote:FireServer("Funnel", "Weapon_Shop_UI_Opened")
 		end
+		refreshWeaponShopUI()
+	end
 	end)
 
 	player:GetAttributeChangedSignal("WeaponLevel"):Connect(function()
@@ -783,10 +785,15 @@ function UIController.Init()
 	end)
 
 	openUpgradeShopUI.OnClientEvent:Connect(function()
-		if upgradeWindow then
-			upgradeWindow.Visible = true
-			refreshUpgradeShopUI()
+	if upgradeWindow then
+		upgradeWindow.Visible = true
+		-- [修改原因] 漏斗埋点：记录玩家打开了属性升级商店界面
+		local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+		if analyticsRemote then
+			analyticsRemote:FireServer("Funnel", "Upgrade_Shop_UI_Opened")
 		end
+		refreshUpgradeShopUI()
+	end
 	end)
 
 	if upgradeCloseBtn then
@@ -820,6 +827,11 @@ function UIController.Init()
 	-- VIP 按钮逻辑
 	if vipButton then
 		vipButton.Activated:Connect(function()
+			-- [修改原因] 漏斗埋点：记录玩家点击了VIP购买按钮并唤起 Roblox 原生支付窗口
+			local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+			if analyticsRemote then
+				analyticsRemote:FireServer("Funnel", "VIP_Prompt_Shown")
+			end
 			MarketplaceService:PromptGamePassPurchase(player, 1806675692)
 		end)
 	end
