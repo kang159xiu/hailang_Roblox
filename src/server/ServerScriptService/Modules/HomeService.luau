@@ -316,11 +316,11 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 			local AnalyticsService = game:GetService("AnalyticsService")
 			AnalyticsService:LogEconomyEvent(
 				triggerPlayer,
-				Enum.AnalyticsEconomyAction.Spend,
+				Enum.AnalyticsEconomyFlowType.Sink,
 				"Gold",
 				cost,
 				PlayerData.Get(triggerPlayer).Gold,
-				Enum.AnalyticsEconomyTransactionType.Gameplay,
+				"Gameplay",
 				"Home_Upgrade"
 			)
 

@@ -136,11 +136,11 @@ function MerchantService.Init()
 		local AnalyticsService = game:GetService("AnalyticsService")
 		AnalyticsService:LogEconomyEvent(
 			player,
-			Enum.AnalyticsEconomyAction.Spend,
+			Enum.AnalyticsEconomyFlowType.Sink,
 			"Gold", 
 			price,
 			PlayerData.Get(player).Gold, 
-			Enum.AnalyticsEconomyTransactionType.Shop,
+			"Shop",
 			"Weapon_Purchase_Lv" .. tostring(nextLevel)
 		)
 
@@ -179,11 +179,11 @@ function MerchantService.Init()
 				local AnalyticsService = game:GetService("AnalyticsService")
 				AnalyticsService:LogEconomyEvent(
 					player,
-					Enum.AnalyticsEconomyAction.Spend,
+					Enum.AnalyticsEconomyFlowType.Sink,
 					"Gold",
 					cost,
 					PlayerData.Get(player).Gold,
-					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Gameplay",
 					"Upgrade_Attack"
 				)
 				
@@ -201,11 +201,11 @@ function MerchantService.Init()
 				local AnalyticsService = game:GetService("AnalyticsService")
 				AnalyticsService:LogEconomyEvent(
 					player,
-					Enum.AnalyticsEconomyAction.Spend,
+					Enum.AnalyticsEconomyFlowType.Sink,
 					"Gold",
 					cost,
 					PlayerData.Get(player).Gold,
-					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Gameplay",
 					"Upgrade_Speed"
 				)
 				
@@ -224,11 +224,11 @@ function MerchantService.Init()
 				local AnalyticsService = game:GetService("AnalyticsService")
 				AnalyticsService:LogEconomyEvent(
 					player,
-					Enum.AnalyticsEconomyAction.Spend,
+					Enum.AnalyticsEconomyFlowType.Sink,
 					"Gold",
 					cost,
 					PlayerData.Get(player).Gold,
-					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Gameplay",
 					"Upgrade_Health"
 				)
 				
@@ -251,11 +251,11 @@ function MerchantService.Init()
 				local AnalyticsService = game:GetService("AnalyticsService")
 				AnalyticsService:LogEconomyEvent(
 					player,
-					Enum.AnalyticsEconomyAction.Spend,
+					Enum.AnalyticsEconomyFlowType.Sink,
 					"Gold",
 					cost,
 					PlayerData.Get(player).Gold,
-					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Gameplay",
 					"Upgrade_Carry"
 				)
 				

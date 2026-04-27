@@ -794,10 +794,9 @@ end
 
 
 function InventoryService.Clear(player: Player)
-	if inventoryByUserId[player.UserId] then
-		inventoryByUserId[player.UserId] = {}
-	end
-	InventoryService.Sync(player)
+	itemsByUserId[player.UserId] = {}
+	clearCarried(player)
+	syncToClient(player)
 	
 	local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 	DataDirtyService.MarkDirty(player)
