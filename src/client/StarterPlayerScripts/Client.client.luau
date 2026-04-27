@@ -536,8 +536,9 @@ local function formatNumberShort(n: number): string
 	local abs = math.abs(n)
 	local units = {
 		{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" },
-		{ 1e9, "B" }, { 1e6, "M" }, { 1e4, "w" },
+		{ 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" },
 	}
+
 	for _, u in ipairs(units) do
 		local base = u[1] :: number
 		local suffix = u[2] :: string
@@ -607,7 +608,10 @@ local function findHeadTemplateBillboardGui(): BillboardGui?
 	for _, descendant in ipairs(workspace:GetDescendants()) do
 		if descendant:IsA("BillboardGui") and descendant.Name == HEAD_TEMPLATE_GUI_NAME then
 			local parentInstance = descendant.Parent
-			if parentInstance and parentInstance.Name == HEAD_TEMPLATE_ROOT_NAME then
+			local grandParentInstance = parentInstance and parentInstance.Parent
+
+			if (parentInstance and parentInstance.Name == HEAD_TEMPLATE_ROOT_NAME)
+				or (grandParentInstance and grandParentInstance.Name == HEAD_TEMPLATE_ROOT_NAME) then
 				return descendant
 			end
 		end
@@ -615,6 +619,7 @@ local function findHeadTemplateBillboardGui(): BillboardGui?
 
 	return nil
 end
+
 
 local function findOwnedHomeForHead(): Instance?
 	local homeFolder = workspace:FindFirstChild("HOME")

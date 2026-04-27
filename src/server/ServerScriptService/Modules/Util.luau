@@ -69,19 +69,32 @@ function Util.clamp(n: number, a: number, b: number): number
 	return math.max(a, math.min(b, n))
 end
 
--- [新增内容] 将大数字转换为带 "w" (万) 单位的字符串，方便 UI 显示
+-- [修改内容] 将大数字转换为带 k / M / B / T 单位的字符串，方便 UI 显示
 function Util.FormatMoney(amount: number): string
-	if type(amount) ~= "number" then return "0" end
-	
-	if amount < 10000 then
-		return tostring(math.floor(amount))
-	else
-		-- 除以 10000，并保留一位小数。例如：15500 变成 1.5w，1000000 变成 100.0w
-		-- 如果你不想显示小数点后的 .0，可以使用 string.gsub 去除
-		local formatted = string.format("%.1fw", amount / 10000)
-		formatted = string.gsub(formatted, "%.0w$", "w") -- 把 .0w 替换成 w
-		return formatted
+	if type(amount) ~= "number" then
+		return "0"
 	end
+
+	local abs = math.abs(amount)
+	local units = {
+		{ 1e12, "T" },
+		{ 1e9, "B" },
+		{ 1e6, "M" },
+		{ 1e3, "k" },
+	}
+
+	for _, unitInfo in ipairs(units) do
+		local base = unitInfo[1]
+		local suffix = unitInfo[2]
+		if abs >= base then
+			local formatted = string.format("%.1f%s", amount / base, suffix)
+			formatted = string.gsub(formatted, "%.0([A-Za-z]+)$", "%1")
+			return formatted
+		end
+	end
+
+	return tostring(math.floor(amount))
 end
+
 
 return Util

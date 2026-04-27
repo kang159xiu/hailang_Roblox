@@ -99,7 +99,7 @@ end
 -- =====================
 local function formatNumberShort(n: number): string
 	local abs = math.abs(n)
-	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e4, "w" }}
+	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" }}
 	for _, u in ipairs(units) do
 		local base, suffix = u[1], u[2]
 		if abs >= base then
@@ -213,7 +213,7 @@ local function loadViewportFromScene(targetContainer: GuiObject, modelSource: In
 	if maxDim == 0 then maxDim = 2 end -- 兜底防错
 
 	-- 根据视场角(FOV)计算刚好能看全模型的距离，乘 1.2 是为了留一点边缘空白
-	local distance = (maxDim / 2) / math.tan(math.rad(camera.FieldOfView) / 2) * 1.2
+	local distance = (maxDim / 2) / math.tan(math.rad(camera.FieldOfView) / 2) * 0.8
 	
 	-- 将摄像机放在模型的斜右前方，并让它看向模型的中心点
 	local camPos = cf.Position + Vector3.new(distance * 0.6, distance * 0.4, distance * 0.8)

@@ -11,8 +11,12 @@ local CollectionService = game:GetService("CollectionService")
 local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local MonsterService = require(script.Parent:WaitForChild("MonsterService"))
+local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 
 local GuardianService = {}
+
+local DIRECT_CHASE_DISTANCE = 12
+local CATCH_DISTANCE = 5
 
 --------------------------------------------------------------------------------
 -- 1. 守护者配置表 (1~30 级)
@@ -36,6 +40,11 @@ local CUSTOM_ANIMATIONS = {
 	-- 你可以继续往下复制，最高写到 [30]
 }
 
+local function getGuardianSpeedByZoneLevel(zoneLevel: number): number
+	local speedMap = Config.GUARDIAN_SPEED_BY_ZONE_LEVEL
+	return (speedMap and speedMap[zoneLevel]) or speedMap[1] or 16
+end
+
 -- 自动初始化 1~30 级的配置
 for level = 1, 30 do
 	-- 如果你在上面的表里配了该等级的动画，就用你配的；如果没配，就自动生成空的兜底
@@ -43,8 +52,8 @@ for level = 1, 30 do
 	
 	GUARDIAN_CONFIG[level] = {
 		ModelName = "守护者形象" .. tostring(level), 
-		-- 速度随等级提升：基础 20，每级增加 3
-		Speed = 20 + (level * 5), 
+		-- 速度统一改为只从 Config.GUARDIAN_SPEED_BY_ZONE_LEVEL 读取
+		Speed = getGuardianSpeedByZoneLevel(level), 
 		Animations = customAnim
 	}
 end
@@ -140,8 +149,11 @@ local function getPlayerCarriedMaxLevel(player: Player): number
 	if char then
 		for _, child in ipairs(char:GetChildren()) do
 			-- 判断是否是怪物模型（名字带“怪物”或“Monster”，或者有Attribute）
+			if child:GetAttribute("FromGacha") == true then
+				continue
+			end
+
 			if child:GetAttribute("IsMonster") or child:GetAttribute("MonsterLevel") or string.find(child.Name, "怪物") or string.find(child.Name, "Monster") then
-				
 				local lv = child:GetAttribute("MonsterLevel")
 				
 				-- 如果模型身上没有挂载 Attribute，就尝试从名字(如"怪物形象5")中提取数字
@@ -154,6 +166,7 @@ local function getPlayerCarriedMaxLevel(player: Player): number
 					maxLevel = lv
 				end
 			end
+
 		end
 	end
 	return maxLevel
@@ -411,9 +424,18 @@ local function onHeartbeat(dt: number)
 			end
 
 			lookAtFlat(g.Model, g.RootPart, targetHrp.Position)
+
+			local targetOffset = targetHrp.Position - g.RootPart.Position
+			local flatTargetOffset = Vector3.new(targetOffset.X, 0, targetOffset.Z)
+			local targetDistance = flatTargetOffset.Magnitude
+
+			if targetDistance <= CATCH_DISTANCE then
+				punishPlayer(g, g.TargetPlayer, targetHrp)
+				continue
+			end
 			
 			-- 寻路移动逻辑
-			if now - g.LastPathTime > 0.3 then
+			if targetDistance > DIRECT_CHASE_DISTANCE and now - g.LastPathTime > 0.3 then
 				g.LastPathTime = now
 				local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 4, AgentCanJump = false})
 				pcall(function() path:ComputeAsync(g.RootPart.Position, targetHrp.Position) end)
@@ -421,6 +443,15 @@ local function onHeartbeat(dt: number)
 					g.Waypoints = path:GetWaypoints()
 					g.CurrentWaypointIdx = 2
 				end
+			end
+
+			if targetDistance <= DIRECT_CHASE_DISTANCE then
+				if targetDistance > 0.05 then
+					local step = math.min(g.Speed * dt, targetDistance)
+					local nextCF = g.RootPart.CFrame + (flatTargetOffset.Unit * step)
+					g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
+				end
+				continue
 			end
 
 			-- [修改内容] 3. 寻路点安全检测：防止 g.Waypoints[idx] 为 nil 导致崩溃
@@ -476,9 +507,8 @@ function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
         local rawLevel = zonePart:GetAttribute("ZoneLevel")
         local zoneLevel = tonumber(rawLevel) or 1
         
-        -- [修改原因: 安全获取 Config，防止上下文未正确引入导致报错]
-        local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("GameModules"):WaitForChild("Config"))
-        local targetSpeed = (Config.GUARDIAN_SPEED_BY_ZONE_LEVEL and Config.GUARDIAN_SPEED_BY_ZONE_LEVEL[zoneLevel]) or 16
+        local targetSpeed = getGuardianSpeedByZoneLevel(zoneLevel)
+        g.Speed = targetSpeed
         
         local humanoid = g.Model and g.Model:FindFirstChildOfClass("Humanoid")
         if humanoid then

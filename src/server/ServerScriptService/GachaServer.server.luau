@@ -20,7 +20,9 @@ local resultEvent = remotes:FindFirstChild("GachaResult") or Instance.new("Remot
 resultEvent.Name = "GachaResult"
 
 local PRODUCT_ID_10_PULL = 3580035858
+local PRODUCT_ID_5_PULL = 3580661228
 local COST_1_PULL_GOLD = 1000000
+
 
 -- [修改原因] 核心算法：怪物等级越高，抽中概率越低 (指数级衰减权重)
 local function getRandomMonsterLevel()
@@ -61,15 +63,20 @@ local function performGacha(player: Player, times: number)
 		end
 	end
 
-	-- [修改原因] 获取该玩家的快速模式状态，计算延迟时间（普通1秒，快速0.3秒）
 	local isFast = playerFastModeCache[player]
-	local delayTime = isFast and 0.3 or 1.0
+	local delayTime
 
-	-- [修改原因] 下发结果给客户端做动画展示，并将延迟时间一同下发保证同步
-	resultEvent:FireClient(player, results, delayTime)
+	if times > 1 then
+		delayTime = times * 0.3
+	else
+		delayTime = isFast and 0.3 or 1.0
+	end
 
-	-- [修改原因] 开启异步延迟，动画结束后再把怪物给玩家
-	task.delay(delayTime, function()
+
+resultEvent:FireClient(player, results, delayTime)
+
+task.delay(delayTime, function()
+
 		-- 安全校验：防止玩家在等待期间退出了游戏
 		if not player.Parent then return end
 
@@ -114,6 +121,12 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		performGacha(player, 10)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
+
+	if receiptInfo.ProductId == PRODUCT_ID_5_PULL then
+		performGacha(player, 5)
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
 
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end

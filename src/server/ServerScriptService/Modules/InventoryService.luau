@@ -32,7 +32,9 @@ type CarriedMonster = {
 	GoldPerSec: number,
 }
 
-local MAX_SLOTS = 10
+
+local MAX_SLOTS = math.huge -- 不再限制怪物背包容量；仅保留常量占位，避免其他旧代码报错
+
 local itemsByUserId: {[number]: {MonsterItem}} = {}
 local groundTouchCooldownByUserId: {[number]: number} = {}
 local toolCacheFolder: Folder? = nil
@@ -515,7 +517,7 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 		tool:SetAttribute("UpgradeLevel", upLevel)
 		tool:SetAttribute("BaseValue", c.Value / upLevel)
 		tool:SetAttribute("BaseGoldPerSec", c.GoldPerSec / upLevel)
-		
+		tool:SetAttribute("FromGacha", true)
 		tool.Parent = backpack
 		if not firstTool then firstTool = tool end
 	end
@@ -618,11 +620,6 @@ function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number
 		itemsByUserId[player.UserId] = list
 	end
 
-	if #list >= MAX_SLOTS then
-		pushToast(player, "背包已满（10格）")
-		return false
-	end
-
 	local item: MonsterItem = {
 		ItemId = newItemId(),
 		MonsterLevel = monsterLevel,
@@ -637,6 +634,7 @@ function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number
 	pushToast(player, string.format("已收起：怪Lv%d", monsterLevel))
 	return true
 end
+
 
 -- 刷怪区域拾取：进入携带态（头顶显示），不进入背包 UI
 function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number)
@@ -784,12 +782,9 @@ function InventoryService.ApplyLoaded(player: Player, loadedItems: {MonsterItem}
 		end
 	end
 
-	while #list > MAX_SLOTS do
-		table.remove(list)
-	end
-
 	itemsByUserId[player.UserId] = list
 	syncToClient(player)
+
 end
 
 function InventoryService.Cleanup(player: Player)
@@ -820,23 +815,52 @@ function InventoryService.GiveGachaMonsterTool(player: Player, monsterLevel: num
 	local value = Config.MONSTER_VALUE_BY_LEVEL[monsterLevel] or (monsterLevel * 10)
 	local gps = Config.MONSTER_GOLD_PER_SEC_BY_LEVEL[monsterLevel] or monsterLevel
 
-	-- 复用现有的 Tool 烘焙核心逻辑
+	-- 统计当前 Tool 数量：角色手上 + Backpack 里都算
+	local toolCount = 0
+	for _, child in ipairs(backpack:GetChildren()) do
+		if child:IsA("Tool") then
+			toolCount += 1
+		end
+	end
+
+	local character = player.Character
+	if character then
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") then
+				toolCount += 1
+			end
+		end
+	end
+
+	-- 这里的 10 表示你下方工具栏/可直接携带区的上限
+	-- 超过后，抽奖怪直接进入怪物背包 UI，不再继续塞 Tool
+	if toolCount >= 10 then
+		local ok = InventoryService.TryAddMonsterItem(player, monsterLevel, value, gps)
+		if ok then
+			pushToast(player, string.format("工具栏已满，怪Lv%d 已放入背包", monsterLevel))
+		else
+			pushToast(player, string.format("工具栏已满，且背包也满了，怪Lv%d 无法领取", monsterLevel))
+		end
+		return
+	end
+
+	-- 工具栏未满时，正常发 Tool
 	local tool = createMonsterToolFromData(
 		monsterLevel,
 		value,
 		gps,
 		"" -- 抽到的怪直接是 Tool，不进入 UI 背包体系
 	)
-	
+
 	tool:SetAttribute("UpgradeLevel", 1)
 	tool:SetAttribute("BaseValue", value)
 	tool:SetAttribute("BaseGoldPerSec", gps)
-	
+	tool:SetAttribute("FromGacha", true)
+
+
 	tool.Parent = backpack
 
-	-- [修改原因] 满足需求：如果需要装备，延迟一帧确保 Tool 进入 Backpack 后再让 Humanoid 装备
 	if autoEquip then
-		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			task.defer(function()
@@ -847,5 +871,7 @@ function InventoryService.GiveGachaMonsterTool(player: Player, monsterLevel: num
 		end
 	end
 end
+
+
 
 return InventoryService

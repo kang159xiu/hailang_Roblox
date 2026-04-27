@@ -38,7 +38,7 @@ local upgradeWindow: Frame
 -- =====================
 local function formatNumberShort(n: number): string
 	local abs = math.abs(n)
-	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e4, "w" }}
+	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" }}
 	for _, u in ipairs(units) do
 		local base, suffix = u[1], u[2]
 		if abs >= base then

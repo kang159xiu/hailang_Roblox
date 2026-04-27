@@ -230,3 +230,24 @@ requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, pr
 end)
 
 print("[Game] Server initialized")
+
+
+-- 将从 [文件末尾的空白行] 替换为以下内容： 漏斗事件
+
+local AnalyticsService = game:GetService("AnalyticsService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local analyticsRemote = ReplicatedStorage:WaitForChild("Analytics_Remote")
+
+-- 简单的防刷记录字典，防止作弊者狂发垃圾事件污染后台
+local rateLimitData = {} 
+
+analyticsRemote.OnServerEvent:Connect(function(player, eventCategory, eventName)
+    if eventCategory == "Funnel" then
+        local lastTime = rateLimitData[player.UserId] or 0
+        if os.clock() - lastTime > 0.5 then -- 防刷限制：0.5秒内只能触发一次
+            rateLimitData[player.UserId] = os.clock()
+            -- [修改原因] 接收客户端漏斗步骤（如打开UI、弹出支付框）并上报自定义事件
+            AnalyticsService:LogCustomEvent(player, eventName)
+        end
+    end
+end)

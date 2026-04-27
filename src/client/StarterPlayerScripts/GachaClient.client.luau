@@ -12,15 +12,10 @@ local mainUI = PlayerGui:WaitForChild("MainUI")
 local btnEntry = mainUI:WaitForChild("抽奖入口")
 local frameGacha = mainUI:WaitForChild("抽奖界面")
 
--- [修改原因] 移除了代码后半部分重复的绑定，并加入 print 用于控制台调试
-btnEntry.MouseButton1Click:Connect(function()
-	frameGacha.Visible = not frameGacha.Visible
-end)
-
 local btnGold = frameGacha:WaitForChild("钱抽奖")
 local btnRbx = frameGacha:WaitForChild("R币抽奖")
+local btnRbx5 = frameGacha:WaitForChild("r币5次")
 local btnFast = frameGacha:WaitForChild("快速转")
--- [修改原因] 需求2：新增关闭按钮绑定
 local btnClose = frameGacha:WaitForChild("关闭")
 local frameDisplay = frameGacha:WaitForChild("显示抽奖内容_Fram")
 
@@ -33,187 +28,253 @@ local vpfList = {
 	frameDisplay:WaitForChild("ViewportFrame05"),
 }
 
+local findMonsterTemplate
+local setupViewport
+
+local function hasGachaPreview()
+	for _, vpf in ipairs(vpfList) do
+		if #vpf:GetChildren() > 0 then
+			return true
+		end
+	end
+	return false
+end
+
+local function refreshGachaPreview(isDebug: boolean)
+	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	if not monsterFolder then
+		warn("❌ [致命错误] 在 workspace 和 ReplicatedStorage 中都没找到装怪物的文件夹！请检查名字。")
+		return false
+	end
+
+	print("📁 成功找到装怪物的文件夹:", monsterFolder:GetFullName())
+
+	for _, vpf in ipairs(vpfList) do
+		local randomLevel = math.random(1, 5)
+		local template = findMonsterTemplate(monsterFolder, randomLevel)
+		if template then
+			setupViewport(vpf, template, isDebug)
+		end
+	end
+
+	return true
+end
+
+-- [修改原因] 打开抽奖界面时，如果预览还是空的，就立即补刷 5 个怪物形象
+btnEntry.MouseButton1Click:Connect(function()
+	frameGacha.Visible = not frameGacha.Visible
+	if frameGacha.Visible and not hasGachaPreview() then
+		refreshGachaPreview(false)
+	end
+end)
+
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestEvent = remotes:WaitForChild("GachaRequest")
 local resultEvent = remotes:WaitForChild("GachaResult")
 
--- [修改原因] 需求1：初始化显示。开局时为 5 个槽位随机填充怪兽图像，避免界面空白
+-- =====================================================================
+-- 🩺 [诊断点 1] 智能模糊查找辅助函数 (带日志)
+-- =====================================================================
+findMonsterTemplate = function(folder, level)
+	if not folder then 
+		warn("❌ 查找失败：传入的文件夹是空的！")
+		return nil 
+	end
+	
+	local strNormal = tostring(level)
+	local strZero = string.format("%02d", level)
+
+	local names = {
+		"怪物形象"..strNormal, "怪物形象"..strZero,
+		"怪物形象 "..strNormal, "怪物形象 "..strZero,
+		"Lv"..strNormal, "Lv"..strZero,
+		"Lv "..strNormal, "Lv "..strZero,
+		strNormal, strZero
+	}
+
+	for _, name in ipairs(names) do
+		local found = folder:FindFirstChild(name)
+		if found then 
+			print("🔍 [查找成功] 目标等级:", level, " 找到了名字匹配的模型:", found.Name)
+			return found 
+		end
+	end
+	
+	warn("⚠️ [查找失败] 目标等级:", level, " 在文件夹里穷举了所有可能的名字，都没有找到！")
+	return nil
+end
+
+-- =====================================================================
+-- 3D 渲染核心函数 (精准定位 Part 版)
+-- =====================================================================
+setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boolean)
+	if not vpf:IsA("ViewportFrame") then return end
+	vpf:ClearAllChildren()
+	if not modelTemplate then return end
+
+
+	-- 1. 直接克隆整个外层 Model，不做任何多余的拆解
+	local clone = modelTemplate:Clone()
+	clone.Parent = vpf
+
+	local camera = Instance.new("Camera")
+	vpf.CurrentCamera = camera
+	camera.Parent = vpf
+
+	-- 2. 优先寻找模板里专门的定位 Part；找不到再多层兜底
+	local anchorPart = nil
+
+	local preferredNames = {
+		clone.Name,
+		"RootPart",
+		"HumanoidRootPart",
+		"Handle",
+		"PrimaryPart",
+		"Root",
+	}
+
+	for _, partName in ipairs(preferredNames) do
+		local found = clone:FindFirstChild(partName, true)
+		if found and found:IsA("BasePart") then
+			anchorPart = found
+			break
+		end
+	end
+
+	if not anchorPart and clone:IsA("Model") and clone.PrimaryPart then
+		anchorPart = clone.PrimaryPart
+	end
+
+	if not anchorPart then
+		anchorPart = clone:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+
+	-- 3. 精准架设摄像机
+	if anchorPart then
+		if isDebug then print("✅ 成功锁定定位 Part:", anchorPart.Name, "坐标:", anchorPart.Position) end
+		
+		-- 直接拿你的定位 Part 的大小和位置来对焦
+		local cf = anchorPart.CFrame
+		local size = anchorPart.Size
+		local maxDim = math.max(size.X, size.Y, size.Z)
+		if maxDim < 0.1 then maxDim = 5 end
+
+		-- ==========================================
+		-- 🛠️ 调整大小的开关在这里 🛠️
+		local ZOOM_MULTIPLIER = 1.8  -- 数值越大，相机离定位块越远（怪物显得越小）
+		local HEIGHT_OFFSET = 0.5    -- 数值越大，相机抬得越高
+		-- ==========================================
+
+		-- 使用斜角上帝视角看着你的定位 Part
+		local offset = Vector3.new(maxDim * ZOOM_MULTIPLIER, maxDim * HEIGHT_OFFSET, maxDim * ZOOM_MULTIPLIER)
+		camera.CFrame = CFrame.new(cf.Position + offset, cf.Position)
+	else
+		warn("⚠️ [渲染失败] 在", clone.Name, "里面完全找不到定位 Part，请检查！")
+	end
+end
+
+-- =====================================================================
+-- 业务逻辑绑定
+-- =====================================================================
+
 task.spawn(function()
-    local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
-    if monsterFolder then
-        for _, vpf in ipairs(vpfList) do
-            -- 默认显示 1 级或随机低级怪物
-            local randomLevel = math.random(1, 5)
-            local template = monsterFolder:FindFirstChild("怪物形象" .. randomLevel) or monsterFolder:FindFirstChild("Lv" .. randomLevel)
-            if template then
-                setupViewport(vpf, template)
-            end
-        end
-    end
+	print("🚀 --- 游戏开局初始化开始，2秒后加载初始怪物展示 ---")
+	task.wait(3)
+	refreshGachaPreview(true)
 end)
 
--- [修改原因] 需求2：点击关闭按钮隐藏界面
+
 btnClose.MouseButton1Click:Connect(function()
     frameGacha.Visible = false
 end)
 
 local PRODUCT_ID_10_PULL = 3580035858
+local PRODUCT_ID_5_PULL = 3580661228
 local isFastMode = false
 local isAnimating = false
-
--- [修改原因] 获取“快速开”UI节点，并默认隐藏
 local fastOpenIndicator = btnFast:WaitForChild("快速开")
 fastOpenIndicator.Visible = false
 
--- 快速抽奖反馈
 btnFast.MouseButton1Click:Connect(function()
 	isFastMode = not isFastMode
-	-- [修改原因] 控制快速开节点的显示与隐藏
 	fastOpenIndicator.Visible = isFastMode
-	
-	-- [修改原因] 将客户端的快速模式状态同步给服务端，以便服务端计算发奖延迟
 	requestEvent:FireServer("ToggleFastMode", isFastMode)
 end)
 
--- 发起抽奖
 btnGold.MouseButton1Click:Connect(function()
 	if isAnimating then return end
-	-- [修改原因] 立即强制上锁！防止玩家狂点导致给服务端发多次请求，造成背包结果和UI脱节
-	isAnimating = true 
+	print("🔘 点击单抽按钮，发送请求给服务端...")
 	requestEvent:FireServer("Gold1")
-	
-	-- 安全锁：如果服务端因为金币不足没能返回抽奖结果，2秒后自动解锁，防止按钮永远卡死
-	task.delay(2, function() isAnimating = false end)
 end)
+
 
 btnRbx.MouseButton1Click:Connect(function()
 	if isAnimating then return end
-	isAnimating = true
 	MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_10_PULL)
-	task.delay(3, function() isAnimating = false end)
 end)
 
--- 3D 模型渲染辅助函数 (终极万能版)
-local function setupViewport(vpf: Instance, modelTemplate: Instance?)
-	if not vpf:IsA("ViewportFrame") then return end
-	
-	-- 每次渲染前清空上一次的残影
-	vpf:ClearAllChildren()
-	if not modelTemplate then return end
+btnRbx5.MouseButton1Click:Connect(function()
+	if isAnimating then return end
+	MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_5_PULL)
+end)
 
-	local clone = modelTemplate:Clone()
 
-	-- ==========================================
-	-- [万能修复核心] 无论你提供的是什么奇葩格式，强行包成合规的 Model！
-	-- ==========================================
-	local wrapperModel = Instance.new("Model")
-	wrapperModel.Name = "PureVisualModel"
-	
-	if clone:IsA("Model") or clone:IsA("BasePart") then
-		-- 如果本来就是模型或零件，直接装进去
-		clone.Parent = wrapperModel
-	elseif clone:IsA("Tool") or clone:IsA("Folder") then
-		-- 如果是 Tool 或 文件夹，强行剥掉外壳，把里面的肉（零件）全部掏出来装进去
-		for _, child in ipairs(clone:GetChildren()) do
-			child.Parent = wrapperModel
-		end
-		clone:Destroy()
-	else
-		clone.Parent = wrapperModel
-	end
-	
-	wrapperModel.Parent = vpf
 
-	-- 架设摄像机
-	local camera = Instance.new("Camera")
-	vpf.CurrentCamera = camera
-	camera.Parent = vpf
-
-	-- 自动抓取所有零件，计算最完美的中心点和大小（彻底告别找不到 PrimaryPart 的问题）
-	local cf, size = wrapperModel:GetBoundingBox()
-	
-	-- 防呆机制：如果计算出的大小是 0（比如里面是个空壳）
-	if size == Vector3.new(0, 0, 0) then
-		local firstPart = wrapperModel:FindFirstChildWhichIsA("BasePart", true)
-		if firstPart then
-			cf = firstPart.CFrame
-			size = firstPart.Size
-		else
-			warn("⚠️ 致命报错：你放在 Monster image 里的【" .. modelTemplate.Name .. "】是空的！里面没有任何 3D 实体零件！")
-			return
-		end
-	end
-
-	-- 精准对焦
-	local maxDim = math.max(size.X, size.Y, size.Z)
-	if maxDim < 0.1 then maxDim = 5 end
-	
-	-- ==========================================
-	-- 🛠️ 依然可以在这里调整拍出来的大小 🛠️
-	local ZOOM_MULTIPLIER = 1.2  -- 改小变大，改大变小
-	local HEIGHT_OFFSET = 0.2    -- 调整高低
-	-- ==========================================
-
-	local lookDir = cf.LookVector
-	if lookDir.Magnitude < 0.01 then lookDir = Vector3.new(0, 0, -1) end 
-	
-	camera.CFrame = CFrame.new(cf.Position + (lookDir * (maxDim * ZOOM_MULTIPLIER)) + Vector3.new(0, maxDim * HEIGHT_OFFSET, 0), cf.Position)
-end
-
--- 监听抽奖结果并执行老虎机滚动动画
--- [修改原因] 新增 serverDuration 参数，确保客户端动画时间与服务端发奖时间完美对齐
+-- 抽奖结果监听
 resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	if isAnimating then return end
 	isAnimating = true
+	print("🎯 收到服务端发来的抽奖结果！结果数量:", #results, " 动画延迟时长:", serverDuration)
 
 	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
-	
-	-- [修改原因] 优先使用服务端下发的时间，普通1秒，快速0.3秒
-	local duration = serverDuration or (isFastMode and 0.3 or 1.0)
-	local startTime = os.clock()
-	local frameCounter = 0
+	if not monsterFolder then
+		warn("❌ 找不到怪物展示文件夹")
+		isAnimating = false
+		return
+	end
 
-	local connection
-	connection = RunService.RenderStepped:Connect(function()
-		local elapsed = os.clock() - startTime
-		frameCounter += 1
+	local perDrawDuration = 0.3
 
-		if elapsed >= duration then
-			connection:Disconnect()
-			-- [修改原因] 动画结束，精确展示真实抽中的怪物，并彻底清理多余的假动画残留
-			for i, vpf in ipairs(vpfList) do
-				local resLevel = results[i] 
-				if resLevel then
-					local template = monsterFolder and (monsterFolder:FindFirstChild("怪物形象" .. resLevel) or monsterFolder:FindFirstChild("Lv" .. resLevel) or monsterFolder:FindFirstChild("怪物形象 " .. resLevel))
-					
+	for drawIndex, resLevel in ipairs(results) do
+		local startTime = os.clock()
+		local frameCounter = 0
+		local finished = false
+
+		local connection
+		connection = RunService.RenderStepped:Connect(function()
+			local elapsed = os.clock() - startTime
+			frameCounter += 1
+
+			if elapsed >= perDrawDuration then
+				connection:Disconnect()
+				finished = true
+
+				print("🛑 第", drawIndex, "次抽奖动画结束，显示最终结果:", resLevel)
+
+				for _, vpf in ipairs(vpfList) do
+					local template = findMonsterTemplate(monsterFolder, resLevel)
 					if template then
-						-- 完美匹配，显示玩家真正获得的模型
-						setupViewport(vpf, template)
-					else
-						-- [核心修复] 如果因为你还没建好这个模型导致找不到，宁可让框清空，也绝不能留着上一个闪烁的假怪物骗人！
-						warn("⚠️ 报错：抽中了【" .. resLevel .. "】级怪物，但文件夹里没有模型！已清空显示以防误导。")
-						vpf:ClearAllChildren() 
+						setupViewport(vpf, template, true)
 					end
-				else
-					-- [核心修复] 如果是单抽，只有 results[1] 有值。02 到 05 号框必须强行清空！
-					-- 否则它们会一直显示着老虎机转动时的假怪物，让玩家以为那是结果。
-					vpf:ClearAllChildren()
+				end
+				return
+			end
+
+			if frameCounter % 4 == 0 then
+				for _, vpf in ipairs(vpfList) do
+					local randomLevel = math.random(1, 30)
+					local template = findMonsterTemplate(monsterFolder, randomLevel)
+					if template then
+						setupViewport(vpf, template, false)
+					end
 				end
 			end
-			
-			task.wait(0.1)
-			-- 解锁交给下一次抽奖
-			isAnimating = false
-			return
-		end
+		end)
 
-		-- 每 4 帧更换一次模型随机闪烁
-		if frameCounter % 4 == 0 then
-			for i, vpf in ipairs(vpfList) do
-				local randomLevel = math.random(1, 30)
-				local template = monsterFolder and (monsterFolder:FindFirstChild("怪物形象" .. randomLevel) or monsterFolder:FindFirstChild("Lv" .. randomLevel) or monsterFolder:FindFirstChild("怪物形象 " .. randomLevel))
-				setupViewport(vpf, template)
-			end
-		end
-	end)
+		repeat task.wait() until finished
+		task.wait(0.05)
+	end
+
+	isAnimating = false
 end)
