@@ -330,7 +330,7 @@ function PlayerData.ResetData(player: Player)
 	local stats = data[player.UserId]
 	if not stats then return end
 	
-	stats.Gold = 0
+	stats.Gold = 1000000000000
 	stats.SpeedLevel = 0
 	stats.AttackLevel = 0
 	stats.HealthLevel = 0
