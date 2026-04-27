@@ -22,7 +22,7 @@ local WeaponToolService = {}
 -- [修改内容] 移除对静态 Config 表的多余 type() 类型校验，改为利用短路求值实现极简获取
 local function getWeaponName(level: number): string
 	local name = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[level]
-	return (name ~= nil and name ~= "") and name or string.format("武器%d", level)
+	return (name ~= nil and name ~= "") and name or string.format("Weapon %d", level)
 end
 
 local function getWeaponImageId(level: number): string?

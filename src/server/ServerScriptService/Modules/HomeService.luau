@@ -179,7 +179,7 @@ end
 
 local function formatUpgradeCostText(cost: number?): string
 	if cost == nil then
-		return "已满级"
+		return "Max Level"
 	end
 	-- 你要求 UI 用 1w/5w
 	if cost == 200000 then
@@ -284,8 +284,8 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 
 		prompt = Instance.new("ProximityPrompt")
 		prompt.Name = "HomeUpgradePrompt"
-		prompt.ActionText = "升级家园"
-		prompt.ObjectText = "家园"
+		prompt.ActionText = "Upgrade Home"
+		prompt.ObjectText = "Home"
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.HoldDuration = 0.5
 		prompt.RequiresLineOfSight = false
@@ -302,13 +302,13 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 			local curLevel = PlayerData.GetHomeLevel(triggerPlayer)
 			local cost = getNextHomeUpgradeCost(curLevel)
 			if cost == nil then
-				toast(triggerPlayer, "家园已满级")
+				toast(triggerPlayer, "Home is already maxed")
 				updateUpgradeGui(upgradeArea, curLevel)
 				return
 			end
 			--【【
 			if not PlayerData.TrySpendGold(triggerPlayer, cost) then
-				toast(triggerPlayer, string.format("金币不足，需要 %s", formatUpgradeCostText(cost)))
+				toast(triggerPlayer, string.format("Not enough gold. Need %s", formatUpgradeCostText(cost)))
 				return
 			end
 
@@ -332,7 +332,7 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 
 			DataDirtyService.MarkDirty(triggerPlayer, 5)
 
-			toast(triggerPlayer, string.format("升级成功：家园等级 %d", newLevel))
+			toast(triggerPlayer, string.format("Upgrade successful: Home Level %d", newLevel))
 		end)
 	end
 

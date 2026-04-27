@@ -329,7 +329,7 @@ local function updateMonsterText(monsterPart: BasePart)
 	local gps = monsterPart:GetAttribute("GoldPerSec") or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
 
-	local remainText = string.format("剩余: %ds", remain)
+	local remainText = string.format("Left: %ds", remain)
 
 	-- 1. 更新【等级+血量】节点
 	local statsLabel = bb:FindFirstChild("等级+血量")
@@ -347,7 +347,7 @@ local function updateMonsterText(monsterPart: BasePart)
 	local valueLabel = bb:FindFirstChild("价值+每秒+x金币")
 	if valueLabel and valueLabel:IsA("TextLabel") then
 		if dead then
-			valueLabel.Text = "已死亡(可收起)"
+			valueLabel.Text = "Dead (Collectible)"--已死亡(可收起)
 			valueLabel.Visible = true
 		else
 			if dist > detailDist then
@@ -356,7 +356,7 @@ local function updateMonsterText(monsterPart: BasePart)
 			else
 				-- 靠近时显示
 				valueLabel.Visible = true
-				valueLabel.Text = string.format("价值:%s  +%s/s", formatNumberShort(value), formatNumberShort(gps))
+				valueLabel.Text = string.format("Value:%s  +%s/s", formatNumberShort(value), formatNumberShort(gps))
 			end
 		end
 	end
@@ -524,7 +524,7 @@ local function createWindow(titleText: string): Frame
 	close.TextColor3 = Color3.fromRGB(255, 255, 255)
 	close.Font = Enum.Font.GothamBold
 	close.TextScaled = true
-	close.Text = "关闭"
+	close.Text = "Close"
 	close.Parent = frame
 	close.Activated:Connect(function() frame.Visible = false end)
 
@@ -557,7 +557,7 @@ end
 
 
 -- =====================
--- Home 头像显示：离开出生点 20 单位后显示，回到范围内隐藏
+-- Home 头像显示：一直显示
 -- 仅本地创建，因此只有玩家自己可见
 -- 模板来源：Workspace.区域.HOME头像name.part.BillboardGui
 -- =====================
@@ -679,7 +679,7 @@ local function ensureHeadGui(spawnPoint: BasePart): BillboardGui?
 	clonedGui.Name = HEAD_CLONE_GUI_NAME
 	clonedGui.Adornee = spawnPoint
 	clonedGui.Parent = spawnPoint
-	clonedGui.Enabled = false
+	clonedGui.Enabled = true
 
 	local imageLabel = clonedGui:FindFirstChild("ImageLabel", true)
 	if imageLabel and imageLabel:IsA("ImageLabel") then
@@ -747,12 +747,12 @@ RunService.Heartbeat:Connect(function()
 		refreshHeadHomeReferences()
 	end
 
-	if currentHeadGui and currentHeadSpawnPoint and currentHeadHumanoidRootPart then
-		local distance = (currentHeadHumanoidRootPart.Position - currentHeadSpawnPoint.Position).Magnitude
-		setHeadGuiVisible(distance > HEAD_DISPLAY_DISTANCE)
+	if currentHeadGui and currentHeadSpawnPoint then
+		setHeadGuiVisible(true)
 	else
 		setHeadGuiVisible(false)
 	end
+
 end)
 
 

@@ -206,25 +206,25 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 	local valueLabel = bb:FindFirstChild("价值+每秒+x")
 	if valueLabel and (valueLabel:IsA("TextLabel") or valueLabel:IsA("TextBox")) then
 		if dead then
-			valueLabel.Text = "已死亡(可收起)"
+			valueLabel.Text = "Dead (Collectible)"
 		else
-			valueLabel.Text = string.format("价值:%d  +%d/s", value, gps)
+			valueLabel.Text = string.format("Value:%d  +%d/s", value, gps)
 		end
 	end
 
 	-- [修改内容] 更新“剩余”部分
 	local timeLabel = bb:FindFirstChild("剩余时间")
 	if timeLabel and (timeLabel:IsA("TextLabel") or timeLabel:IsA("TextBox")) then
-		timeLabel.Text = string.format("剩余: %ds", timeLeft)
+		timeLabel.Text = string.format("Remaining: %ds", timeLeft)
 	end
 
 	-- [修改内容] 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示
 	local oldLabel = bb:FindFirstChild("Label")
 	if oldLabel and oldLabel:IsA("TextLabel") then
 		if dead then
-			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n已死亡(可收起)", level, hp, maxHp)
+			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\nDead (Collectible)", level, hp, maxHp)
 		else
-			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n价值:%d  +%d/s", level, hp, maxHp, value, gps)
+			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\nValue:%d  +%d/s", level, hp, maxHp, value, gps)
 		end
 	end
 end
@@ -254,8 +254,8 @@ local function ensureCollectPrompt(monsterPart: BasePart)
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "CollectPrompt"
-	prompt.ActionText = "收起"
-	prompt.ObjectText = "怪尸体"
+	prompt.ActionText = "Collect"
+	prompt.ObjectText = "Monster Corpse"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.HoldDuration = 1
 	prompt.MaxActivationDistance = 10
@@ -308,6 +308,10 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	local gps = monsterPart:GetAttribute("GoldPerSec")
 	-- 【新增】读取强化等级
 	local upLevel = monsterPart:GetAttribute("UpgradeLevel") or 1 
+	local sourceZoneLevel = monsterPart:GetAttribute("SourceZoneLevel")
+	if type(sourceZoneLevel) ~= "number" then
+		sourceZoneLevel = monsterPart:GetAttribute("ZoneLevel")
+	end
 
 	-- 【新增】在调用 PickupCarryMonster 时，把 upLevel 传进去
 	local ok = InventoryService.PickupCarryMonster(
@@ -315,7 +319,8 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 		type(level) == "number" and level or 1,
 		type(value) == "number" and value or 0,
 		type(gps) == "number" and gps or 0,
-		upLevel 
+		type(upLevel) == "number" and upLevel or 1,
+		type(sourceZoneLevel) == "number" and sourceZoneLevel or 1
 	)
 
 	if ok then

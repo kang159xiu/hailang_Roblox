@@ -187,7 +187,7 @@ clearDataRemote.OnServerEvent:Connect(function(player: Player)
 	DataDirtyService.MarkDirty(player)
 	
 	-- 5. 必须踢出玩家！只有踢出才能阻断旧金币增加，并瞬间将空数据写入云端
-	player:Kick("\n数据已成功清空！\n请重新进入游戏，开始新旅程。")
+	player:Kick("\nData cleared successfully!\nPlease rejoin and start a new journey.")
 end)
 
 -- 普通攻击：客户端请求对某个怪造成一次伤害

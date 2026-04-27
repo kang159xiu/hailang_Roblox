@@ -143,34 +143,43 @@ end
 -- [修改内容] 增加辅助函数：获取玩家当前举起的怪物最高等级
 -- 遍历玩家角色身上的部件，判断是否携带了怪物，如果没携带返回 0
 
-local function getPlayerCarriedMaxLevel(player: Player): number
-	local maxLevel = 0
+local function getPlayerCarriedSourceZoneLevel(player: Player): number
+	local maxSourceZoneLevel = 0
 	local char = player.Character
-	if char then
-		for _, child in ipairs(char:GetChildren()) do
-			-- 判断是否是怪物模型（名字带“怪物”或“Monster”，或者有Attribute）
-			if child:GetAttribute("FromGacha") == true then
-				continue
+	if not char then
+		return 0
+	end
+
+	local function tryReadSourceZoneLevel(inst: Instance)
+		if inst:GetAttribute("FromGacha") == true then
+			return
+		end
+
+		if inst:GetAttribute("IsMonster") or inst:GetAttribute("MonsterLevel") or string.find(inst.Name, "怪物") or string.find(inst.Name, "Monster") then
+			local sourceZoneLevel = inst:GetAttribute("SourceZoneLevel")
+			if type(sourceZoneLevel) ~= "number" then
+				sourceZoneLevel = inst:GetAttribute("ZoneLevel")
 			end
-
-			if child:GetAttribute("IsMonster") or child:GetAttribute("MonsterLevel") or string.find(child.Name, "怪物") or string.find(child.Name, "Monster") then
-				local lv = child:GetAttribute("MonsterLevel")
-				
-				-- 如果模型身上没有挂载 Attribute，就尝试从名字(如"怪物形象5")中提取数字
-				if type(lv) ~= "number" then
-					local numStr = string.match(child.Name, "%d+")
-					lv = numStr and tonumber(numStr) or 1
-				end
-
-				if lv > maxLevel then
-					maxLevel = lv
-				end
+			if type(sourceZoneLevel) == "number" and sourceZoneLevel > maxSourceZoneLevel then
+				maxSourceZoneLevel = sourceZoneLevel
 			end
-
 		end
 	end
-	return maxLevel
+
+	for _, child in ipairs(char:GetChildren()) do
+		tryReadSourceZoneLevel(child)
+	end
+
+	local carriedFolder = char:FindFirstChild("CarriedMonsters")
+	if carriedFolder then
+		for _, child in ipairs(carriedFolder:GetChildren()) do
+			tryReadSourceZoneLevel(child)
+		end
+	end
+
+	return maxSourceZoneLevel
 end
+
 -- =======================================================
 -- =======================================================
 -- [修改内容] 新增辅助函数：向下打射线检测玩家脚底是否踩着安全区
@@ -365,21 +374,21 @@ local function onHeartbeat(dt: number)
 			local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 			if hrp and isPlayerInZone(hrp, g.ZonePart) then
 				
-				local carriedLevel = getPlayerCarriedMaxLevel(player)
+				local carriedSourceZoneLevel = getPlayerCarriedSourceZoneLevel(player)
 				local isSafe = isPlayerOnSafeGround(char)
 				
 				if not isSafe then
-					-- 核心跨区追踪逻辑
-					if carriedLevel > 0 and g.ZoneLevel <= carriedLevel then
+					-- 只在“当前区域等级 <= 怪物来源区域等级”时追击
+					if carriedSourceZoneLevel > 0 and g.ZoneLevel <= carriedSourceZoneLevel then
 						if g.State == "Idle" or g.State == "Return" then
 							g.TargetPlayer = player
-							-- [修改内容] 标记模型正在追击该玩家，以便客户端识别
 							g.Model:SetAttribute("TargetPlayerName", player.Name)
 							g.State = "Track"
 							g.LastPathTime = 0
 							playAnim(g, "Track")
 						end
 					end
+
 
 					-- 计算距离锁定目标
 					local d = (hrp.Position - g.RootPart.Position).Magnitude
@@ -414,7 +423,7 @@ local function onHeartbeat(dt: number)
 			local targetHrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart") :: BasePart?
 			local isSafe = targetChar and isPlayerOnSafeGround(targetChar)
 
-			if not targetHrp or getPlayerCarriedMaxLevel(g.TargetPlayer) == 0 or isSafe then
+			if not targetHrp or getPlayerCarriedSourceZoneLevel(g.TargetPlayer) == 0 or isSafe then
 				g.TargetPlayer = nil
 				-- [修改内容] 玩家逃脱，清除追击标记
 				g.Model:SetAttribute("TargetPlayerName", "")

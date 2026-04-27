@@ -30,7 +30,10 @@ type CarriedMonster = {
 	MonsterLevel: number,
 	Value: number,
 	GoldPerSec: number,
+	UpgradeLevel: number,
+	SourceZoneLevel: number,
 }
+
 
 
 local MAX_SLOTS = math.huge -- 不再限制怪物背包容量；仅保留常量占位，避免其他旧代码报错
@@ -316,9 +319,9 @@ end
 local function createMonsterToolFromData(monsterLevel: number, value: number, goldPerSec: number, itemId: string): Tool
 	local baked = getBakedToolTemplate(monsterLevel)
 	local tool = if baked then baked:Clone() else Instance.new("Tool")
-	tool.Name = string.format("怪Lv%d", monsterLevel)
+	tool.Name = string.format("Monster Lv.%d", monsterLevel)
 	tool.CanBeDropped = false
-	tool.ToolTip = string.format("价值:%d  +%d/s", value, goldPerSec)
+	tool.ToolTip = string.format("Value:%d  +%d/s", value, goldPerSec)
 
 	ensureHandle(tool)
 
@@ -431,8 +434,6 @@ local function rebuildCarriedVisual(player: Player)
 		end
 		inst.Parent = holder
 
-
-
 		local model, part = toModelLike(inst)
 		if model then
 			inst = model
@@ -440,8 +441,11 @@ local function rebuildCarriedVisual(player: Player)
 			inst = part
 		end
 
+		inst:SetAttribute("SourceZoneLevel", (c :: any).SourceZoneLevel or 1)
+
 		table.insert(built, inst)
 		table.insert(widths, math.max(1, getWidthX(inst)))
+
 	end
 
 	-- Centered arrangement on player's local X axis
@@ -537,7 +541,7 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 		end
 	end
 
-	pushToast(player, string.format("已收起并放入工具栏：%d 只", moved))
+	pushToast(player, string.format("Collected and moved to toolbar: %d", moved))
 	return moved
 end
 
@@ -631,31 +635,32 @@ function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number
 	DataDirtyService.MarkDirty(player)
 	syncToClient(player)
 
-	pushToast(player, string.format("已收起：怪Lv%d", monsterLevel))
+	pushToast(player, string.format("Collected: Monster Lv.%d", monsterLevel))
 	return true
 end
 
 
 -- 刷怪区域拾取：进入携带态（头顶显示），不进入背包 UI
-function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number)
+function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number, sourceZoneLevel: number)
 	local stats = PlayerData.Get(player)
 	local maxCarry = Config.GetCarryMax(stats.CarryLevel)
 
 	local list = ensureCarriedList(player)
 	if #list >= maxCarry then
-		pushToast(player, string.format("携带已满（%d/%d）", #list, maxCarry))
+		pushToast(player, string.format("Carry full (%d/%d)", #list, maxCarry))
 		return false
 	end
 
 	table.insert(list, {
-		MonsterLevel = level, -- 【修复】变量名纠正
+		MonsterLevel = level,
 		Value = value,
-		GoldPerSec = gps,     -- 【修复】变量名纠正
-		UpgradeLevel = upgradeLevel or 1, -- 【新增】继承强化等级
+		GoldPerSec = gps,
+		UpgradeLevel = upgradeLevel or 1,
+		SourceZoneLevel = math.max(1, math.floor(tonumber(sourceZoneLevel) or 1)),
 	})
 
 	rebuildCarriedVisual(player)
-	pushToast(player, string.format("已拾取：怪Lv%d（携带 %d/%d）", level, #list, maxCarry))
+	pushToast(player, string.format("Picked up: Monster Lv.%d (Carry %d/%d)", level, #list, maxCarry))
 	return true
 end
 
@@ -673,13 +678,15 @@ function InventoryService.DropAllCarried(player: Player): {CarriedMonster}
 			MonsterLevel = v.MonsterLevel,
 			Value = v.Value,
 			GoldPerSec = v.GoldPerSec,
-			UpgradeLevel = (v :: any).UpgradeLevel or 1, -- [修改内容] 确保掉落时继承强化等级，防止数值丢失
+			UpgradeLevel = (v :: any).UpgradeLevel or 1,
+			SourceZoneLevel = (v :: any).SourceZoneLevel or 1,
 		})
+
 	end
 
 	-- 清空玩家头顶的模型和数据
 	clearCarried(player)
-	pushToast(player, "你被守护者击飞，掉落了所有携带的怪物！")
+	pushToast(player, "You were knocked back by the Guardian and dropped all carried monsters!")
 	
 	return dropped
 end
@@ -836,9 +843,9 @@ function InventoryService.GiveGachaMonsterTool(player: Player, monsterLevel: num
 	if toolCount >= 10 then
 		local ok = InventoryService.TryAddMonsterItem(player, monsterLevel, value, gps)
 		if ok then
-			pushToast(player, string.format("工具栏已满，怪Lv%d 已放入背包", monsterLevel))
+			pushToast(player, string.format("Toolbar full, Monster Lv.%d moved to backpack", monsterLevel))
 		else
-			pushToast(player, string.format("工具栏已满，且背包也满了，怪Lv%d 无法领取", monsterLevel))
+			pushToast(player, string.format("Toolbar and backpack are full, Monster Lv.%d could not be claimed", monsterLevel))
 		end
 		return
 	end

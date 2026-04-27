@@ -183,7 +183,7 @@ local function onPlayerAdded(player: Player)
 		local key = getProfileKey(player.UserId)
 		local profile = profileStore:LoadProfileAsync(key, "ForceLoad")
 		if not profile then
-			player:Kick("数据加载失败，请重试")
+				player:Kick("Data load failed, please try again")
 			return
 		end
 
@@ -205,7 +205,7 @@ local function onPlayerAdded(player: Player)
 			end
 
 			if player.Parent then
-				player:Kick("数据在其它服务器被加载，请重进")
+				player:Kick("Data is loaded on another server. Please rejoin.")
 			end
 		end)
 

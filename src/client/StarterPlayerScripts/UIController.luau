@@ -235,10 +235,10 @@ local function refreshUpgradeShopUI()
 
 	-- 2. 定义升级类型
 	local upgradeTypes = {
-		{ name = "升级攻击", type = "Attack", getLv = "AttackLevel" },
-		{ name = "升级速度", type = "Speed", getLv = "SpeedLevel" },
-		{ name = "升级血量", type = "Health", getLv = "HealthLevel" },
-		{ name = "升级背包容量", type = "Carry", getLv = "CarryLevel" },
+		{ name = "Upgrade Attack", type = "Attack", getLv = "AttackLevel" },--升级攻击
+		{ name = "Upgrade Speed", type = "Speed", getLv = "SpeedLevel" },--升级速度
+		{ name = "Upgrade Health", type = "Health", getLv = "HealthLevel" },--升级血量
+		{ name = "Upgrade Carry Capacity", type = "Carry", getLv = "CarryLevel" },--升级背包容量
 	}
 
 	for _, info in ipairs(upgradeTypes) do
@@ -252,13 +252,13 @@ local function refreshUpgradeShopUI()
 
 		if info.type == "Attack" then
 			cost = Config.GetAttackUpgradeCost and Config.GetAttackUpgradeCost(nextLv) or 0
-			incrementText = string.format("+%d 攻击力", Config.ATTACK_UPGRADE_ADD or 10)
+			incrementText = string.format("+%d Attack", Config.ATTACK_UPGRADE_ADD or 10)--升级攻击力
 		elseif info.type == "Speed" then
 			cost = Config.GetSpeedUpgradeCost and Config.GetSpeedUpgradeCost(nextLv) or 0
-			incrementText = string.format("+%d 速度", Config.WALK_SPEED_PER_UPGRADE or 2)
+			incrementText = string.format("+%d Speed", Config.WALK_SPEED_PER_UPGRADE or 2)--升级速度
 		elseif info.type == "Health" then
 			cost = Config.GetHealthUpgradeCost and Config.GetHealthUpgradeCost(nextLv) or 0
-			incrementText = string.format("+%d 最大血量", Config.HEALTH_PER_UPGRADE or 100)
+			incrementText = string.format("+%d Max HP", Config.HEALTH_PER_UPGRADE or 100)--升级血量
 		elseif info.type == "Carry" then
 			local nextCost = Config.GetCarryUpgradeCost and Config.GetCarryUpgradeCost(nextLv)
 			if nextCost == nil then
@@ -267,7 +267,7 @@ local function refreshUpgradeShopUI()
 				cost = nextCost
 				local currentCarry = Config.GetCarryMax and Config.GetCarryMax(currentLv) or (currentLv + 1)
 				local nextCarry = Config.GetCarryMax and Config.GetCarryMax(nextLv) or (nextLv + 1)
-				incrementText = string.format("可携带: %d → %d", currentCarry, nextCarry)
+				incrementText = string.format("Carry: %d → %d", currentCarry, nextCarry)
 			end
 		end
 
@@ -288,9 +288,10 @@ local function refreshUpgradeShopUI()
 		local costInfoLabel = row:FindFirstChild("花费+增加数值")
 		if costInfoLabel and costInfoLabel:IsA("TextLabel") then
 			if isMaxed then
-				costInfoLabel.Text = "已满级"
+				costInfoLabel.Text = "Max Level" --已满级
+
 			else
-				costInfoLabel.Text = string.format("花费:%s   %s", formatNumberShort(cost), incrementText)
+				costInfoLabel.Text = string.format("Cost: %s   %s", formatNumberShort(cost), incrementText)
 			end
 		end
 
@@ -335,8 +336,8 @@ local function refreshMonsterInventoryUI(payload)
 		
 		local label = row:FindFirstChild("Label")
 		if label and label:IsA("TextLabel") then
-			label.Text = string.format("怪Lv%d  价值:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
-		end
+			label.Text = string.format("Monster Lv.%d  Value:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
+		end --怪Lv%d 价值
 		
 		-- [修改内容] 根据命名规则 "怪物形象01-30" 匹配加载
 		local imageContainer = row:FindFirstChild("ImageLabel")
@@ -376,7 +377,7 @@ local function refreshWeaponInventoryUI()
 		
 		local label = row:FindFirstChild("Label")
 		if label and label:IsA("TextLabel") then
-			label.Text = Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
+			label.Text = Config.WEAPON_NAME_BY_LEVEL[i] or ("Weapon " .. i)
 		end
 		
 		-- [修改内容] 根据命名规则 "武器01-20" 匹配加载
@@ -392,9 +393,9 @@ local function refreshWeaponInventoryUI()
 			local btnText = equipBtn:FindFirstChild("装备text")
 			if btnText and btnText:IsA("TextLabel") then
 				if i == equippedWeapon then
-					btnText.Text = "已装备"
+					btnText.Text = "Equipped" -- 已装备
 				else
-					btnText.Text = "装备武器"
+					btnText.Text = "Equip Weapon" -- 装备武器
 					equipBtn.Activated:Connect(function()
 						requestEquipWeapon:FireServer(i)
 					end)
@@ -632,8 +633,8 @@ local function refreshWeaponShopUI()
 
 		local infoLabel = row:FindFirstChild("武器价格/武器攻击力")
 		if infoLabel and infoLabel:IsA("TextLabel") then
-			infoLabel.Text = string.format("价格: %s   攻击力: +%s", formatNumberShort(price or 0), formatNumberShort(attack or 0))
-		end
+			infoLabel.Text = string.format("Price: %s   Attack: +%s", formatNumberShort(price or 0), formatNumberShort(attack or 0))
+		end--价格: %s 攻击力
 
 		local imageContainer = row:FindFirstChild("武器形象")
 		if imageContainer and weaponFolder then
@@ -649,11 +650,11 @@ local function refreshWeaponShopUI()
 		
 		if btn and btn:IsA("GuiButton") then
 			if i > maxWeaponLevel + 1 then
-				btn.Text = "未解锁"
+				btn.Text = "Locked"--未解锁
 				btn.Interactable = false  
 				btn.Active = false
 			elseif i == maxWeaponLevel + 1 then
-				btn.Text = "购买"
+				btn.Text = "Buy"
 				btn.Interactable = true
 				btn.Active = true
 				btn.Activated:Connect(function()
@@ -661,11 +662,11 @@ local function refreshWeaponShopUI()
 				end)
 			elseif i <= maxWeaponLevel then
 				if i == equippedWeapon then
-					btn.Text = "已装备"
+					btn.Text = "Equipped"--已装备
 					btn.Interactable = false
 					btn.Active = false
 				else
-					btn.Text = "装备"
+					btn.Text = "Equip"--装备
 					btn.Interactable = true
 					btn.Active = true
 					btn.Activated:Connect(function()

@@ -202,7 +202,7 @@ local function setIncomeDisplayText(gui: IncomeDisplayGui, monsterLevel: number?
 		end
 	end
 
-	local levelText = monsterLevel == nil and "未放置" or string.format("Lv.%d", monsterLevel)
+	local levelText = monsterLevel == nil and "Not Placed" or string.format("Lv.%d", monsterLevel)
 	local goldPerSecText = string.format("+%d/s", goldPerSec or 0)
 	local unclaimedText = tostring(unclaimed or 0)
 	local valueText = tostring(value or 0)
@@ -365,7 +365,7 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 
 	if not placed or placed.Parent == nil then
 		-- 未放置状态
-		if costLabel and costLabel:IsA("TextLabel") then costLabel.Text = "未放置" end
+		if costLabel and costLabel:IsA("TextLabel") then costLabel.Text = "Not Placed" end
 		if levelLabel and levelLabel:IsA("TextLabel") then levelLabel.Text = "" end
 		if unclaimedLabel and unclaimedLabel:IsA("TextLabel") then unclaimedLabel.Text = "0" end
 	else
@@ -825,7 +825,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
 	end
 
-	toast(player, string.format("卖出获得 %d 金币", val))
+	toast(player, string.format("Sold for %d Gold", val))
 	destroyPlacedMonster(placedPart)
 	return true
 end
@@ -878,7 +878,7 @@ local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedP
 		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
 	end
 
-	toast(player, "已收起到背包")
+	toast(player, "Collected to Backpack")
 	destroyPlacedMonster(placedPart)
 	return true
 end
@@ -899,13 +899,13 @@ local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, promp
 	end
 
 	if not canUseSlotByHomeLevel(player, idx) then
-		toast(player, "需要升级家园才能解锁该区域")
+		toast(player, "Upgrade your home to unlock this area")
 		updateUnlockPromptEnabled(player, slotPart)
 		return false
 	end
 
 	if not isPrevUnlocked(player, idx) then
-		toast(player, "请先解锁上一个放置区域")
+		toast(player, "Unlock the previous placement area first")
 		updateUnlockPromptEnabled(player, slotPart)
 		return false
 	end
@@ -918,7 +918,7 @@ local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, promp
 
 	local cost = getUnlockCost(idx)
 	if not PlayerData.TrySpendGold(player, cost) then
-		toast(player, string.format("金币不足，需要 %d", cost))
+		toast(player, string.format("Not enough gold. Need %d", cost))
 		return false
 	end
 
@@ -926,7 +926,7 @@ local function tryUnlockSlotFromPrompt(player: Player, slotPart: BasePart, promp
 	PlayerData.Sync(player)
 	DataDirtyService.MarkDirty(player, 5)
 	prompt.Enabled = false
-	toast(player, string.format("解锁成功：区域%d", idx))
+	toast(player, string.format("Unlocked: Area %d", idx))
 
 	updateUnlockPromptEnabled(player, slotPart)
 	local nextSlot = HomeService.GetSlotPart(player, idx + 1)
@@ -996,8 +996,8 @@ local function createPlacedMonsterPart(
 
 		local sell = Instance.new("ProximityPrompt")
 		sell.Name = "SellPrompt"
-		sell.ActionText = "卖出"
-		sell.ObjectText = "放置怪"
+		sell.ActionText = "Sell"
+		sell.ObjectText = "Placed Monster"
 		sell.KeyboardKeyCode = Enum.KeyCode.E
 		sell.HoldDuration = 0.2
 		sell.MaxActivationDistance = 10
@@ -1018,8 +1018,8 @@ local function createPlacedMonsterPart(
 
 		local store = Instance.new("ProximityPrompt")
 		store.Name = "StorePrompt"
-		store.ActionText = "收起"
-		store.ObjectText = "放置怪"
+		store.ActionText = "Collect"
+		store.ObjectText = "Placed Monster"
 		store.KeyboardKeyCode = Enum.KeyCode.R
 		store.HoldDuration = 0.6
 		store.MaxActivationDistance = 10
@@ -1175,8 +1175,8 @@ local function createPlacedMonsterPart(
 	-- 卖出 prompt
 	local sell = Instance.new("ProximityPrompt")
 	sell.Name = "SellPrompt"
-	sell.ActionText = "卖出"
-	sell.ObjectText = "放置怪"
+	sell.ActionText = "Sell"
+	sell.ObjectText = "Placed Monster"
 	sell.KeyboardKeyCode = Enum.KeyCode.E
 	sell.HoldDuration = 0.2
 	sell.MaxActivationDistance = 10
@@ -1199,8 +1199,8 @@ local function createPlacedMonsterPart(
 	-- 收起 prompt
 	local store = Instance.new("ProximityPrompt")
 	store.Name = "StorePrompt"
-	store.ActionText = "收起"
-	store.ObjectText = "放置怪"
+	store.ActionText = "Collect"
+	store.ObjectText = "Placed Monster"
 	store.KeyboardKeyCode = Enum.KeyCode.R
 	store.HoldDuration = 0.6
 	store.MaxActivationDistance = 10
@@ -1432,7 +1432,7 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	
 	equipped:Destroy()
 	DataDirtyService.MarkDirty(player, 5)
-	toast(player, string.format("已放置怪到区域%d", idx))
+	toast(player, string.format("Placed Monster in Area %d", idx))
 end
 	
 
@@ -1466,7 +1466,7 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 	end
 
 	addUnclaimedToPlayer(player, placed)
-	toast(player, string.format("领取金币 +%d", math.floor(un)))
+	toast(player, string.format("Collected Gold +%d", math.floor(un)))
 end
 
 -- forward declare（ensureUnlockPrompt 里会用到）
@@ -1481,7 +1481,7 @@ local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 
 	prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "UnlockPrompt"
-	prompt.ActionText = "解锁"
+	prompt.ActionText = "Unlock"
 	prompt.ObjectText = slotPart.Name
 	prompt.KeyboardKeyCode = Enum.KeyCode.F
 	prompt.HoldDuration = 0.4
@@ -1507,14 +1507,14 @@ local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 
 		-- 超出当前家园等级：禁止解锁
 		if not canUseSlotByHomeLevel(player, idx) then
-			toast(player, "需要升级家园才能解锁该区域")
+			toast(player, "Upgrade your home to unlock this area")
 			updateUnlockPromptEnabled(player, slotPart)
 			return
 		end
 
 		-- 必须按顺序解锁
 		if not isPrevUnlocked(player, idx) then
-			toast(player, "请先解锁上一个放置区域")
+			toast(player, "Unlock the previous placement area first")
 			updateUnlockPromptEnabled(player, slotPart)
 			return
 		end
@@ -1527,7 +1527,7 @@ local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 
 		local cost = getUnlockCost(idx)
 		if not PlayerData.TrySpendGold(player, cost) then
-			toast(player, string.format("金币不足，需要 %d", cost))
+			toast(player, string.format("Not enough gold. Need %d", cost))
 			return
 		end
 
@@ -1535,7 +1535,7 @@ local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
 		PlayerData.Sync(player)
 		DataDirtyService.MarkDirty(player, 5)
 		prompt.Enabled = false
-		toast(player, string.format("解锁成功：区域%d", idx))
+		toast(player, string.format("Unlocked: Area %d", idx))
 
 		-- 解锁后刷新本格与下一格（让下一格可立即解锁）
 		updateUnlockPromptEnabled(player, slotPart)
@@ -1573,7 +1573,7 @@ updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
 	-- 超出当前家园等级：不可解锁/不可交互
 	if not canUseSlotByHomeLevel(player, idx) then
 		prompt.Enabled = true
-		prompt.ActionText = "升级家园解锁"
+		prompt.ActionText = "Upgrade Home to Unlock"
 		return
 	end
 
@@ -1586,12 +1586,12 @@ updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
 	-- 必须按顺序解锁（需要上一个区域已解锁）
 	if not isPrevUnlocked(player, idx) then
 		prompt.Enabled = true
-		prompt.ActionText = "先解锁上一个"
+		prompt.ActionText = "Unlock Previous First"
 		return
 	end
 
 	prompt.Enabled = true
-	prompt.ActionText = string.format("解锁(%d)", getUnlockCost(idx))
+	prompt.ActionText = string.format("Unlock (%d)", getUnlockCost(idx))
 end
 
 
@@ -1706,7 +1706,7 @@ function PlacementService.Init()
 									
 									-- 诊断拦截
 									if not state or not state.PlacedMonster or not state.PlacedMonster.Parent then 
-										toast(player, "请先放置怪物再升级！")
+						toast(player, "Place a monster before upgrading!")
 										return 
 									end
 									
@@ -1725,10 +1725,10 @@ function PlacementService.Init()
 										
 										setPlacedMonsterHeadBillboardText(pm)
 										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, pm)
-										toast(player, "升级成功！")
+						toast(player, "Upgrade successful!")
 										DataDirtyService.MarkDirty(player)
 									else
-										toast(player, "金币不足！")
+						toast(player, "Not enough gold!")
 									end
 								end)
 							end

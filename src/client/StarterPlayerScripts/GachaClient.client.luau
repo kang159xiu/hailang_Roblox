@@ -30,8 +30,26 @@ local vpfList = {
 
 local findMonsterTemplate
 local setupViewport
+local hasGachaPreview
+local refreshGachaPreview
 
-local function hasGachaPreview()
+local touchDebounce = false
+local gachaTouchConnection: RBXScriptConnection? = nil
+
+local function openGachaUI()
+	frameGacha.Visible = true
+
+	local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+	if analyticsRemote then
+		analyticsRemote:FireServer("Funnel", "Gacha_UI_Opened")
+	end
+
+	if not hasGachaPreview() then
+		refreshGachaPreview(false)
+	end
+end
+
+hasGachaPreview = function()
 	for _, vpf in ipairs(vpfList) do
 		if #vpf:GetChildren() > 0 then
 			return true
@@ -40,7 +58,7 @@ local function hasGachaPreview()
 	return false
 end
 
-local function refreshGachaPreview(isDebug: boolean)
+refreshGachaPreview = function(isDebug: boolean)
 	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	if not monsterFolder then
 		warn("❌ [致命错误] 在 workspace 和 ReplicatedStorage 中都没找到装怪物的文件夹！请检查名字。")
@@ -64,14 +82,60 @@ end
 btnEntry.MouseButton1Click:Connect(function()
 	frameGacha.Visible = not frameGacha.Visible
 	if frameGacha.Visible then
-		-- [修改原因] 漏斗埋点：记录玩家打开了抽奖界面
-		local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
-		if analyticsRemote then
-			analyticsRemote:FireServer("Funnel", "Gacha_UI_Opened")
-		end
+		openGachaUI()
 	end
-	if frameGacha.Visible and not hasGachaPreview() then
-		refreshGachaPreview(false)
+end)
+
+local function bindGachaTouch(part: BasePart)
+	if gachaTouchConnection then
+		gachaTouchConnection:Disconnect()
+		gachaTouchConnection = nil
+	end
+
+	gachaTouchConnection = part.Touched:Connect(function(hit)
+		if touchDebounce then
+			return
+		end
+
+		local character = player.Character
+		if not character or not hit:IsDescendantOf(character) then
+			return
+		end
+
+		touchDebounce = true
+		openGachaUI()
+
+		task.delay(1, function()
+			touchDebounce = false
+		end)
+	end)
+end
+
+local function tryBindGachaTouchFromInstance(inst: Instance?)
+	if inst and inst:IsA("BasePart") then
+		bindGachaTouch(inst)
+		return true
+	end
+	return false
+end
+
+task.spawn(function()
+	local immediate = workspace:FindFirstChild("转盘抽奖")
+	if tryBindGachaTouchFromInstance(immediate) then
+		return
+	end
+
+	local waited = workspace:WaitForChild("转盘抽奖", 30)
+	if tryBindGachaTouchFromInstance(waited) then
+		return
+	end
+
+	warn("[GachaClient] 30 秒内未找到 Workspace.转盘抽奖，开始监听后续加载")
+end)
+
+workspace.ChildAdded:Connect(function(child)
+	if child.Name == "转盘抽奖" then
+		tryBindGachaTouchFromInstance(child)
 	end
 end)
 

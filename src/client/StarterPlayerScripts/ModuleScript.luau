@@ -68,7 +68,7 @@ local function refreshMonsterInventoryUI(payload)
 		row.Parent = monsterInventoryList
 		local label = row:FindFirstChild("Label")
 		if label and label:IsA("TextLabel") then
-			label.Text = string.format("怪Lv%d  价值:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
+			label.Text = string.format("Monster Lv.%d  Value:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
 		end
 		local takeOutBtn = row:FindFirstChild("拿出按钮")
 		if takeOutBtn and takeOutBtn:IsA("GuiButton") then

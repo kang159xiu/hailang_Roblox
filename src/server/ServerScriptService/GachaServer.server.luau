@@ -105,7 +105,7 @@ requestEvent.OnServerEvent:Connect(function(player, action, extraData)
 			performGacha(player, 1)
 		else
 			local toastEvent = remotes:FindFirstChild("PushClientToast")
-			if toastEvent then toastEvent:FireClient(player, "金币不足") end
+			if toastEvent then toastEvent:FireClient(player, "Not enough gold") end
 		end
 	end
 end)
