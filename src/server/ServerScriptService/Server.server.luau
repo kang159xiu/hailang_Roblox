@@ -47,6 +47,8 @@ ensureRemoteEvent(remotesFolder, "RequestPurchaseUpgrade")
 ensureRemoteEvent(remotesFolder, "OpenWeaponShopUI")
 ensureRemoteEvent(remotesFolder, "OpenUpgradeShopUI")
 ensureRemoteEvent(remotesFolder, "PushClientToast")
+-- [修改原因] 使用统一的 ensureRemoteEvent 函数自动注册客户端到服务端的埋点通讯通道
+ensureRemoteEvent(remotesFolder, "Analytics_Remote")
 
 -- 怪物背包（自定义 UI）同步与交互
 ensureRemoteEvent(remotesFolder, "SyncMonsterInventory")
@@ -231,17 +233,14 @@ end)
 
 print("[Game] Server initialized")
 
-
--- 将从 [文件末尾的空白行] 替换为以下内容： 漏斗事件
-
+-- [修改原因] 规范化引入 AnalyticsService，移除重复定义的 ReplicatedStorage，并直接引用上方已建好的 remotesFolder
 local AnalyticsService = game:GetService("AnalyticsService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local analyticsRemote = ReplicatedStorage:WaitForChild("Analytics_Remote")
+local analyticsRemote = remotesFolder:WaitForChild("Analytics_Remote") :: RemoteEvent
 
 -- 简单的防刷记录字典，防止作弊者狂发垃圾事件污染后台
 local rateLimitData = {} 
 
-analyticsRemote.OnServerEvent:Connect(function(player, eventCategory, eventName)
+analyticsRemote.OnServerEvent:Connect(function(player: Player, eventCategory: string, eventName: string)
     if eventCategory == "Funnel" then
         local lastTime = rateLimitData[player.UserId] or 0
         if os.clock() - lastTime > 0.5 then -- 防刷限制：0.5秒内只能触发一次
