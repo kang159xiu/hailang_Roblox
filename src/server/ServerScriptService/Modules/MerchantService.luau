@@ -197,6 +197,18 @@ function MerchantService.Init()
 			local nextLevel = stats.SpeedLevel + 1
 			local cost = Config.GetSpeedUpgradeCost(nextLevel)
 			if PlayerData.TrySpendGold(player, cost) then
+				-- [修改原因] 经济埋点：上报速度升级造成的金币消耗
+				local AnalyticsService = game:GetService("AnalyticsService")
+				AnalyticsService:LogEconomyEvent(
+					player,
+					Enum.AnalyticsEconomyAction.Spend,
+					"Gold",
+					cost,
+					PlayerData.Get(player).Gold,
+					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Upgrade_Speed"
+				)
+				
 				PlayerData.AddSpeedLevel(player, 1)
 				CharacterService.Refresh(player)
 				DataDirtyService.MarkDirty(player, 5)
@@ -208,6 +220,18 @@ function MerchantService.Init()
 			local nextLevel = stats.HealthLevel + 1
 			local cost = Config.GetHealthUpgradeCost(nextLevel)
 			if PlayerData.TrySpendGold(player, cost) then
+				-- [修改原因] 经济埋点：上报血量升级造成的金币消耗
+				local AnalyticsService = game:GetService("AnalyticsService")
+				AnalyticsService:LogEconomyEvent(
+					player,
+					Enum.AnalyticsEconomyAction.Spend,
+					"Gold",
+					cost,
+					PlayerData.Get(player).Gold,
+					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Upgrade_Health"
+				)
+				
 				PlayerData.AddHealthLevel(player, 1)
 				CharacterService.Refresh(player)
 				DataDirtyService.MarkDirty(player, 5)
@@ -223,6 +247,18 @@ function MerchantService.Init()
 				return
 			end
 			if PlayerData.TrySpendGold(player, cost) then
+				-- [修改原因] 经济埋点：上报背包携带数量升级造成的金币消耗
+				local AnalyticsService = game:GetService("AnalyticsService")
+				AnalyticsService:LogEconomyEvent(
+					player,
+					Enum.AnalyticsEconomyAction.Spend,
+					"Gold",
+					cost,
+					PlayerData.Get(player).Gold,
+					Enum.AnalyticsEconomyTransactionType.Gameplay,
+					"Upgrade_Carry"
+				)
+				
 				PlayerData.AddCarryLevel(player, 1)
 				DataDirtyService.MarkDirty(player, 5)
 				pushToast(player, string.format("携带数量升级成功！花费：%s", Util.FormatMoney(cost)))
