@@ -195,8 +195,8 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 	local anchorPart = nil
 
 	local preferredNames = {
-		clone.Name,
 		"RootPart",
+		clone.Name,
 		"HumanoidRootPart",
 		"Handle",
 		"PrimaryPart",
@@ -231,7 +231,7 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 
 		-- ==========================================
 		-- 🛠️ 调整大小的开关在这里 🛠️
-		local ZOOM_MULTIPLIER = 1.8  -- 数值越大，相机离定位块越远（怪物显得越小）
+		local ZOOM_MULTIPLIER = 7  -- 数值越大，相机离定位块越远（怪物显得越小）
 		local HEIGHT_OFFSET = 0.5    -- 数值越大，相机抬得越高
 		-- ==========================================
 

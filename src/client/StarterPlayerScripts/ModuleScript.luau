@@ -37,17 +37,30 @@ local upgradeWindow: Frame
 -- 辅助函数
 -- =====================
 local function formatNumberShort(n: number): string
-	local abs = math.abs(n)
-	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" }}
-	for _, u in ipairs(units) do
-		local base, suffix = u[1], u[2]
-		if abs >= base then
-			local v = n / base
-			local s = (math.abs(v) >= 100) and string.format("%.0f", v) or (math.abs(v) >= 10 and string.format("%.1f", v) or string.format("%.2f", v))
-			return s:gsub("%.?0+$", "") .. suffix
-		end
-	end
-	return tostring(math.floor(n))
+    if type(n) ~= "number" then return "0" end
+    local abs = math.abs(n)
+    if abs < 1000 then return tostring(math.floor(n)) end
+
+    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
+    local suffixIndex = math.floor(math.log10(abs) / 3)
+
+    if suffixIndex > #suffixes then
+        return string.format("%.2fe%d", n / (10 ^ (suffixIndex * 3)), suffixIndex * 3)
+    end
+
+    local base = 10 ^ (suffixIndex * 3)
+    local value = abs / base
+    
+    local formatted = (value >= 100) and string.format("%.0f", value) 
+                   or (value >= 10 and string.format("%.1f", value) 
+                   or string.format("%.2f", value))
+
+    if string.find(formatted, "%.") then
+        formatted = string.gsub(formatted, "0+$", "")
+        formatted = string.gsub(formatted, "%.$", "")
+    end
+
+    return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
 end
 
 local function showToast(text: string)

@@ -4,6 +4,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterPack = game:GetService("StarterPack")
+local Players = game:GetService("Players")
 
 -- =========
 -- Remotes（若你没提前在 Studio 放 RemoteEvent，这里会自动创建，避免脚本 WaitForChild 卡死）
@@ -117,6 +118,7 @@ local PlacementService = require(script.Parent:WaitForChild("Modules"):WaitForCh
 local MonsterService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MonsterService"))
 local LavaService = require(script.Parent:WaitForChild("Modules"):WaitForChild("LavaService"))
 local MerchantService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MerchantService"))
+local ZoneService = require(script.Parent:WaitForChild("Modules"):WaitForChild("ZoneService"))
 local WeaponToolService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponToolService"))
 local WeaponAppearanceService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponAppearanceService"))
 local WeaponService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponService"))
@@ -238,7 +240,97 @@ local AnalyticsService = game:GetService("AnalyticsService")
 local analyticsRemote = remotesFolder:WaitForChild("Analytics_Remote") :: RemoteEvent
 
 -- 简单的防刷记录字典，防止作弊者狂发垃圾事件污染后台
-local rateLimitData = {} 
+local rateLimitData = {}
+
+local function getCharacterRootPosition(player: Player): Vector3?
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp.Position
+	end
+	return nil
+end
+
+local function isPointInsidePart(part: BasePart, worldPosition: Vector3, padding: number?): boolean
+	local extra = padding or 0
+	local localPos = part.CFrame:PointToObjectSpace(worldPosition)
+	local half = part.Size * 0.5
+	return math.abs(localPos.X) <= (half.X + extra)
+		and math.abs(localPos.Y) <= (half.Y + extra)
+		and math.abs(localPos.Z) <= (half.Z + extra)
+end
+
+local function isPointInsideInstance(root: Instance, worldPosition: Vector3, padding: number?): boolean
+	if root:IsA("BasePart") then
+		return isPointInsidePart(root, worldPosition, padding)
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") and isPointInsidePart(descendant, worldPosition, padding) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function getPlayerExitZone(player: Player): string
+	local position = getCharacterRootPosition(player)
+	if not position then
+		return "Unknown"
+	end
+
+	for _, zone in ipairs(ZoneService.GetPickupZones()) do
+		if isPointInsidePart(zone.Part, position, 2) then
+			return "PickupZone"
+		end
+	end
+
+	local homeFolder = workspace:FindFirstChild("HOME")
+	if homeFolder and homeFolder:IsA("Folder") then
+		for _, homeRoot in ipairs(homeFolder:GetChildren()) do
+			if isPointInsideInstance(homeRoot, position, 2) then
+				return "HomeZone"
+			end
+		end
+	end
+
+	local merchant = ZoneService.GetMerchantPart()
+	if merchant and isPointInsidePart(merchant, position, 4) then
+		return "MerchantZone"
+	end
+
+	local weaponMerchant = ZoneService.GetWeaponMerchantPart()
+	if weaponMerchant and isPointInsidePart(weaponMerchant, position, 4) then
+		return "MerchantZone"
+	end
+
+	local gachaPart = workspace:FindFirstChild("转盘抽奖", true)
+	if gachaPart and gachaPart:IsA("BasePart") and isPointInsidePart(gachaPart, position, 4) then
+		return "GachaZone"
+	end
+
+	return "Unknown"
+end
+
+local function getExitTimeText(): string
+	return os.date("!%Y%m%dT%H%M%SZ")
+end
+
+local function logPlayerEnter(player: Player)
+	AnalyticsService:LogCustomEvent(player, "PlayerEnter")
+end
+
+local function logPlayerLeave(player: Player)
+	local zoneName = getPlayerExitZone(player)
+	local exitTime = getExitTimeText()
+	AnalyticsService:LogCustomEvent(player, string.format("PlayerLeave_%s_%s", zoneName, exitTime))
+	print(string.format("[Analytics] PlayerLeave player=%s userId=%d time=%s zone=%s", player.Name, player.UserId, exitTime, zoneName))
+	if rateLimitData[player.UserId] ~= nil then
+		rateLimitData[player.UserId] = nil
+	end
+	return zoneName, exitTime
+end
 
 analyticsRemote.OnServerEvent:Connect(function(player: Player, eventCategory: string, eventName: string)
     if eventCategory == "Funnel" then
@@ -249,4 +341,12 @@ analyticsRemote.OnServerEvent:Connect(function(player: Player, eventCategory: st
             AnalyticsService:LogCustomEvent(player, eventName)
         end
     end
+end)
+
+Players.PlayerAdded:Connect(function(player: Player)
+	logPlayerEnter(player)
+end)
+
+Players.PlayerRemoving:Connect(function(player: Player)
+	logPlayerLeave(player)
 end)

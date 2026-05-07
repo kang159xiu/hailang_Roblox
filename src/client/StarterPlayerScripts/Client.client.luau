@@ -4,7 +4,7 @@
 -- 1) HUD：左上角金币 + Toast
 -- 2) 怪头顶信息：距离显示（远处仅倒计时，近处显示详细），并显示存在时间倒计时
 -- 3) 商店 UI：武器商店（滚动列表）/升级商店（攻击/血量/速度）
-
+--
 
 --!strict
 local Players = game:GetService("Players")
@@ -296,31 +296,13 @@ local function updateMonsterText(monsterPart: BasePart)
 	end
 
 	-- 显示/隐藏的总距离控制
-	local showDist = 30
+	local showDist = 150
 	local detailDist = (Config.MONSTER_DETAIL_SHOW_DISTANCE or 6)
 
 	bb.Enabled = dist <= showDist
 	if not bb.Enabled then
 		return
 	end
-
-	-- ==========================================
-	-- 【核心修复：恢复并强化根据距离实时刷新的逻辑】
-	-- ==========================================
-	-- 1. 恢复原始的完整尺寸（不再除以 2！）你可以根据需要调大这两个数字
-	local baseW, baseH = 260, 90 
-	
-	-- 2. 计算距离比例 (t: 0代表完全贴脸，1代表达到最远可视距离)
-	local t = math.clamp(dist / showDist, 0, 1)
-	
-	-- 3. 调整缩放倍率！
-	local maxScale = 1.5  -- 贴脸时放大到 1.5 倍（之前是 1.2）
-	local minScale = 1  -- 离远时缩小到 0.8 倍（之前是 0.55，太小了）
-	
-	-- 4. 实时计算当前帧的最终比例，并强制刷新大小
-	local scale = maxScale + (minScale - maxScale) * t
-	bb.Size = UDim2.fromOffset(math.floor(baseW * scale), math.floor(baseH * scale))
-	-- ==========================================
 
 	local level = monsterPart:GetAttribute("MonsterLevel") or 1
 	local hp = monsterPart:GetAttribute("HP") or 0
@@ -329,12 +311,12 @@ local function updateMonsterText(monsterPart: BasePart)
 	local gps = monsterPart:GetAttribute("GoldPerSec") or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
 
-	local remainText = string.format("Left: %ds", remain)
+	local remainText = string.format("%ds", remain)
 
 	-- 1. 更新【等级+血量】节点
 	local statsLabel = bb:FindFirstChild("等级+血量")
 	if statsLabel and statsLabel:IsA("TextLabel") then
-		statsLabel.Text = string.format("Lv.%d  HP:%d/%d", level, hp, maxHp)
+		statsLabel.Text = string.format("[Lv. %d]  HP:%d/%d", level, hp, maxHp)
 	end
 
 	-- 2. 更新【剩余】节点
@@ -356,7 +338,7 @@ local function updateMonsterText(monsterPart: BasePart)
 			else
 				-- 靠近时显示
 				valueLabel.Visible = true
-				valueLabel.Text = string.format("Value:%s  +%s/s", formatNumberShort(value), formatNumberShort(gps))
+				valueLabel.Text = string.format("$%s/s", formatNumberShort(gps))
 			end
 		end
 	end
@@ -533,23 +515,34 @@ end
 
 -- [修改内容] 引入必要的数值格式化工具
 local function formatNumberShort(n: number): string
-	local abs = math.abs(n)
-	local units = {
-		{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" },
-		{ 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" },
-	}
+    if type(n) ~= "number" then return "0" end
+    local abs = math.abs(n)
+    if abs < 1000 then return tostring(math.floor(n)) end
 
-	for _, u in ipairs(units) do
-		local base = u[1] :: number
-		local suffix = u[2] :: string
-		if abs >= base then
-			local v = n / base
-			local s: string = string.format("%.1f", v)
-			s = s:gsub("%.?0+$", "")
-			return s .. suffix
-		end
-	end
-	return tostring(math.floor(n))
+    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
+    
+    local suffixIndex = 0
+    local value = abs
+    
+    while value >= 999.5 and suffixIndex < #suffixes do
+        value /= 1000
+        suffixIndex += 1
+    end
+
+    if value >= 1000 then
+        return string.format("%.2fe%d", value, suffixIndex * 3)
+    end
+    
+    local formatted = (value >= 100) and string.format("%.0f", value) 
+                   or (value >= 10 and string.format("%.1f", value) 
+                   or string.format("%.2f", value))
+
+    if string.find(formatted, "%.") then
+        formatted = string.gsub(formatted, "0+$", "")
+        formatted = string.gsub(formatted, "%.$", "")
+    end
+
+    return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
 end
 
 

@@ -17,7 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
-
+local Util = require(script.Parent:WaitForChild("Util"))
 local HomeService = {}
 local hiddenHousesCache: {[Instance]: {[number]: Instance}} = {}
 
@@ -178,16 +178,9 @@ local function setHomeOwner(homeRoot: Instance, ownerUserId: number?)
 end
 
 local function formatUpgradeCostText(cost: number?): string
-	if cost == nil then
-		return "Max Level"
-	end
-	-- 你要求 UI 用 1w/5w
-	if cost == 200000 then
-		return "20w"
-	elseif cost == 1000000 then
-		return "100w"
-	end
-	return tostring(cost)
+    if cost == nil then return "Max Level" end
+    -- 全面接管为欧美的 K, M, B, T...
+    return Util.FormatMoney(cost)
 end
 
 local function getNextHomeUpgradeCost(homeLevel: number): number?
@@ -200,14 +193,39 @@ local function getNextHomeUpgradeCost(homeLevel: number): number?
 end
 
 local function updateUpgradeGui(upgradeArea: Instance, homeLevel: number)
+	local cost = getNextHomeUpgradeCost(homeLevel)
+	
 	local priceValue = upgradeArea:FindFirstChild("03价格数值", true)
 	if priceValue and priceValue:IsA("TextLabel") then
-		priceValue.Text = formatUpgradeCostText(getNextHomeUpgradeCost(homeLevel))
+		priceValue.Text = formatUpgradeCostText(cost)
+		
+		-- 记录原始位置，方便没满级时恢复
+		if not priceValue:GetAttribute("OrigPosX") then
+			priceValue:SetAttribute("OrigPosX", priceValue.Position.X.Scale)
+			priceValue:SetAttribute("OrigOffset", priceValue.Position.X.Offset)
+		end
+		
+		local origScale = priceValue:GetAttribute("OrigPosX")
+		local origOffset = priceValue:GetAttribute("OrigOffset")
+		
+		if cost == nil then
+			-- 满级时，文字向左偏移（-40像素，你可以自己改这个数字微调）
+			priceValue.Position = UDim2.new(origScale, origOffset - 12, priceValue.Position.Y.Scale, priceValue.Position.Y.Offset)
+		else
+			-- 没满级时，恢复原始位置，给左侧箭头留空间
+			priceValue.Position = UDim2.new(origScale, origOffset, priceValue.Position.Y.Scale, priceValue.Position.Y.Offset)
+		end
 	end
 
 	local levelLabel = upgradeArea:FindFirstChild("05等级", true)
 	if levelLabel and levelLabel:IsA("TextLabel") then
 		levelLabel.Text = tostring(homeLevel)
+	end
+	
+	-- 根据是否还有下一级花费，来决定箭头是否显示
+	local arrow = upgradeArea:FindFirstChild("arrow", true)
+	if arrow and arrow:IsA("ImageLabel") then
+		arrow.Visible = (cost ~= nil)
 	end
 end
 

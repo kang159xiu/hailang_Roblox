@@ -171,7 +171,7 @@ local function buildBillboard(monsterPart: BasePart)
 
 	bb.AlwaysOnTop = true
 	bb.Enabled = true
-	bb.MaxDistance = 30
+	bb.MaxDistance = 150
 	-- [修改内容] 保持原有的高度偏移设置
 	--bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
 	bb.Parent = monsterPart
@@ -208,14 +208,14 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 		if dead then
 			valueLabel.Text = "Dead (Collectible)"
 		else
-			valueLabel.Text = string.format("Value:%d  +%d/s", value, gps)
+			valueLabel.Text = string.format("$%d/s", gps)
 		end
 	end
 
 	-- [修改内容] 更新“剩余”部分
 	local timeLabel = bb:FindFirstChild("剩余时间")
 	if timeLabel and (timeLabel:IsA("TextLabel") or timeLabel:IsA("TextBox")) then
-		timeLabel.Text = string.format("Remaining: %ds", timeLeft)
+		timeLabel.Text = string.format("%ds", timeLeft)
 	end
 
 	-- [修改内容] 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示
@@ -224,7 +224,7 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 		if dead then
 			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\nDead (Collectible)", level, hp, maxHp)
 		else
-			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\nValue:%d  +%d/s", level, hp, maxHp, value, gps)
+			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n$%d/s", level, hp, maxHp, gps)
 		end
 	end
 end

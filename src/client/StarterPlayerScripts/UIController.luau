@@ -33,6 +33,9 @@ local addGoldUI = mainGui:WaitForChild("GoldFrame"):WaitForChild("addGoldUI") ::
 local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") :: Frame
 local monsterInventoryList = monsterInventoryWindow:WaitForChild("List") :: ScrollingFrame
 local rowTemplate = monsterInventoryWindow:WaitForChild("RowTemplate") :: ImageButton
+-- 【新增】获取你刚做好的关闭按钮
+local inventoryCloseBtn = monsterInventoryWindow:WaitForChild("guanbibb", 5) :: GuiButton?
+
 
 -- [修改内容] 引用删除数据按钮
 local deleteBtn = mainGui:WaitForChild("delete") :: ImageButton
@@ -98,17 +101,37 @@ end
 -- 辅助函数
 -- =====================
 local function formatNumberShort(n: number): string
-	local abs = math.abs(n)
-	local units = {{ 1e18, "Qi" }, { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "k" }}
-	for _, u in ipairs(units) do
-		local base, suffix = u[1], u[2]
-		if abs >= base then
-			local v = n / base
-			local s = (math.abs(v) >= 100) and string.format("%.0f", v) or (math.abs(v) >= 10 and string.format("%.1f", v) or string.format("%.2f", v))
-			return s:gsub("%.?0+$", "") .. suffix
-		end
-	end
-	return tostring(math.floor(n))
+    if type(n) ~= "number" then return "0" end
+    local abs = math.abs(n)
+    if abs < 1000 then return tostring(math.floor(n)) end
+
+    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
+    
+    local suffixIndex = 0
+    local value = abs
+    
+    while value >= 999.5 and suffixIndex < #suffixes do
+        value /= 1000
+        suffixIndex += 1
+    end
+
+    if value >= 1000 then
+        return string.format("%.2fe%d", value, suffixIndex * 3)
+    end
+
+    local base = 10 ^ (suffixIndex * 3)
+    local value = abs / base
+    
+    local formatted = (value >= 100) and string.format("%.0f", value) 
+                   or (value >= 10 and string.format("%.1f", value) 
+                   or string.format("%.2f", value))
+
+    if string.find(formatted, "%.") then
+        formatted = string.gsub(formatted, "0+$", "")
+        formatted = string.gsub(formatted, "%.$", "")
+    end
+
+    return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
 end
 
 -- [新增内容] 提示消息显示的计数器，防止多个提示动画冲突
@@ -322,11 +345,9 @@ end
 -- =====================
 local function refreshMonsterInventoryUI(payload)
 	for _, ch in ipairs(monsterInventoryList:GetChildren()) do
-		-- [修改内容] 改为判断 UILayout，防止 UIGridLayout 等其他布局组件被误删
 		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
-	-- [修改内容] 精确定位到 Workspace 下的 "Monster image" 文件夹
 	local monsterFolder = workspace:FindFirstChild("Monster image")
 
 	for i, it in ipairs(payload or {}) do
@@ -337,9 +358,8 @@ local function refreshMonsterInventoryUI(payload)
 		local label = row:FindFirstChild("Label")
 		if label and label:IsA("TextLabel") then
 			label.Text = string.format("Monster Lv.%d  Value:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
-		end --怪Lv%d 价值
+		end 
 		
-		-- [修改内容] 根据命名规则 "怪物形象01-30" 匹配加载
 		local imageContainer = row:FindFirstChild("ImageLabel")
 		if imageContainer and monsterFolder then
 			local iconName = string.format("怪物形象%02d", it.MonsterLevel)
@@ -705,13 +725,26 @@ function UIController.Init()
 	if rowTemplate then rowTemplate.Visible = false end
 	if weaponTemplate then weaponTemplate.Visible = false end
 
+	-- 1. 怪物列表滚动修复
 	if monsterInventoryList then
-		monsterInventoryList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-		monsterInventoryList.CanvasSize = UDim2.new(0, 0, 0, 0)
+		monsterInventoryList.AutomaticCanvasSize = Enum.AutomaticSize.None
+		local layout = monsterInventoryList:FindFirstChildWhichIsA("UIListLayout")
+		if layout then
+			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+				monsterInventoryList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+			end)
+		end
 	end
+
+	-- 2. 武器列表滚动修复
 	if weaponList then
-		weaponList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-		weaponList.CanvasSize = UDim2.new(0, 0, 0, 0)
+		weaponList.AutomaticCanvasSize = Enum.AutomaticSize.None
+		local layout = weaponList:FindFirstChildWhichIsA("UIListLayout")
+		if layout then
+			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+				weaponList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+			end)
+		end
 	end
 
 	-- 1. 金币同步与飞行动效触发 (纯净版)
@@ -749,6 +782,13 @@ function UIController.Init()
 			if newState then switchInventoryTab("monster") end
 		end)
 	end
+-- 【新增】红叉关闭按钮的逻辑
+    if inventoryCloseBtn then
+        inventoryCloseBtn.Activated:Connect(function()
+            -- 点击红叉时，直接隐藏背包面板
+            monsterInventoryWindow.Visible = false
+        end)
+    end
 
 	if monsterTabBtn then monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end) end
 	if weaponTabBtn then weaponTabBtn.Activated:Connect(function() switchInventoryTab("weapon") end) end

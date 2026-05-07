@@ -69,31 +69,39 @@ function Util.clamp(n: number, a: number, b: number): number
 	return math.max(a, math.min(b, n))
 end
 
--- [修改内容] 将大数字转换为带 k / M / B / T 单位的字符串，方便 UI 显示
 function Util.FormatMoney(amount: number): string
-	if type(amount) ~= "number" then
-		return "0"
-	end
+    if type(amount) ~= "number" then return "0" end
+    local abs = math.abs(amount)
+    if abs < 1000 then return tostring(math.floor(amount)) end
 
-	local abs = math.abs(amount)
-	local units = {
-		{ 1e12, "T" },
-		{ 1e9, "B" },
-		{ 1e6, "M" },
-		{ 1e3, "k" },
-	}
+    -- 欧美常见数值单位，最高支持到 Vg (10^63)
+    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
+    
+    local suffixIndex = 0
+    local value = abs
+    
+-- 【修复核心】将进位阈值降低到 999.5。防止 999.5~999.99 之间的数字被 %.0f 四舍五入成 1000
+    while value >= 999.5 and suffixIndex < #suffixes do
+        value /= 1000
+        suffixIndex += 1
+    end
 
-	for _, unitInfo in ipairs(units) do
-		local base = unitInfo[1]
-		local suffix = unitInfo[2]
-		if abs >= base then
-			local formatted = string.format("%.1f%s", amount / base, suffix)
-			formatted = string.gsub(formatted, "%.0([A-Za-z]+)$", "%1")
-			return formatted
-		end
-	end
+    if value >= 1000 then
+        -- 当数值爆炸超过上限时，自动退化为安全的科学计数法
+        return string.format("%.2fe%d", value, suffixIndex * 3)
+    end
+    
+    local formatted = (value >= 100) and string.format("%.0f", value) 
+                   or (value >= 10 and string.format("%.1f", value) 
+                   or string.format("%.2f", value))
 
-	return tostring(math.floor(amount))
+    -- 优化正则，安全去除末尾多余的0和小数点，防止整百数值误删
+    if string.find(formatted, "%.") then
+        formatted = string.gsub(formatted, "0+$", "")
+        formatted = string.gsub(formatted, "%.$", "")
+    end
+
+    return (amount < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
 end
 
 
