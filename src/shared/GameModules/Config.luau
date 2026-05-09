@@ -13,7 +13,7 @@ local Config = {}
 Config.GRID_STUDS = 4
 
 -- 怪生成最大同时数量（注意：若希望每个区域允许到 10 只怪，请保证该上限 >= 区域数 * 10）
-Config.MAX_ALIVE_MONSTERS = 300
+Config.MAX_ALIVE_MONSTERS = 100
 
 -- 每个怪生成后存在时间（秒），到点消失（即使没人打/拿）
 Config.MONSTER_LIFETIME_SECONDS = 60
@@ -23,8 +23,8 @@ Config.SPAWN_INTERVAL_MIN = 10
 Config.SPAWN_INTERVAL_MAX = 60
 
 -- 每个区域数量范围：至少多少只怪 / 最多允许增长到多少只怪
-Config.MIN_MONSTERS_PER_ZONE = 5
-Config.MAX_MONSTERS_PER_ZONE = 10
+Config.MIN_MONSTERS_PER_ZONE = 3
+Config.MAX_MONSTERS_PER_ZONE = 7
 
 -- 补怪参数：每次补 1~3 只，每批间隔 5 秒
 Config.REPLENISH_BATCH_MIN = 1
@@ -96,6 +96,16 @@ function Config.GetCarryMax(carryLevel: number): number
 	local v = Config.CARRY_MAX_BASE + carryLevel
 	return math.clamp(v, Config.CARRY_MAX_BASE, Config.CARRY_MAX_CAP)
 end
+
+-- 升级商店每项升级的展示图标。
+-- 位置：StarterGui.ShopsUI.升级商店Window.RowTemplate.ImageLabel
+-- 填写方式：把对应升级类型右侧的 rbxassetid://0 改成你的图片 ID，例如 "rbxassetid://1234567890"。
+Config.UPGRADE_SHOP_ICON_BY_TYPE = {
+	Attack = "rbxassetid://127831794517025", -- 攻击升级图标
+	Speed = "rbxassetid://104534762878172", -- 速度升级图标
+	Health = "rbxassetid://104862583990197", -- 血量升级图标
+	Carry = "rbxassetid://81401681168713", -- 背包容量升级图标
+}
 
 -- 怪头顶信息显示距离（studs）：距离远只显示“倒计时”
 Config.MONSTER_INFO_SHOW_DISTANCE = 15
@@ -217,16 +227,16 @@ Config.WEAPON_PRICE_BY_LEVEL = {
 	500 * 10^4, 
 	1000 * 10^4,  -- 1000万
 	5000 * 10^4,  -- 5000万
-	1 * 10^8,     -- 1亿 
-	2 * 10^8,     -- 2亿
-	3 * 10^8,     -- 3亿
-	4 * 10^8,     -- 4亿
-	5 * 10^8,     -- 5亿
-	6 * 10^8,     -- 6亿
-	7 * 10^8,     -- 7亿
-	8 * 10^8,     -- 8亿
-	9 * 10^8,     -- 9亿
-	10 * 10^8,    -- 10亿
+	10 * 10^8,     -- 1亿 
+	25 * 10^8,     -- 5亿
+	50 * 10^8,     -- 10亿
+	100 * 10^8,     -- 15亿
+	300 * 10^8,     -- 30亿
+	600 * 10^8,     -- 60亿
+	1000 * 10^8,     -- 100亿
+	2000 * 10^8,     -- 200亿
+	4000 * 10^8,     -- 400亿
+	8000 * 10^8,    -- 800亿
 }
 
 -- 技能（18/19/20）固定伤害 & 冷却

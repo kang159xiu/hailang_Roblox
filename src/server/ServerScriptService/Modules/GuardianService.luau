@@ -225,13 +225,15 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
 	end
 
-	-- 2. 物理表现：击飞并空中翻滚
+	-- 2. 物理表现：击飞，但不锁住玩家操作
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	
 	if humanoid then
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-		humanoid.PlatformStand = true
+		-- 不再使用 Physics + PlatformStand，否则玩家击飞期间无法移动/跳跃。
+		-- 保持正常 Humanoid 状态，让玩家被击飞时仍然可以控制角色。
+		humanoid.PlatformStand = false
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 	end
 	
 	-- 强制离地，解除摩擦力
@@ -245,21 +247,13 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	local pushPower = 100 
 	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 	
-	-- 附加随机旋转角速度 (实现身体乱翻)
-	local spin = 40
+	-- 保留轻微翻滚视觉，但数值不要太大，否则会影响玩家击飞期间操作。
+	local spin = 5
 	playerHRP.AssemblyAngularVelocity = Vector3.new(
-		math.random(-spin, spin), 
-		math.random(-spin, spin), 
+		math.random(-spin, spin),
+		math.random(-spin, spin),
 		math.random(-spin, spin)
 	)
-	
-	-- 0.1秒后恢复状态
-	task.delay(0.1, function()
-		if humanoid then
-			humanoid.PlatformStand = false
-			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-		end
-	end)
 end
 
 --------------------------------------------------------------------------------

@@ -69,9 +69,36 @@ local shopsGui = playerGui:WaitForChild("ShopsUI")
 -- 升级商店引用
 local upgradeWindow = shopsGui:WaitForChild("升级商店Window")
 local upgradeCloseBtn = upgradeWindow:WaitForChild("Close") :: GuiButton
-local upgradeTemplate = upgradeWindow:WaitForChild("RowTemplate") :: GuiObject
-local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow
-upgradeTemplate.Visible = false -- 隐藏原始模板，防止它作为实体显示出来
+local upgradeList = upgradeWindow:WaitForChild("List") :: GuiObject
+local legacyUpgradeTemplate = upgradeWindow:FindFirstChild("RowTemplate") :: GuiObject?
+
+-- 升级商店现在使用你放在 List 下的 4 个独立模板：
+-- StarterGui.ShopsUI.升级商店Window.List.HP升级 / 攻击升级 / 速度升级 / 拿取个数升级
+local UPGRADE_TEMPLATE_NAME_BY_TYPE = {
+	Attack = "攻击升级",
+	Speed = "速度升级",
+	Health = "HP升级",
+	Carry = "拿取个数升级",
+}
+
+local UPGRADE_TEMPLATE_NAME_SET: {[string]: boolean} = {}
+for _, templateName in pairs(UPGRADE_TEMPLATE_NAME_BY_TYPE) do
+	UPGRADE_TEMPLATE_NAME_SET[templateName] = true
+end
+
+local upgradeTemplatesByType: {[string]: GuiObject} = {}
+for upgradeType, templateName in pairs(UPGRADE_TEMPLATE_NAME_BY_TYPE) do
+	local template = upgradeList:FindFirstChild(templateName)
+	if template and template:IsA("GuiObject") then
+		upgradeTemplatesByType[upgradeType] = template
+		template.Visible = false -- 模板只用于克隆，不直接显示
+	else
+		warn(string.format("[UIController] 升级商店缺少模板：List.%s", templateName))
+	end
+end
+if legacyUpgradeTemplate then
+	legacyUpgradeTemplate.Visible = false -- 兼容旧模板，防止它作为实体显示出来
+end
 
 -- 武器商店引用
 local weaponWindow = shopsGui:FindFirstChild("武器商店Window")
@@ -92,7 +119,7 @@ end
 local function clearUpgradeRows()
 	for _, child in ipairs(upgradeList:GetChildren()) do
 		-- 只删除克隆出来的组件，保留模板和 Layout 排版组件
-		if child:IsA("GuiObject") and child.Name ~= "RowTemplate" and not child:IsA("UIListLayout") then
+		if child:IsA("GuiObject") and not UPGRADE_TEMPLATE_NAME_SET[child.Name] and child.Name ~= "RowTemplate" and not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
 	end
@@ -250,11 +277,7 @@ end
 -- 融合了你优秀的表驱动循环逻辑，以及精准的 UI 模板文本分离映射
 local function refreshUpgradeShopUI()
 	-- 1. 清理旧条目
-	for _, ch in ipairs(upgradeList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch.Name ~= "RowTemplate" and not ch:IsA("UILayout") then
-			ch:Destroy()
-		end
-	end
+	clearUpgradeRows()
 
 	-- 2. 定义升级类型
 	local upgradeTypes = {
@@ -294,21 +317,38 @@ local function refreshUpgradeShopUI()
 			end
 		end
 
-		-- 3. 克隆模板并设置
-		-- 注意：如果你的模板变量叫 upgradeRowTemplate，请把这里的 upgradeTemplate 换成你实际的变量名
-		local row = upgradeTemplate:Clone() 
+		-- 3. 按升级类型克隆你放在 List 下的独立模板
+		local template = upgradeTemplatesByType[info.type] or legacyUpgradeTemplate
+		if not template then
+			warn(string.format("[UIController] 无法创建升级条目：缺少 %s 对应模板", info.type))
+			continue
+		end
+
+		local row = template:Clone()
 		row.Name = info.type .. "Row"
+		row.LayoutOrder = table.find({"Health", "Attack", "Speed", "Carry"}, info.type) or 0
 		row.Visible = true
 		row.Parent = upgradeList
 
+		-- 图标：优先保留模板自身图片；如果模板图片为空，再读取 Config.UPGRADE_SHOP_ICON_BY_TYPE 兜底
+		local iconLabel = row:FindFirstChild("ImageLabel", true)
+		if iconLabel and iconLabel:IsA("ImageLabel") then
+			local iconId = Config.UPGRADE_SHOP_ICON_BY_TYPE and Config.UPGRADE_SHOP_ICON_BY_TYPE[info.type]
+			local templateImageEmpty = iconLabel.Image == nil or iconLabel.Image == "" or iconLabel.Image == "rbxassetid://0"
+			if templateImageEmpty and iconId and iconId ~= "" and iconId ~= "rbxassetid://0" then
+				iconLabel.Image = iconId
+				iconLabel.Visible = true
+			end
+		end
+
 		-- A. 赋值：升级目标文本框
-		local targetLabel = row:FindFirstChild("升级目标")
+		local targetLabel = row:FindFirstChild("升级目标", true)
 		if targetLabel and targetLabel:IsA("TextLabel") then
 			targetLabel.Text = info.name
 		end
 
 		-- B. 赋值：花费与增加数值文本框
-		local costInfoLabel = row:FindFirstChild("花费+增加数值")
+		local costInfoLabel = row:FindFirstChild("花费+增加数值", true)
 		if costInfoLabel and costInfoLabel:IsA("TextLabel") then
 			if isMaxed then
 				costInfoLabel.Text = "Max Level" --已满级
@@ -319,7 +359,7 @@ local function refreshUpgradeShopUI()
 		end
 
 		-- C. 绑定：升级按钮
-		local upBtn = row:FindFirstChild("升级按钮")
+		local upBtn = row:FindFirstChild("升级按钮", true)
 		if upBtn and upBtn:IsA("GuiButton") then
 			if isMaxed then
 				if upBtn:IsA("ImageButton") then
