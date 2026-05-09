@@ -33,6 +33,7 @@ end
 
 local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
 ensureRemoteEvent(remotesFolder, "PlayWeaponHitVFX")
+ensureRemoteEvent(remotesFolder, "ShowDamageNumber")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local damageRemote = remotes:WaitForChild("RequestDamageMonster") :: RemoteEvent

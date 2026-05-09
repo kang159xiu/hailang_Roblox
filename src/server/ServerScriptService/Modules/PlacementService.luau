@@ -265,7 +265,7 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 		return
 	end
 
-	local level = math.floor(getNumAttr(rootPart, "MonsterLevel", 1))
+	local level = math.floor(getNumAttr(rootPart, "UpgradeLevel", getNumAttr(rootPart, "MonsterLevel", 1)))
 	local value = math.floor(getNumAttr(rootPart, "Value", 0))
 	local goldPerSec = math.floor(getNumAttr(rootPart, "GoldPerSec", 0))
 
@@ -384,14 +384,22 @@ local function toast(player: Player, text: string)
 end
 
 local function getMonsterAppearanceTemplate(monsterLevel: number): Instance?
-	local folder = ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	local folder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	if not folder or not folder:IsA("Folder") then
 		return nil
 	end
 
-	return folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+	local level2 = string.format("%02d", monsterLevel)
+	return folder:FindFirstChild("怪物形象" .. level2)
+		or folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+		or folder:FindFirstChild("怪物形象 " .. level2)
 		or folder:FindFirstChild("怪物形象 " .. tostring(monsterLevel))
 		or folder:FindFirstChild("Lv" .. tostring(monsterLevel))
+		or folder:FindFirstChild("怪物形象01")
+		or folder:FindFirstChild("怪物形象1")
+		or folder:FindFirstChild("怪物形象 01")
+		or folder:FindFirstChild("怪物形象 1")
 end
 
 local function stripJointsAndConstraints(root: Instance)
@@ -590,7 +598,7 @@ local function createPlacedMonsterFromTemplate(slotPart: BasePart, monsterLevel:
 		moveHierarchyToTarget(rootPart, model, targetCFrame)
 		container = model
 	elseif part then
-		-- 【修复关键点】用一个确定的 bp 变量来避免 rootPart 可选类型引发的警告
+		-- 用一个确定的 bp 变量来避免 rootPart 可选类型引发的警告
 		local bp = part :: BasePart
 		rootPart = bp
 		bp.Anchored = true
@@ -779,8 +787,12 @@ local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedP
 	local lvl = getNumAttr(placedPart, "MonsterLevel", 1)
 	local v = getNumAttr(placedPart, "Value", 0)
 	local gps = getNumAttr(placedPart, "GoldPerSec", 0)
+	local upLevel = getNumAttr(placedPart, "UpgradeLevel", 1)
+	local baseV = getNumAttr(placedPart, "BaseValue", v)
+	local baseGps = getNumAttr(placedPart, "BaseGoldPerSec", gps)
+	local sourceZoneLevel = getNumAttr(placedPart, "SourceZoneLevel", 1)
 	
-	local ok = InventoryService.TryAddMonsterItem(player, lvl, v, gps)
+	local ok = InventoryService.TryAddMonsterItem(player, lvl, v, gps, upLevel, baseV, baseGps, sourceZoneLevel)
 	if not ok then
 		placedPart:SetAttribute("__InteractionLocked", false)
 		return false
@@ -1201,6 +1213,7 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		activePm:SetAttribute("UpgradeLevel", upLevel)
 		activePm:SetAttribute("BaseValue", baseV)
 		activePm:SetAttribute("BaseGoldPerSec", baseGps)
+		setPlacedMonsterHeadBillboardText(activePm)
 
 		local vfxFolder = Workspace:FindFirstChild("放置特效")
 		if vfxFolder then
@@ -1497,11 +1510,22 @@ function PlacementService.Init()
 									local upgradeCost = upLevel * 10 * baseGps
 									
 									if PlayerData.TrySpendGold(player, upgradeCost) then
-										activePm:SetAttribute("UpgradeLevel", upLevel + 1)
-										local newGps = (upLevel + 1) * baseGps
+										local newLevel = upLevel + 1
+										local newGps = newLevel * baseGps
 										local baseValue = getNumAttr(activePm, "BaseValue", getNumAttr(activePm, "Value", 0))
+										local newValue = baseValue * newLevel
+										activePm:SetAttribute("UpgradeLevel", newLevel)
+										activePm:SetAttribute("MonsterLevel", newLevel)
 										activePm:SetAttribute("GoldPerSec", newGps)
-										activePm:SetAttribute("Value", baseValue * (upLevel + 1))
+										activePm:SetAttribute("Value", newValue)
+
+										if state.PlacedData then
+											state.PlacedData.MonsterLevel = newLevel
+											state.PlacedData.UpgradeLevel = newLevel
+											state.PlacedData.GoldPerSec = newGps
+											state.PlacedData.Value = newValue
+											state.PlacedData.LastTickUnix = os.time()
+										end
 										
 										setPlacedMonsterHeadBillboardText(activePm)
 										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
@@ -1663,6 +1687,7 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 				activePm:SetAttribute("UpgradeLevel", pData.UpgradeLevel or 1)
 				activePm:SetAttribute("BaseValue", pData.BaseValue or getNumAttr(activePm, "Value", 0))
 				activePm:SetAttribute("BaseGoldPerSec", pData.BaseGoldPerSec or getNumAttr(activePm, "GoldPerSec", 0))
+				setPlacedMonsterHeadBillboardText(activePm)
 			end
 			
 			st.PlacedMonster = placed

@@ -25,7 +25,7 @@ type AnimationConfig = { Idle: string, Track: string, Attack: string }
 type GuardianData = { ModelName: string, Speed: number, Animations: AnimationConfig }
 local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 
--- [修改内容] 新增：专属动画配置表。你可以在这里为每一级的守护者独立配置动画 ID
+-- 新增：专属动画配置表。你可以在这里为每一级的守护者独立配置动画 ID
 local CUSTOM_ANIMATIONS = {
 	[1] = { Idle = "rbxassetid://81551578379988", Track = "rbxassetid://132222392379713", Attack = "" },
 	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://78735945899751", Attack = "" },
@@ -63,20 +63,18 @@ end
 --------------------------------------------------------------------------------
 local activeGuardians = {}
 local guardiansFolder: Folder
+local guardianTemplateFolder = ReplicatedStorage:WaitForChild("GuardianModel")
 
 --------------------------------------------------------------------------------
 -- 3. 辅助功能函数
 --------------------------------------------------------------------------------
 local function getGuardianTemplate(modelName: string): Model?
-	local templateFolder = workspace:FindFirstChild("GuardianModel")
-	if not templateFolder then return nil end
-
 	-- 尝试查找当前等级对应的特定形象
-	local template = templateFolder:FindFirstChild(modelName)
+	local template = guardianTemplateFolder:FindFirstChild(modelName)
 	
 	-- 如果还没做该等级的模型，则暂时用 1 级模型兜底（防止脚本报错停止运行）
 	if not template then
-		template = templateFolder:FindFirstChild("守护者形象1")
+		template = guardianTemplateFolder:FindFirstChild("守护者形象1")
 	end
 
 	return (template and template:IsA("Model")) and template or nil
@@ -125,22 +123,22 @@ local function isPlayerInZone(playerHRP: BasePart, zonePart: BasePart): boolean
 end
 
 -- 让守护者看向目标 (PivotTo 驱动)
--- [修改内容] 增强版朝向逻辑：仅改变 XZ 平面旋转，并严格抵消 PivotOffset 带来的位置偏移
+-- 增强版朝向逻辑：仅改变 XZ 平面旋转，并严格抵消 PivotOffset 带来的位置偏移
 local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 	local currentPos = rootPart.Position 
 	-- 强制目标点高度等于当前高度，防止模型“抬头”或“低头”
 	local flatTarget = Vector3.new(targetPos.X, currentPos.Y, targetPos.Z)
 
 	if (flatTarget - currentPos).Magnitude > 0.1 then
-		-- [修改内容] 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面 Angles(0, math.pi, 0)
+		-- 计算基础朝向后，叠加 CFrame.Angles 旋转 180 度(math.pi) 来反转模型正面 Angles(0, math.pi, 0)
 		local targetCFrame = CFrame.lookAt(currentPos, flatTarget) * CFrame.Angles(0, 0, 0)
-		-- [修改内容] 必须乘以 rootPart.PivotOffset，否则每次转身都会导致坐标叠加偏移，引起跳动
+		-- 必须乘以 rootPart.PivotOffset，否则每次转身都会导致坐标叠加偏移，引起跳动
 		model:PivotTo(targetCFrame * rootPart.PivotOffset)
 	end
 end
 
 -- =======================================================
--- [修改内容] 增加辅助函数：获取玩家当前举起的怪物最高等级
+-- 增加辅助函数：获取玩家当前举起的怪物最高等级
 -- 遍历玩家角色身上的部件，判断是否携带了怪物，如果没携带返回 0
 
 local function getPlayerCarriedSourceZoneLevel(player: Player): number
@@ -182,7 +180,7 @@ end
 
 -- =======================================================
 -- =======================================================
--- [修改内容] 新增辅助函数：向下打射线检测玩家脚底是否踩着安全区
+-- 新增辅助函数：向下打射线检测玩家脚底是否踩着安全区
 local function isPlayerOnSafeGround(char: Model): boolean
 	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not hrp then return false end
@@ -214,7 +212,7 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	if guardian.State ~= "Track" then return end
 	guardian.State = "Attack"
 	guardian.TargetPlayer = nil 
-	-- [修改内容] 攻击时丢失目标，清除追逐标记
+	-- 攻击时丢失目标，清除追逐标记
 	guardian.Model:SetAttribute("TargetPlayerName", "")
 	guardian.AttackTimer = os.clock()
 	playAnim(guardian, "Attack")
@@ -255,8 +253,8 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		math.random(-spin, spin)
 	)
 	
-	-- 1.2秒后恢复状态
-	task.delay(1.2, function()
+	-- 0.1秒后恢复状态
+	task.delay(0.1, function()
 		if humanoid then
 			humanoid.PlatformStand = false
 			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
@@ -274,14 +272,14 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	local clone = template:Clone()
 	
-	-- [修改内容] 优先寻找你指定的 RootPart。如果找不到，再尝试 PrimaryPart 或其他部件
+	-- 优先寻找你指定的 RootPart。如果找不到，再尝试 PrimaryPart 或其他部件
 	local root = clone:FindFirstChild("RootPart") 
 		or clone.PrimaryPart or clone:FindFirstChild("FakeRootPart") or clone:FindFirstChildWhichIsA("BasePart", true) :: BasePart
 	
 		--
 	if not root or not root:IsA("BasePart") then 
 		root = Instance.new("Part")
-		root.Name = "RootPart"  -- [修改内容] 兜底生成的部件名字也统一叫 RootPart
+		root.Name = "RootPart"  -- 兜底生成的部件名字也统一叫 RootPart
 		root.Size = Vector3.new(2, 2, 2)
 		root.Transparency = 1
 		root.CanCollide = false
@@ -292,11 +290,11 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 
 	-- 强制统一控制权
 	clone.PrimaryPart = root
-	-- [修改内容] 初始化追击标记
+	-- 初始化追击标记
 	clone:SetAttribute("TargetPlayerName", "")
 
-	-- [修改内容] 强制全锚定模式：将模型内所有零件全部锚定
-	-- [修改内容] 为了让 Motor6D 动画能生效，除了 RootPart 必须锚定外，其他所有外观零件绝对不能锚定！
+	-- 强制全锚定模式：将模型内所有零件全部锚定
+	-- 为了让 Motor6D 动画能生效，除了 RootPart 必须锚定外，其他所有外观零件绝对不能锚定！
 	for _, d in ipairs(clone:GetDescendants()) do
 		if d:IsA("BasePart") then
 			d.Anchored = (d == root)  -- 只有 RootPart 是 true，其他全是 false
@@ -307,7 +305,7 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	end
 
 	local spawnCFrame = zonePart.CFrame * CFrame.new(0, (zonePart.Size.Y / 2) + (root.Size.Y / 2), 0)
-	-- [修改内容] 必须乘以 PivotOffset，消除生成时的坐标偏移
+	-- 必须乘以 PivotOffset，消除生成时的坐标偏移
 	clone:PivotTo(spawnCFrame * root.PivotOffset)
 	clone.Parent = guardiansFolder
 
@@ -334,7 +332,7 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	-- 绑定碰撞抓捕
 	root.Touched:Connect(function(hit)
 		local g = activeGuardians[zoneKey]
-		-- [修改内容] 增加 g 存在的判断，防止异步触发时 g 已经被清理
+		-- 增加 g 存在的判断，防止异步触发时 g 已经被清理
 		if g and g.State == "Track" and g.TargetPlayer then
 			local char = g.TargetPlayer.Character
 			if char and hit:IsDescendantOf(char) then
@@ -352,7 +350,7 @@ local function onHeartbeat(dt: number)
 	local now = os.clock()
 	for key, g in pairs(activeGuardians) do
 		
-		-- [修改内容] 1. 终极存活检测：如果模型被引擎意外销毁，安全剔除，防止崩溃
+		-- 1. 终极存活检测：如果模型被引擎意外销毁，安全剔除，防止崩溃
 		if type(g) ~= "table" or not g.Model or not g.RootPart or not g.RootPart:IsA("BasePart") or not g.RootPart.Parent then
 			if type(g) == "table" and g.Model then 
 				pcall(function() g.Model:Destroy() end) 
@@ -361,7 +359,7 @@ local function onHeartbeat(dt: number)
 			continue
 		end
 
-		-- [修改内容] 2. 出生点兜底：如果数据表中丢失了 SpawnCFrame，用当前位置补全
+		-- 2. 出生点兜底：如果数据表中丢失了 SpawnCFrame，用当前位置补全
 		if not g.SpawnCFrame then
 			g.SpawnCFrame = g.RootPart.CFrame
 		end
@@ -402,18 +400,18 @@ local function onHeartbeat(dt: number)
 
 		if g.State == "Idle" then
 			if closestHRP then
-				-- [修改内容] 追踪附近的玩家时也会自动应用 lookAtFlat 里的 180 度修正
+				-- 追踪附近的玩家时也会自动应用 lookAtFlat 里的 180 度修正
 				lookAtFlat(g.Model, g.RootPart, closestHRP.Position)
 			else
-				-- [修改内容] 当玩家不在附近时，让守护者完美对齐地块的朝向（同样叠加 180 度修正）
+				-- 当玩家不在附近时，让守护者完美对齐地块的朝向（同样叠加 180 度修正）
 				local targetIdleCFrame = g.SpawnCFrame * CFrame.Angles(0, math.pi, 0)
 				local dist = (g.RootPart.Position - targetIdleCFrame.Position).Magnitude
 				
 				if dist > 5 then
-					-- [修改内容] 强制拉回时乘以 PivotOffset 补偿
+					-- 强制拉回时乘以 PivotOffset 补偿
 					g.Model:PivotTo(targetIdleCFrame * g.RootPart.PivotOffset)
 				else
-					-- [修改内容] 平滑插值后，乘以 PivotOffset 补偿，彻底切断“无限起飞再被拉回”的死循环
+					-- 平滑插值后，乘以 PivotOffset 补偿，彻底切断“无限起飞再被拉回”的死循环
 					local lerpedCF = g.RootPart.CFrame:Lerp(targetIdleCFrame, 0.1)
 					g.Model:PivotTo(lerpedCF * g.RootPart.PivotOffset)
 				end
@@ -425,7 +423,7 @@ local function onHeartbeat(dt: number)
 
 			if not targetHrp or getPlayerCarriedSourceZoneLevel(g.TargetPlayer) == 0 or isSafe then
 				g.TargetPlayer = nil
-				-- [修改内容] 玩家逃脱，清除追击标记
+				-- 玩家逃脱，清除追击标记
 				g.Model:SetAttribute("TargetPlayerName", "")
 				g.State = "Return"
 				playAnim(g, "Track")
@@ -463,7 +461,7 @@ local function onHeartbeat(dt: number)
 				continue
 			end
 
-			-- [修改内容] 3. 寻路点安全检测：防止 g.Waypoints[idx] 为 nil 导致崩溃
+			-- 3. 寻路点安全检测：防止 g.Waypoints[idx] 为 nil 导致崩溃
 			if g.Waypoints and #g.Waypoints > 0 and g.CurrentWaypointIdx <= #g.Waypoints then
 				local currentWP = g.Waypoints[g.CurrentWaypointIdx]
 				if currentWP then
@@ -473,7 +471,7 @@ local function onHeartbeat(dt: number)
 					if flatMoveVec.Magnitude < 1 then
 						g.CurrentWaypointIdx += 1
 					else
-						-- [修改内容] 提取出新的中心坐标，再应用 PivotOffset 补偿
+						-- 提取出新的中心坐标，再应用 PivotOffset 补偿
 						local nextCF = g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt)
 						g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
 					end
@@ -495,7 +493,7 @@ local function onHeartbeat(dt: number)
 				g.State = "Idle"
 				playAnim(g, "Idle")
 			else
-				-- [修改内容] 移动时看向出生点，应用 PivotOffset 补偿
+				-- 移动时看向出生点，应用 PivotOffset 补偿
 				local nextCF = g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt)
 				g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
 				lookAtFlat(g.Model, g.RootPart, targetIdleCFrame.Position)
@@ -551,7 +549,7 @@ function GuardianService.Init()
 	
 	RunService.Heartbeat:Connect(onHeartbeat)
 	
-	-- [修改内容] 旧版基于 Touched 事件的检测容易引起状态打架和疯狂打印，已被彻底移除。现在由 onHeartbeat 里的射线(Raycast)负责安全区检测。
+	-- 旧版基于 Touched 事件的检测容易引起状态打架和疯狂打印，已被彻底移除。现在由 onHeartbeat 里的射线(Raycast)负责安全区检测。
 end
 
 return GuardianService

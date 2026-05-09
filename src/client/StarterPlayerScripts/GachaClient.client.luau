@@ -59,9 +59,11 @@ hasGachaPreview = function()
 end
 
 refreshGachaPreview = function(isDebug: boolean)
-	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+		or workspace:FindFirstChild("Monster image")
 	if not monsterFolder then
-		warn("❌ [致命错误] 在 workspace 和 ReplicatedStorage 中都没找到装怪物的文件夹！请检查名字。")
+		warn("❌ [致命错误] 在 ReplicatedStorage 中没找到 'Monster image'（也未找到兼容目录 MonsterAppearances）！请检查名字。")
 		return false
 	end
 
@@ -295,7 +297,9 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	isAnimating = true
 	print("🎯 收到服务端发来的抽奖结果！结果数量:", #results, " 动画延迟时长:", serverDuration)
 
-	local monsterFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+		or workspace:FindFirstChild("Monster image")
 	if not monsterFolder then
 		warn("❌ 找不到怪物展示文件夹")
 		isAnimating = false

@@ -15,7 +15,7 @@ local WeaponToolService = require(script.Parent:WaitForChild("WeaponToolService"
 local DataPersistenceService = {}
 
 local DATASTORE_NAME = "PlayerProfiles_V1"
-
+	
 export type PersistedPlacedMonster = {
 	MonsterLevel: number,
 	Value: number,
@@ -38,6 +38,11 @@ export type PersistedInventoryMonsterItem = {
 	MonsterLevel: number,
 	Value: number,
 	GoldPerSec: number,
+	UpgradeLevel: number?,
+	BaseValue: number?,
+	BaseGoldPerSec: number?,
+	SourceZoneLevel: number?,
+	StorageKind: string?,
 }
 
 export type PersistedPlayerData = {

@@ -129,9 +129,12 @@ local function buildMonsterAppearances()
 		return
 	end
 
-	local base = findDescendantByNames(workspace, getMonsterTemplateNames(1))
+	local monsterImageFolder = ReplicatedStorage:FindFirstChild("Monster image")
+	local base = if monsterImageFolder
+		then findDescendantByNames(monsterImageFolder, getMonsterTemplateNames(1))
+		else findDescendantByNames(workspace, getMonsterTemplateNames(1))
 	if not base then
-		warn("[AssetBootstrapService] 未找到 Workspace.'Monster image'/Workspace 中的 怪物形象01/怪物形象1（无法自动生成怪物外观）")
+		warn("[AssetBootstrapService] 未找到 ReplicatedStorage.'Monster image' 中的 怪物形象01/怪物形象1（无法自动生成怪物外观）")
 		return
 	end
 

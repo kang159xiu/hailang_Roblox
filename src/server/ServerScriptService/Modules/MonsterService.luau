@@ -41,6 +41,7 @@ local MonsterService = {}
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local playWeaponHitVFXRemote = remotes:WaitForChild("PlayWeaponHitVFX") :: RemoteEvent
+local showDamageNumberRemote = remotes:WaitForChild("ShowDamageNumber") :: RemoteEvent
 
 local monstersFolder: Folder
 local aliveMonsters: {[BasePart]: true} = {}
@@ -145,19 +146,19 @@ end
 
 
 local function buildBillboard(monsterPart: BasePart)
-	-- [修改内容] 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
-	-- [修改内容] 按照你提供的路径查找模板：Workspace.区域.场景怪数据头顶显示.BillboardGui
+	-- 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
+	-- 按照你提供的路径查找模板：Workspace.区域.场景怪数据头顶显示.BillboardGui
 	local areaFolder = workspace:FindFirstChild("区域")
 	local uiContainer = areaFolder and areaFolder:FindFirstChild("场景怪数据头顶显示")
 	local template = uiContainer and uiContainer:FindFirstChild("BillboardGui")
 
 	local bb: BillboardGui
 	if template then
-		-- [修改内容] 找到模板后进行克隆，并命名为 MonsterBillboard 方便后续查找
+		-- 找到模板后进行克隆，并命名为 MonsterBillboard 方便后续查找
 		bb = template:Clone()
 		bb.Name = "MonsterBillboard"
 	else
-		-- [修改内容] 兜底逻辑：如果找不到模板，打印警告并创建一个基础 UI，防止脚本报错
+		-- 兜底逻辑：如果找不到模板，打印警告并创建一个基础 UI，防止脚本报错
 		warn("[MonsterService] 找不到 UI 模板，路径应为: Workspace.区域.场景怪数据头顶显示.BillboardGui")
 		bb = Instance.new("BillboardGui")
 		bb.Name = "MonsterBillboard"
@@ -172,7 +173,7 @@ local function buildBillboard(monsterPart: BasePart)
 	bb.AlwaysOnTop = true
 	bb.Enabled = true
 	bb.MaxDistance = 150
-	-- [修改内容] 保持原有的高度偏移设置
+	-- 保持原有的高度偏移设置
 	--bb.StudsOffset = Vector3.new(0, monsterPart.Size.Y * 0.5 + 2.5, 0)
 	bb.Parent = monsterPart
 end
@@ -192,17 +193,17 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 	local value = tonumber(monsterPart:GetAttribute("Value")) or 0
 	local gps = tonumber(monsterPart:GetAttribute("GoldPerSec")) or 0
 	local dead = monsterPart:GetAttribute("Dead") == true
-	-- [修改内容] 获取过期时间用于计算剩余秒数
+	-- 获取过期时间用于计算剩余秒数
 	local expireUnix = tonumber(monsterPart:GetAttribute("ExpireUnix")) or 0
 	local timeLeft = math.max(0, expireUnix - os.time())
 
-	-- [修改内容] 更新“等级+血量”部分
+	-- 更新“等级+血量”部分
 	local statsLabel = bb:FindFirstChild("等级+血量")
 	if statsLabel and (statsLabel:IsA("TextLabel") or statsLabel:IsA("TextBox")) then
 		statsLabel.Text = string.format("Lv.%d  HP:%d/%d", level, hp, maxHp)
 	end
 
-	-- [修改内容] 更新“价值+每秒+x金币”部分
+	-- 更新“价值+每秒+x金币”部分
 	local valueLabel = bb:FindFirstChild("价值+每秒+x")
 	if valueLabel and (valueLabel:IsA("TextLabel") or valueLabel:IsA("TextBox")) then
 		if dead then
@@ -212,13 +213,13 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 		end
 	end
 
-	-- [修改内容] 更新“剩余”部分
+	-- 更新“剩余”部分
 	local timeLabel = bb:FindFirstChild("剩余时间")
 	if timeLabel and (timeLabel:IsA("TextLabel") or timeLabel:IsA("TextBox")) then
 		timeLabel.Text = string.format("%ds", timeLeft)
 	end
 
-	-- [修改内容] 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示
+	-- 兼容原有代码结构：如果模板中依然存在名为 "Label" 的节点，则按原格式合并显示
 	local oldLabel = bb:FindFirstChild("Label")
 	if oldLabel and oldLabel:IsA("TextLabel") then
 		if dead then
@@ -226,6 +227,14 @@ local function setMonsterBillboardText(monsterPart: BasePart)
 		else
 			oldLabel.Text = string.format("Lv.%d  HP:%d/%d\n$%d/s", level, hp, maxHp, gps)
 		end
+	end
+end
+
+local function destroyMonsterInstance(monsterPart: BasePart)
+	aliveMonsters[monsterPart] = nil
+	local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
+	if monsterInstance and monsterInstance.Parent then
+		monsterInstance:Destroy()
 	end
 end
 
@@ -257,7 +266,9 @@ local function ensureCollectPrompt(monsterPart: BasePart)
 	prompt.ActionText = "Collect"
 	prompt.ObjectText = "Monster Corpse"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.HoldDuration = 1
+	-- 尸体收取恢复为“按一下 E 即可收取”，避免依赖客户端长按链路。
+	-- 这样既符合当前玩法预期，也不会影响 Sell/Store/Unlock 等其它仍需长按的 Prompt。
+	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = monsterPart
@@ -365,14 +376,19 @@ local function stripJointsAndConstraints(root: Instance)
 end
 
 local function findMonsterAppearanceRoot(): Instance?
-	local workspaceRoot = workspace:FindFirstChild("Monster image")
-	if workspaceRoot then
-		return workspaceRoot
+	local replicatedMonsterImage = ReplicatedStorage:FindFirstChild("Monster image")
+	if replicatedMonsterImage then
+		return replicatedMonsterImage
 	end
 
 	local replicatedRoot = ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	if replicatedRoot then
 		return replicatedRoot
+	end
+
+	local workspaceRoot = workspace:FindFirstChild("Monster image")
+	if workspaceRoot then
+		return workspaceRoot
 	end
 
 	return nil
@@ -562,7 +578,7 @@ local function pickMonsterLevelForZone(zoneLevel: number): number?
 	return Util.weightedPick(weights)
 end
 
-local function markDead(monsterPart: BasePart)
+local function markDead(monsterPart: BasePart, killerPlayer: Player?)
 	-- 将怪物标记为死亡。
 	--
 	-- 这里没有直接 Destroy 掉怪物，
@@ -574,6 +590,36 @@ local function markDead(monsterPart: BasePart)
 	if monsterPart:GetAttribute("Dead") == true then
 		return
 	end
+
+	if killerPlayer then
+		local level = monsterPart:GetAttribute("MonsterLevel")
+		local value = monsterPart:GetAttribute("Value")
+		local gps = monsterPart:GetAttribute("GoldPerSec")
+		local upLevel = monsterPart:GetAttribute("UpgradeLevel") or 1
+		local sourceZoneLevel = monsterPart:GetAttribute("SourceZoneLevel")
+		if type(sourceZoneLevel) ~= "number" then
+			sourceZoneLevel = monsterPart:GetAttribute("ZoneLevel")
+		end
+
+		local pickedUp = InventoryService.PickupCarryMonster(
+			killerPlayer,
+			type(level) == "number" and level or 1,
+			type(value) == "number" and value or 0,
+			type(gps) == "number" and gps or 0,
+			type(upLevel) == "number" and upLevel or 1,
+			type(sourceZoneLevel) == "number" and sourceZoneLevel or 1
+		)
+
+		if pickedUp then
+			monsterPart:SetAttribute("Dead", true)
+			syncMonsterModelAttribute(monsterPart, "Dead", true)
+			monsterPart:SetAttribute("Collected", true)
+			syncMonsterModelAttribute(monsterPart, "Collected", true)
+			destroyMonsterInstance(monsterPart)
+			return
+		end
+	end
+
 	-- 不改变外观颜色：保持“死亡前后模型一致”（你要求）
 	monsterPart:SetAttribute("Dead", true)
 	syncMonsterModelAttribute(monsterPart, "Dead", true)
@@ -581,12 +627,12 @@ local function markDead(monsterPart: BasePart)
 	setMonsterBillboardText(monsterPart)
 end
 
-function MonsterService.MarkDead(monsterPart: Instance)
+function MonsterService.MarkDead(monsterPart: Instance, killerPlayer: Player?)
 	-- 对外暴露的死亡接口。
 	-- 别的模块如果要让怪物直接死亡，可以调用 MonsterService.MarkDead(...)。
 	-- 这里先做类型和属性校验，避免误传普通物体。
 	if monsterPart and monsterPart:IsA("BasePart") and monsterPart:GetAttribute("IsMonster") == true then
-		markDead(monsterPart)
+		markDead(monsterPart, killerPlayer)
 	end
 end
 
@@ -651,7 +697,7 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 	aliveMonsters[monster] = true
 
 	-- 找到 spawnMonsterInZone 函数，在 aliveMonsters[monster] = true 之后添加：
-	-- [修改内容] 开启一个循环任务，每秒更新一次头顶 UI 的倒计时
+	-- 开启一个循环任务，每秒更新一次头顶 UI 的倒计时
 	task.spawn(function()
 		while monster and monster.Parent and monster:GetAttribute("Dead") ~= true do
 			setMonsterBillboardText(monster)
@@ -740,42 +786,42 @@ replenishZoneToTarget = function(z: PickupZone, key: string, target: number)
 	end)
 end
 
--- [修改内容] 新增函数：处理怪物受击时的向上跳跃表现
+-- 新增函数：处理怪物受击时的向上跳跃表现
 local function playMonsterJumpEffect(monsterPart: BasePart, monsterModel: Model)
-	-- [修改内容] 添加状态锁（防抖）。如果怪物已经在跳跃中，则忽略新的跳跃请求，防止连续受击导致怪物“上天”
+	-- 添加状态锁（防抖）。如果怪物已经在跳跃中，则忽略新的跳跃请求，防止连续受击导致怪物“上天”
 	if monsterPart:GetAttribute("IsJumping") == true then
 		return
 	end
 	monsterPart:SetAttribute("IsJumping", true)
 
-	-- [修改内容] 记录怪物当前初始位置，并计算跳跃的最高点 CFrame（在此基础向上移动 2 个 Studs）
+	-- 记录怪物当前初始位置，并计算跳跃的最高点 CFrame（在此基础向上移动 2 个 Studs）
 	local originalCFrame = monsterModel:GetPivot()
 	local targetCFrame = originalCFrame * CFrame.new(0, 2, 0)
 
-	-- [修改内容] 创建一个临时 CFrameValue 作为 Tween 的承载体，因为 Model 自身无法直接运行 Tween
+	-- 创建一个临时 CFrameValue 作为 Tween 的承载体，因为 Model 自身无法直接运行 Tween
 	local cframeValue = Instance.new("CFrameValue")
 	cframeValue.Value = originalCFrame
 
-	-- [修改内容] 监听 CFrameValue 的实时变化，并将其同步应用到怪物的整体模型上
+	-- 监听 CFrameValue 的实时变化，并将其同步应用到怪物的整体模型上
 	local connection = cframeValue.Changed:Connect(function(newCFrame)
 		if monsterModel and monsterModel.Parent then
 			monsterModel:PivotTo(newCFrame)
 		end
 	end)
 
-	-- [修改内容] 配置动画参数：时长 0.15 秒，二次方缓出；Reverses = true 代表跳到最高点后会自动返回原位
+	-- 配置动画参数：时长 0.15 秒，二次方缓出；Reverses = true 代表跳到最高点后会自动返回原位
 	local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
 	local jumpTween = TweenService:Create(cframeValue, tweenInfo, {Value = targetCFrame})
 
 	jumpTween.Completed:Connect(function()
-		-- [修改内容] 动画完成后，断开事件监听并清理垃圾对象
+		-- 动画完成后，断开事件监听并清理垃圾对象
 		connection:Disconnect()
 		cframeValue:Destroy()
 		
 		if monsterPart and monsterPart.Parent then
-			-- [修改内容] 解除跳跃锁定状态
+			-- 解除跳跃锁定状态
 			monsterPart:SetAttribute("IsJumping", false)
-			-- [修改内容] 强制重置回初始位置，防止因为浮点数精度误差导致怪物最终没踩到地上
+			-- 强制重置回初始位置，防止因为浮点数精度误差导致怪物最终没踩到地上
 			if monsterModel and monsterModel.Parent then
 				monsterModel:PivotTo(originalCFrame)
 			end
@@ -877,9 +923,11 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	end
 
 	local dmg = CombatService.GetPlayerDamage(player)
+	local shownDamage = math.min(dmg, hp)
 	local newHp = math.max(0, hp - dmg)
 	monsterPart:SetAttribute("HP", newHp)
 	setMonsterBillboardText(monsterPart)
+	showDamageNumberRemote:FireAllClients(monsterPart.Position, monsterPart.Size.Y, shownDamage)
 
 	-- 获取怪物模型。无论扣血后是否存活，只要受击前有血量（走到这里说明一定有），就播放跳跃受击特效
 	local monsterModel = getMonsterInstanceFromRoot(monsterPart)
@@ -888,14 +936,14 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 		playMonsterDamageColorEffect(monsterPart, monsterModel) -- [修改原因: 在触发跳跃的同时，增加模型受击变红特效]
 	end
 
-	-- [修改内容] 触发武器命中特效（保持原样，特效本就不受血量限制）
+	-- 触发武器命中特效（保持原样，特效本就不受血量限制）
 	local stats = PlayerData.Get(player)
 	local weaponLevel = stats.EquippedWeaponLevel or stats.WeaponLevel or 1
 	playWeaponHitVFXRemote:FireAllClients(hitPart, weaponLevel)
 
-	-- [修改内容] 如果血量归零，则标记死亡（变为尸体状态）
+	-- 如果血量归零，则标记死亡（变为尸体状态）
 	if newHp <= 0 then
-		markDead(monsterPart)
+		markDead(monsterPart, player)
 	end
 end
 
@@ -973,7 +1021,7 @@ function MonsterService.Init()
 	monstersFolder = Util.ensureFolder(workspace, "Monsters")
 	monsterAppearances = findMonsterAppearanceRoot()
 	if not monsterAppearances then
-		warn("[MonsterService] 未找到怪物模板目录：优先查找 Workspace.'Monster image'，其次 ReplicatedStorage.MonsterAppearances")
+		warn("[MonsterService] 未找到怪物模板目录：优先查找 ReplicatedStorage.'Monster image'，其次 ReplicatedStorage.MonsterAppearances")
 	end
 
 	local zones = ZoneService.GetPickupZones()
@@ -987,7 +1035,7 @@ function MonsterService.Init()
 	for _, z in ipairs(zones) do
 		local key = getZoneKey(z.Part)
 		pickupZonesByKey[key] = z
-		-- [修改内容] 在区域 Part 上记录等级属性，方便 GuardianService 读取配置
+		-- 在区域 Part 上记录等级属性，方便 GuardianService 读取配置
 		z.Part:SetAttribute("ZoneLevel", z.Level)
 
 		-- 初始化：先保底到最小值

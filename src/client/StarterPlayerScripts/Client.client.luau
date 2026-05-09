@@ -10,6 +10,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
 local ContextActionService = game:GetService("ContextActionService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -59,7 +60,122 @@ local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChil
 
 -- [修改内容] 移除已被 UIController 接管的 UI Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local requestPromptInteraction = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
+local showDamageNumberRemote = remotes:WaitForChild("ShowDamageNumber") :: RemoteEvent
+
+-- =====================
+-- 伤害数字：克隆 Workspace.区域.伤害数字 模板，从怪物头顶弹出后向下飘落并淡出
+-- =====================
+
+local function findDamageNumberTemplate(): BasePart?
+	local areaFolder = workspace:FindFirstChild("区域")
+	local template = areaFolder and areaFolder:FindFirstChild("伤害数字")
+	if template and template:IsA("BasePart") then
+		return template
+	end
+	warn("[DamageNumber] 未找到模板：Workspace.区域.伤害数字，需要是一个 Part，内部包含 BillboardGui/TextLabel")
+	return nil
+end
+
+local function findFirstTextLabel(root: Instance): TextLabel?
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("TextLabel") then
+			return descendant
+		end
+	end
+	return nil
+end
+
+local function setBillboardEnabledAndAdornee(rootPart: BasePart)
+	for _, descendant in ipairs(rootPart:GetDescendants()) do
+		if descendant:IsA("BillboardGui") then
+			descendant.Enabled = true
+			descendant.AlwaysOnTop = true
+			descendant.Adornee = rootPart
+		end
+	end
+end
+
+local function playDamageNumber(originPosition: Vector3, monsterHeight: number, damage: number)
+	if type(damage) ~= "number" or damage <= 0 then
+		return
+	end
+
+	local template = findDamageNumberTemplate()
+	if not template then
+		return
+	end
+
+	local numberPart = template:Clone()
+	numberPart.Name = "DamageNumber"
+	numberPart.Anchored = true
+	numberPart.CanCollide = false
+	numberPart.CanQuery = false
+	numberPart.CanTouch = false
+	numberPart.Transparency = 1
+
+	local startOffset = Vector3.new(
+		math.random(-100, 100) / 100,
+		(math.max(monsterHeight, 1) * 0.5) + 3,--上升高度
+		math.random(-100, 100) / 100
+	)
+	local driftOffset = Vector3.new(
+		math.random(-120, 120) / 100,
+		-8,--掉落高度
+		math.random(-120, 120) / 100
+	)
+	local startPosition = originPosition + startOffset
+	local endPosition = startPosition + driftOffset
+	numberPart.CFrame = CFrame.new(startPosition)
+	numberPart.Parent = workspace
+
+	setBillboardEnabledAndAdornee(numberPart)
+
+	local label = findFirstTextLabel(numberPart)
+	if label then
+		label.Text = string.format("-%d", math.floor(damage + 0.5))
+		label.TextColor3 = Color3.fromRGB(255, 0, 0)
+		label.TextStrokeColor3 = Color3.fromRGB(20, 10, 0)
+		label.TextStrokeTransparency = 0
+		label.TextTransparency = 0
+		label.Visible = true
+	end
+
+	local moveTween = TweenService:Create(
+		numberPart,
+		TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),--0.9掉落速度
+		{ CFrame = CFrame.new(endPosition) }
+	)
+	moveTween:Play()
+
+	if label then
+		local popTween = TweenService:Create(
+			label,
+			TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+			{ TextSize = math.max(label.TextSize, 34) }
+		)
+		local fadeTween = TweenService:Create(
+			label,
+			TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ TextTransparency = 1, TextStrokeTransparency = 1 }
+		)
+		popTween:Play()
+		task.delay(0.45, function()
+			if label and label.Parent then
+				fadeTween:Play()
+			end
+		end)
+	end
+
+	task.delay(1, function()
+		if numberPart and numberPart.Parent then
+			numberPart:Destroy()
+		end
+	end)
+end
+
+showDamageNumberRemote.OnClientEvent:Connect(function(originPosition: Vector3, monsterHeight: number, damage: number)
+	playDamageNumber(originPosition, monsterHeight, damage)
+end)
 
 
 -- =====================
@@ -233,10 +349,9 @@ end
 local function tryFirePromptInteractionFromKeyboard(keyCode: Enum.KeyCode, source: string)
 	local prompt = findBestVisiblePromptForKey(keyCode)
 	if prompt then
-		-- 不再在按键按下瞬间手动 FireServer。
-		-- 之前这会绕过 Roblox 原生 ProximityPrompt 的 HoldDuration，
-		-- 导致像“收起/卖出/解锁”这类本应长按的交互变成一按就触发。
-		-- 现在改为完全交给 ProximityPrompt 自己处理按住与触发时机。
+		-- 这里不再手动 FireServer。
+		-- 怪物尸体 CollectPrompt 现在统一依赖原生 ProximityPrompt.Triggered，
+		-- 这样既能保留“按一下 E 收取”，也不会和服务端原生链路发生双触发。
 		return
 	else
 		return
@@ -273,6 +388,40 @@ local keyDownDebugState = {
 	[Enum.KeyCode.R] = false,
 	[Enum.KeyCode.F] = false,
 }
+
+
+
+-- [修改内容] 引入必要的数值格式化工具
+local function formatNumberShort(n: number): string
+    if type(n) ~= "number" then return "0" end
+    local abs = math.abs(n)
+    if abs < 1000 then return tostring(math.floor(n)) end
+
+    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
+    
+    local suffixIndex = 0
+    local value = abs
+    
+    while value >= 999.5 and suffixIndex < #suffixes do
+        value /= 1000
+        suffixIndex += 1
+    end
+
+    if value >= 1000 then
+        return string.format("%.2fe%d", value, suffixIndex * 3)
+    end
+    
+    local formatted = (value >= 100) and string.format("%.0f", value) 
+                   or (value >= 10 and string.format("%.1f", value) 
+                   or string.format("%.2f", value))
+
+    if string.find(formatted, "%.") then
+        formatted = string.gsub(formatted, "0+$", "")
+        formatted = string.gsub(formatted, "%.$", "")
+    end
+
+    return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
+end
 
 
 
@@ -513,42 +662,6 @@ local function createWindow(titleText: string): Frame
 	return frame
 end
 
--- [修改内容] 引入必要的数值格式化工具
-local function formatNumberShort(n: number): string
-    if type(n) ~= "number" then return "0" end
-    local abs = math.abs(n)
-    if abs < 1000 then return tostring(math.floor(n)) end
-
-    local suffixes = {"K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qd", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg"}
-    
-    local suffixIndex = 0
-    local value = abs
-    
-    while value >= 999.5 and suffixIndex < #suffixes do
-        value /= 1000
-        suffixIndex += 1
-    end
-
-    if value >= 1000 then
-        return string.format("%.2fe%d", value, suffixIndex * 3)
-    end
-    
-    local formatted = (value >= 100) and string.format("%.0f", value) 
-                   or (value >= 10 and string.format("%.1f", value) 
-                   or string.format("%.2f", value))
-
-    if string.find(formatted, "%.") then
-        formatted = string.gsub(formatted, "0+$", "")
-        formatted = string.gsub(formatted, "%.$", "")
-    end
-
-    return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
-end
-
-
-
-
-
 -- =====================
 -- Home 头像显示：一直显示
 -- 仅本地创建，因此只有玩家自己可见
@@ -782,7 +895,7 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 	local targetIntensity = 0
 	if isChased and minDistance < 60 then
 		-- 当距离为 60 时强度为 0.1，完全贴脸时强度可达 1.5
-		targetIntensity = math.clamp(1 - (minDistance / 60), 0.1, 1) * 1.5 
+		targetIntensity = math.clamp(1 - (minDistance / 60), 0.1, 1) * 1
 	end
 	
 	-- 平滑过渡抖动强度，防止开始和停止时画面突兀

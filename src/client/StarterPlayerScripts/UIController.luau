@@ -28,7 +28,7 @@ local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") ::
 -- =====================
 local mainGui = player:WaitForChild("PlayerGui"):WaitForChild("MainUI") :: ScreenGui
 local goldLabel = mainGui:WaitForChild("GoldFrame"):WaitForChild("GoldLabel") :: TextLabel
--- [修改内容] 引用金币增减提示的 TextLabel
+-- 引用金币增减提示的 TextLabel
 local addGoldUI = mainGui:WaitForChild("GoldFrame"):WaitForChild("addGoldUI") :: TextLabel
 local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") :: Frame
 local monsterInventoryList = monsterInventoryWindow:WaitForChild("List") :: ScrollingFrame
@@ -37,12 +37,12 @@ local rowTemplate = monsterInventoryWindow:WaitForChild("RowTemplate") :: ImageB
 local inventoryCloseBtn = monsterInventoryWindow:WaitForChild("guanbibb", 5) :: GuiButton?
 
 
--- [修改内容] 引用删除数据按钮
+-- 引用删除数据按钮
 local deleteBtn = mainGui:WaitForChild("delete") :: ImageButton
--- [修改内容] 引用清空数据的远程事件
+-- 引用清空数据的远程事件
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
 
--- [修改内容] 新增武器列表、武器模板和选项卡按钮的变量引用
+-- 新增武器列表、武器模板和选项卡按钮的变量引用
 local weaponList = monsterInventoryWindow:WaitForChild("weaponList") :: ScrollingFrame
 local weaponTemplate = monsterInventoryWindow:WaitForChild("WeaponTemplate") :: GuiObject
 local monsterTabBtn = monsterInventoryWindow:WaitForChild("monster") :: GuiButton
@@ -55,14 +55,14 @@ local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
 -- [终极修复] 先声明攻击按钮变量，但不立刻查找，避免由于 UI 加载延迟导致永远为 nil
 local attackButton: ImageButton? = nil
 
--- [修改内容] 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
+-- 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
 local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度", true) :: ImageButton?
 local normalSpeedBgOn = speedToggleButton and speedToggleButton:FindFirstChild("开启常速背景") :: ImageLabel?
 local normalSpeedBgOff = speedToggleButton and speedToggleButton:FindFirstChild("关闭常速背景") :: ImageLabel?
 local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("开/关速度状态") :: TextLabel?
 local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升级后的加速状态）
 
--- [修改内容] 引用您预设的商店 UI
+-- 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
 local shopsGui = playerGui:WaitForChild("ShopsUI")
 
@@ -73,7 +73,7 @@ local upgradeTemplate = upgradeWindow:WaitForChild("RowTemplate") :: GuiObject
 local upgradeList = upgradeWindow:FindFirstChild("List") or upgradeWindow
 upgradeTemplate.Visible = false -- 隐藏原始模板，防止它作为实体显示出来
 
--- [修改内容] 武器商店引用
+-- 武器商店引用
 local weaponWindow = shopsGui:FindFirstChild("武器商店Window")
 local weaponShopList = weaponWindow and weaponWindow:FindFirstChild("List")
 local weaponShopTemplate = weaponWindow and weaponWindow:FindFirstChild("单个武器背景")
@@ -245,9 +245,9 @@ end
 
 
 -- =====================
--- [修改内容] 升级商店逻辑
+-- 升级商店逻辑
 -- =====================
--- [修改内容] 融合了你优秀的表驱动循环逻辑，以及精准的 UI 模板文本分离映射
+-- 融合了你优秀的表驱动循环逻辑，以及精准的 UI 模板文本分离映射
 local function refreshUpgradeShopUI()
 	-- 1. 清理旧条目
 	for _, ch in ipairs(upgradeList:GetChildren()) do
@@ -348,7 +348,9 @@ local function refreshMonsterInventoryUI(payload)
 		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
-	local monsterFolder = workspace:FindFirstChild("Monster image")
+	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+		or workspace:FindFirstChild("Monster image")
 
 	for i, it in ipairs(payload or {}) do
 		local row = rowTemplate:Clone()
@@ -380,14 +382,14 @@ end
 -- =====================
 local function refreshWeaponInventoryUI()
 	for _, ch in ipairs(weaponList:GetChildren()) do
-		-- [修改内容] 改为判断 UILayout
+		-- 改为判断 UILayout
 		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
 	
-	-- [修改内容] 精确定位到 Workspace 下的 "weapon" 文件夹
+	-- 精确定位到 Workspace 下的 "weapon" 文件夹
 	local weaponFolder = workspace:FindFirstChild("weapon")
 
 	for i = 1, maxWeaponLevel do
@@ -400,7 +402,7 @@ local function refreshWeaponInventoryUI()
 			label.Text = Config.WEAPON_NAME_BY_LEVEL[i] or ("Weapon " .. i)
 		end
 		
-		-- [修改内容] 根据命名规则 "武器01-20" 匹配加载
+		-- 根据命名规则 "武器01-20" 匹配加载
 		local imageContainer = row:FindFirstChild("ImageLabel")
 		if imageContainer and weaponFolder then
 			local iconName = string.format("武器%02d", i)
@@ -426,7 +428,7 @@ local function refreshWeaponInventoryUI()
 end
 
 -- =====================
--- [修改内容] 选项卡切换逻辑
+-- 选项卡切换逻辑
 -- =====================
 local function switchInventoryTab(tabName: string)
 	if tabName == "monster" then

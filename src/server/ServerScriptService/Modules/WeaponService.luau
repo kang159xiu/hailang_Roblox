@@ -14,6 +14,7 @@ local WeaponService = {}
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local useSkillRemote = remotes:WaitForChild("RequestUseWeaponSkill") :: RemoteEvent
+local showDamageNumberRemote = remotes:WaitForChild("ShowDamageNumber") :: RemoteEvent
 
 -- 玩家技能冷却
 local lastSkillAt: {[number]: number} = {}
@@ -51,15 +52,17 @@ local function findMonstersInRadius(center: Vector3, radius: number): {BasePart}
 	return out
 end
 
-local function applyDamageToMonsterPart(_player: Player, monster: BasePart, damage: number)
+local function applyDamageToMonsterPart(player: Player, monster: BasePart, damage: number)
 	local hp = monster:GetAttribute("HP")
 	if type(hp) ~= "number" or hp <= 0 then
 		return
 	end
 
+	local shownDamage = math.min(damage, hp)
 	monster:SetAttribute("HP", math.max(0, hp - damage))
+	showDamageNumberRemote:FireAllClients(monster.Position, monster.Size.Y, shownDamage)
 	if (monster:GetAttribute("HP") :: number) <= 0 then
-		MonsterService.MarkDead(monster)
+		MonsterService.MarkDead(monster, player)
 	end
 end
 

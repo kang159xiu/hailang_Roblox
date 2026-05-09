@@ -325,7 +325,7 @@ function PlayerData.ApplyLoaded(player: Player, loaded: PersistedPlayerData)
 	PlayerData.Sync(player)
 end
 
--- [修改内容] 强制重置玩家所有基础属性为 0 或 1 级
+-- 强制重置玩家所有基础属性为 0 或 1 级
 function PlayerData.ResetData(player: Player)
 	local stats = data[player.UserId]
 	if not stats then return end

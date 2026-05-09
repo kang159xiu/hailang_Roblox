@@ -5,9 +5,7 @@
 -- 1) 你在 Workspace 放好：武器1、怪物形象1（必需）
 -- 2) 模板可以放在 Workspace 任意层级（支持 FindFirstChild(..., true) 递归查找）
 -- 3) 如果你后续自己做了 武器2/武器3... 或 怪物形象2...，本服务会优先用对应编号的模板；
---    如果没做，就用 1 号模板克隆补齐。
---
-
+--    如果没做，就用 1 号模板克隆
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -192,7 +190,8 @@ local function findWeaponTemplate(index: number): Instance?
 end
 
 local function findMonsterTemplate(index: number): Instance?
-	local monsterRoot = workspace:FindFirstChild("Monster image")
+	local monsterRoot = ReplicatedStorage:FindFirstChild("Monster image")
+		or workspace:FindFirstChild("Monster image")
 	local names = getMonsterTemplateNames(index)
 	if monsterRoot then
 		-- 优先只取 Monster image 文件夹的“直接子级”，避免误选到其它地方的同名对象
@@ -209,7 +208,7 @@ local function findMonsterTemplate(index: number): Instance?
 		end
 	end
 
-	return findByNames(workspace, names)
+	return findByNames(ReplicatedStorage, names) or findByNames(workspace, names)
 end
 
 local function ensureWeaponAppearances()
@@ -236,7 +235,7 @@ end
 local function ensureMonsterAppearances()
 	local base = findMonsterTemplate(1)
 	if not base or not isAllowedTemplate(base) then
-		warn("[AppearanceBootstrapService] 未找到怪物模板：请在 Workspace 任意位置放置 名称=怪物形象01/怪物形象1（Model/Folder/BasePart）")
+		warn("[AppearanceBootstrapService] 未找到怪物模板：请在 ReplicatedStorage.'Monster image' 中放置 名称=怪物形象01/怪物形象1（Model/Folder/BasePart）")
 		return
 	end
 

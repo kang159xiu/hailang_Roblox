@@ -24,6 +24,11 @@ export type MonsterItem = {
 	MonsterLevel: number,
 	Value: number,
 	GoldPerSec: number,
+	UpgradeLevel: number?,
+	BaseValue: number?,
+	BaseGoldPerSec: number?,
+	SourceZoneLevel: number?,
+	StorageKind: string?,
 }
 
 type CarriedMonster = {
@@ -45,6 +50,29 @@ local toolCacheFolder: Folder? = nil
 -- 玩家“携带中”的怪（在刷怪区拾取后显示在头顶，直到碰到 gorund 标签区域后转换成 Tool）
 local carriedByUserId: {[number]: {CarriedMonster}} = {}
 local carriedHolderByUserId: {[number]: Folder?} = {}
+
+local function normalizeMonsterItem(raw: any): MonsterItem
+	local monsterLevel = math.max(1, math.floor(tonumber(raw.MonsterLevel) or 1))
+	local value = math.floor(tonumber(raw.Value) or 0)
+	local goldPerSec = math.floor(tonumber(raw.GoldPerSec) or 0)
+	local upgradeLevel = math.max(1, math.floor(tonumber(raw.UpgradeLevel) or 1))
+	local baseValue = math.floor(tonumber(raw.BaseValue) or math.floor(value / math.max(upgradeLevel, 1)))
+	local baseGoldPerSec = math.floor(tonumber(raw.BaseGoldPerSec) or math.floor(goldPerSec / math.max(upgradeLevel, 1)))
+	local sourceZoneLevel = math.max(1, math.floor(tonumber(raw.SourceZoneLevel) or 1))
+	local storageKind = tostring(raw.StorageKind or "Inventory")
+
+	return {
+		ItemId = tostring(raw.ItemId or ""),
+		MonsterLevel = monsterLevel,
+		Value = value,
+		GoldPerSec = goldPerSec,
+		UpgradeLevel = upgradeLevel,
+		BaseValue = baseValue,
+		BaseGoldPerSec = baseGoldPerSec,
+		SourceZoneLevel = sourceZoneLevel,
+		StorageKind = storageKind,
+	}
+end
 
 local function getRemotes(): Folder?
 	local f = ReplicatedStorage:FindFirstChild("Remotes")
@@ -139,14 +167,22 @@ local function sanitizeModel(model: Instance): BasePart?
 end
 
 local function getMonsterAppearanceTemplate(monsterLevel: number): Instance?
-	local folder = ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	local folder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
 	if not folder or not folder:IsA("Folder") then
 		return nil
 	end
 
-	return folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+	local level2 = string.format("%02d", monsterLevel)
+	return folder:FindFirstChild("怪物形象" .. level2)
+		or folder:FindFirstChild("怪物形象" .. tostring(monsterLevel))
+		or folder:FindFirstChild("怪物形象 " .. level2)
 		or folder:FindFirstChild("怪物形象 " .. tostring(monsterLevel))
 		or folder:FindFirstChild("Lv" .. tostring(monsterLevel))
+		or folder:FindFirstChild("怪物形象01")
+		or folder:FindFirstChild("怪物形象1")
+		or folder:FindFirstChild("怪物形象 01")
+		or folder:FindFirstChild("怪物形象 1")
 end
 
 local function ensureHandle(tool: Tool): BasePart
@@ -188,7 +224,9 @@ end
 -- 运行时模板烘焙：把怪物外观模板预处理成可直接使用的 Tool
 local function buildToolTemplates()
 	-- 读取场景中的怪物外观文件夹
-	local sourceFolder = workspace:FindFirstChild("Monster image") or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+	local sourceFolder = ReplicatedStorage:FindFirstChild("Monster image")
+		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
+		or workspace:FindFirstChild("Monster image")
 	if not sourceFolder then return end
 
 	local cache = ensureToolCacheFolder()
@@ -335,6 +373,47 @@ local function createMonsterToolFromData(monsterLevel: number, value: number, go
 		applyMonsterAppearanceToTool(tool, monsterLevel)
 	end
 	return tool
+end
+
+local function applyMonsterDataToTool(tool: Tool, item: MonsterItem)
+	local normalized = normalizeMonsterItem(item)
+	tool:SetAttribute("IsMonsterItem", true)
+	tool:SetAttribute("MonsterLevel", normalized.MonsterLevel)
+	tool:SetAttribute("Value", normalized.Value)
+	tool:SetAttribute("GoldPerSec", normalized.GoldPerSec)
+	tool:SetAttribute("UpgradeLevel", normalized.UpgradeLevel or 1)
+	tool:SetAttribute("BaseValue", normalized.BaseValue or normalized.Value)
+	tool:SetAttribute("BaseGoldPerSec", normalized.BaseGoldPerSec or normalized.GoldPerSec)
+	tool:SetAttribute("SourceZoneLevel", normalized.SourceZoneLevel or 1)
+	tool:SetAttribute("FromGacha", true)
+end
+
+local function collectMonsterToolsFromContainer(container: Instance?, out: {MonsterItem}, seenTools: {[Tool]: boolean})
+	if not container then
+		return
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("IsMonsterItem") == true then
+			local tool = child :: Tool
+			if seenTools[tool] then
+				continue
+			end
+			seenTools[tool] = true
+			local item = normalizeMonsterItem({
+				ItemId = newItemId(),
+				MonsterLevel = tool:GetAttribute("MonsterLevel"),
+				Value = tool:GetAttribute("Value"),
+				GoldPerSec = tool:GetAttribute("GoldPerSec"),
+				UpgradeLevel = tool:GetAttribute("UpgradeLevel"),
+				BaseValue = tool:GetAttribute("BaseValue"),
+				BaseGoldPerSec = tool:GetAttribute("BaseGoldPerSec"),
+				SourceZoneLevel = tool:GetAttribute("SourceZoneLevel"),
+				StorageKind = "Tool",
+			})
+			table.insert(out, item)
+		end
+	end
 end
 
 local function clearCarried(player: Player)
@@ -516,12 +595,17 @@ local function convertCarriedToTools(player: Player, autoEquipOne: boolean): num
 			"" -- IMPORTANT: 从携带态来的 Tool 不属于背包列表
 		)
 		
-		-- 写入强化属性
-		local upLevel = (c :: any).UpgradeLevel or 1
-		tool:SetAttribute("UpgradeLevel", upLevel)
-		tool:SetAttribute("BaseValue", c.Value / upLevel)
-		tool:SetAttribute("BaseGoldPerSec", c.GoldPerSec / upLevel)
-		tool:SetAttribute("FromGacha", true)
+		applyMonsterDataToTool(tool, {
+			ItemId = "",
+			MonsterLevel = c.MonsterLevel,
+			Value = c.Value,
+			GoldPerSec = c.GoldPerSec,
+			UpgradeLevel = (c :: any).UpgradeLevel or 1,
+			BaseValue = math.floor(c.Value / math.max((c :: any).UpgradeLevel or 1, 1)),
+			BaseGoldPerSec = math.floor(c.GoldPerSec / math.max((c :: any).UpgradeLevel or 1, 1)),
+			SourceZoneLevel = (c :: any).SourceZoneLevel or 1,
+			StorageKind = "Tool",
+		})
 		tool.Parent = backpack
 		if not firstTool then firstTool = tool end
 	end
@@ -616,20 +700,24 @@ function InventoryService.GetItems(player: Player): {MonsterItem}
 	return itemsByUserId[player.UserId] or {}
 end
 
--- 仅用于“收起放置怪” -> 进入背包 UI
-function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number, value: number, goldPerSec: number): boolean
+function InventoryService.TryAddMonsterItem(player: Player, monsterLevel: number, value: number, goldPerSec: number, upgradeLevel: number?, baseValue: number?, baseGoldPerSec: number?, sourceZoneLevel: number?): boolean
 	local list = itemsByUserId[player.UserId]
 	if not list then
 		list = {}
 		itemsByUserId[player.UserId] = list
 	end
 
-	local item: MonsterItem = {
+	local item: MonsterItem = normalizeMonsterItem({
 		ItemId = newItemId(),
 		MonsterLevel = monsterLevel,
 		Value = value,
 		GoldPerSec = goldPerSec,
-	}
+		UpgradeLevel = upgradeLevel,
+		BaseValue = baseValue,
+		BaseGoldPerSec = baseGoldPerSec,
+		SourceZoneLevel = sourceZoneLevel,
+		StorageKind = "Inventory",
+	})
 	table.insert(list, item)
 
 	DataDirtyService.MarkDirty(player)
@@ -734,6 +822,7 @@ function InventoryService.TakeOutToTool(player: Player, itemId: string)
 		it.GoldPerSec,
 		"" -- IMPORTANT: 拿出后不再属于背包列表
 	)
+	applyMonsterDataToTool(tool, it)
 	tool.Parent = backpack
 end
 
@@ -758,39 +847,92 @@ end
 function InventoryService.Export(player: Player): {MonsterItem}
 	local list = itemsByUserId[player.UserId] or {}
 	local out: {MonsterItem} = {}
+	local seenTools: {[Tool]: boolean} = {}
 	for _, it in ipairs(list) do
-		local item: MonsterItem = {
+		table.insert(out, normalizeMonsterItem({
 			ItemId = tostring(it.ItemId),
-			MonsterLevel = math.max(1, math.floor(tonumber(it.MonsterLevel) or 1)),
-			Value = math.floor(tonumber(it.Value) or 0),
-			GoldPerSec = math.floor(tonumber(it.GoldPerSec) or 0),
-		}
-		table.insert(out, item)
+			MonsterLevel = it.MonsterLevel,
+			Value = it.Value,
+			GoldPerSec = it.GoldPerSec,
+			UpgradeLevel = (it :: any).UpgradeLevel,
+			BaseValue = (it :: any).BaseValue,
+			BaseGoldPerSec = (it :: any).BaseGoldPerSec,
+			SourceZoneLevel = (it :: any).SourceZoneLevel,
+			StorageKind = (it :: any).StorageKind or "Inventory",
+		}))
 	end
+
+	local carried = carriedByUserId[player.UserId] or {}
+	for _, it in ipairs(carried) do
+		table.insert(out, normalizeMonsterItem({
+			ItemId = newItemId(),
+			MonsterLevel = it.MonsterLevel,
+			Value = it.Value,
+			GoldPerSec = it.GoldPerSec,
+			UpgradeLevel = it.UpgradeLevel,
+			BaseValue = math.floor(it.Value / math.max(it.UpgradeLevel, 1)),
+			BaseGoldPerSec = math.floor(it.GoldPerSec / math.max(it.UpgradeLevel, 1)),
+			SourceZoneLevel = it.SourceZoneLevel,
+			StorageKind = "Carried",
+		}))
+	end
+
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	collectMonsterToolsFromContainer(backpack, out, seenTools)
+	collectMonsterToolsFromContainer(player.Character, out, seenTools)
 	return out
 end
 
 function InventoryService.ApplyLoaded(player: Player, loadedItems: {MonsterItem}?)
 	local list: {MonsterItem} = {}
+	local carriedList: {CarriedMonster} = {}
+	local toolItems: {MonsterItem} = {}
 	if type(loadedItems) == "table" then
 		for _, it in ipairs(loadedItems) do
 			if type(it) == "table" then
 				local itemId = tostring((it :: any).ItemId or "")
 				if itemId ~= "" then
-					local item: MonsterItem = {
-						ItemId = itemId,
-						MonsterLevel = math.max(1, math.floor(tonumber((it :: any).MonsterLevel) or 1)),
-						Value = math.floor(tonumber((it :: any).Value) or 0),
-						GoldPerSec = math.floor(tonumber((it :: any).GoldPerSec) or 0),
-					}
-					table.insert(list, item)
+					local item = normalizeMonsterItem(it)
+					if item.StorageKind == "Tool" then
+						table.insert(toolItems, item)
+					elseif item.StorageKind == "Carried" then
+						table.insert(carriedList, {
+							MonsterLevel = item.MonsterLevel,
+							Value = item.Value,
+							GoldPerSec = item.GoldPerSec,
+							UpgradeLevel = item.UpgradeLevel or 1,
+							SourceZoneLevel = item.SourceZoneLevel or 1,
+						})
+					else
+						table.insert(list, item)
+					end
 				end
 			end
 		end
 	end
 
 	itemsByUserId[player.UserId] = list
+	carriedByUserId[player.UserId] = carriedList
 	syncToClient(player)
+	rebuildCarriedVisual(player)
+
+	if #toolItems > 0 then
+		task.defer(function()
+			local backpack = player:FindFirstChildOfClass("Backpack")
+			if not backpack then
+				backpack = player:WaitForChild("Backpack", 3) :: any
+			end
+			if not backpack or not backpack:IsA("Backpack") then
+				return
+			end
+
+			for _, item in ipairs(toolItems) do
+				local tool = createMonsterToolFromData(item.MonsterLevel, item.Value, item.GoldPerSec, "")
+				applyMonsterDataToTool(tool, item)
+				tool.Parent = backpack
+			end
+		end)
+	end
 
 end
 
