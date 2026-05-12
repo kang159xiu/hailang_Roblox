@@ -59,6 +59,11 @@ ensureRemoteEvent(remotesFolder, "RequestTakeOutMonsterItem")
 -- 测试：清空玩家数据
 ensureRemoteEvent(remotesFolder, "RequestClearPlayerData")
 
+-- 新手引导
+ensureRemoteEvent(remotesFolder, "TutorialUpdate")
+ensureRemoteEvent(remotesFolder, "TutorialRequestRetarget")
+ensureRemoteEvent(remotesFolder, "TutorialClientReachedTarget")
+
 -- 确保 StarterPack.Weapon 有 Handle（Tool.RequiresHandle=true 时必须）
 local function ensureWeaponToolHasHandle()
 	local weapon = StarterPack:FindFirstChild("Weapon")
@@ -117,7 +122,6 @@ local InventoryService = require(script.Parent:WaitForChild("Modules"):WaitForCh
 local HomeService = require(script.Parent:WaitForChild("Modules"):WaitForChild("HomeService"))
 local PlacementService = require(script.Parent:WaitForChild("Modules"):WaitForChild("PlacementService"))
 local MonsterService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MonsterService"))
-local LavaService = require(script.Parent:WaitForChild("Modules"):WaitForChild("LavaService"))
 local MerchantService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MerchantService"))
 local ZoneService = require(script.Parent:WaitForChild("Modules"):WaitForChild("ZoneService"))
 local WeaponToolService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponToolService"))
@@ -125,6 +129,7 @@ local WeaponAppearanceService = require(script.Parent:WaitForChild("Modules"):Wa
 local WeaponService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponService"))
 --引入新的守护者系统模块
 local GuardianService = require(script.Parent:WaitForChild("Modules"):WaitForChild("GuardianService"))
+local TutorialService = require(script.Parent:WaitForChild("Modules"):WaitForChild("TutorialService"))
 
 AppearanceBootstrapService.Init()
 WeaponToolService.Init()
@@ -138,8 +143,8 @@ InventoryService.Init()
 HomeService.Init()
 PlacementService.Init()
 MonsterService.Init()
-LavaService.Init()
 MerchantService.Init()
+TutorialService.Init()
 WeaponService.Init()
 --  启动守护者系统的全局初始化（生成待机的守护者并开启追踪循环）
 GuardianService.Init()

@@ -749,6 +749,10 @@ function InventoryService.PickupCarryMonster(player: Player, level: number, valu
 
 	rebuildCarriedVisual(player)
 	pushToast(player, string.format("Picked up: Monster Lv.%d (Carry %d/%d)", level, #list, maxCarry))
+	task.defer(function()
+		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
+		TutorialService.OnMonsterAcquired(player)
+	end)
 	return true
 end
 

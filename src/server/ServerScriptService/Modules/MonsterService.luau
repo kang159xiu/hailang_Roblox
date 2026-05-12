@@ -144,6 +144,56 @@ local function syncMonsterModelAttribute(monsterPart: BasePart, name: string, va
 	end
 end
 
+local function getOrCreateMonsterGlowOutline(monsterPart: BasePart): Highlight?
+	local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
+	if not monsterInstance or not monsterInstance.Parent then
+		return nil
+	end
+
+	local glowOutline = monsterInstance:FindFirstChild("GlowOutline")
+	if glowOutline and not glowOutline:IsA("Highlight") then
+		glowOutline:Destroy()
+		glowOutline = nil
+	end
+
+	if not glowOutline then
+		glowOutline = Instance.new("Highlight")
+		glowOutline.Name = "GlowOutline"
+		glowOutline.Parent = monsterInstance
+	end
+
+	return glowOutline :: Highlight
+end
+
+local function setCollectibleMonsterOutline(monsterPart: BasePart, enabled: boolean)
+	local highlight = getOrCreateMonsterGlowOutline(monsterPart)
+	if not highlight then
+		return
+	end
+
+	if enabled then
+		highlight.Enabled = true
+		highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+		highlight.FillColor = Color3.fromRGB(255, 255, 255)
+		highlight.OutlineTransparency = 0.4
+		highlight.FillTransparency = 1
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	else
+		highlight.Enabled = false
+		highlight.OutlineTransparency = 1
+		highlight.FillTransparency = 1
+	end
+end
+
+local function syncCollectibleMonsterOutline(monsterPart: BasePart)
+	local shouldShow = monsterPart:GetAttribute("IsMonster") == true
+		and monsterPart:GetAttribute("Dead") == true
+		and monsterPart:GetAttribute("Collected") ~= true
+		and monsterPart.Parent ~= nil
+
+	setCollectibleMonsterOutline(monsterPart, shouldShow)
+end
+
 
 local function buildBillboard(monsterPart: BasePart)
 	-- 修改 buildBillboard 函数，使其克隆 Workspace 中的预设模板
@@ -232,6 +282,7 @@ end
 
 local function destroyMonsterInstance(monsterPart: BasePart)
 	aliveMonsters[monsterPart] = nil
+	setCollectibleMonsterOutline(monsterPart, false)
 	local monsterInstance = getMonsterInstanceFromRoot(monsterPart)
 	if monsterInstance and monsterInstance.Parent then
 		monsterInstance:Destroy()
@@ -310,6 +361,8 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	end
 
 	monsterPart:SetAttribute("Collected", true)
+	syncMonsterModelAttribute(monsterPart, "Collected", true)
+	syncCollectibleMonsterOutline(monsterPart)
 	if prompt then
 		prompt.Enabled = false
 	end
@@ -357,6 +410,8 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	end
 
 	monsterPart:SetAttribute("Collected", false)
+	syncMonsterModelAttribute(monsterPart, "Collected", false)
+	syncCollectibleMonsterOutline(monsterPart)
 	if prompt then
 		prompt.Enabled = true
 	end
@@ -611,6 +666,17 @@ local function markDead(monsterPart: BasePart, killerPlayer: Player?)
 		)
 
 		if pickedUp then
+			local zoneKey = monsterPart:GetAttribute("ZoneKey")
+			if type(zoneKey) == "string" then
+				local zoneInfo = pickupZonesByKey[zoneKey]
+				if zoneInfo and zoneInfo.Part then
+					task.spawn(function()
+						local GuardianService = require(script.Parent:WaitForChild("GuardianService"))
+						GuardianService.TriggerAlert(killerPlayer, zoneInfo.Part)
+					end)
+				end
+			end
+
 			monsterPart:SetAttribute("Dead", true)
 			syncMonsterModelAttribute(monsterPart, "Dead", true)
 			monsterPart:SetAttribute("Collected", true)
@@ -623,7 +689,10 @@ local function markDead(monsterPart: BasePart, killerPlayer: Player?)
 	-- 不改变外观颜色：保持“死亡前后模型一致”（你要求）
 	monsterPart:SetAttribute("Dead", true)
 	syncMonsterModelAttribute(monsterPart, "Dead", true)
+	monsterPart:SetAttribute("Collected", false)
+	syncMonsterModelAttribute(monsterPart, "Collected", false)
 	ensureCollectPrompt(monsterPart)
+	syncCollectibleMonsterOutline(monsterPart)
 	setMonsterBillboardText(monsterPart)
 end
 
@@ -831,34 +900,42 @@ local function playMonsterJumpEffect(monsterPart: BasePart, monsterModel: Model)
 	jumpTween:Play()
 end
 
--- [新增内容] 处理怪物受击时的变红特效
+-- [新增内容] 处理怪物受击时的红色描边特效
 local function playMonsterDamageColorEffect(monsterPart: BasePart, monsterModel: Model)
-	-- [修改原因: 防抖锁。如果怪物已经在变色倒计时中，则忽略，防止覆盖原有颜色记录]
+	-- [修改原因: 防抖锁。如果怪物已经在受击描边倒计时中，则忽略，防止频繁重复创建/关闭描边]
 	if monsterPart:GetAttribute("IsColorChanging") == true then
 		return
 	end
 	monsterPart:SetAttribute("IsColorChanging", true)
 
-	local originalColors = {}
-	
-	-- 遍历模型下所有基础部件，记录原色并将其染红
-	for _, descendant in ipairs(monsterModel:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			originalColors[descendant] = descendant.Color
-			descendant.Color = Color3.fromRGB(255, 0, 0) -- [修改原因: 受击瞬间将各个部件变为红色]
-		end
+	local highlight = getOrCreateMonsterGlowOutline(monsterPart)
+	if not highlight then
+		monsterPart:SetAttribute("IsColorChanging", false)
+		return
 	end
 
-	-- 0.2秒后恢复原本颜色
+	highlight.Enabled = true
+	highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+	highlight.FillColor = Color3.fromRGB(255, 0, 0)
+	highlight.OutlineTransparency = 1
+	highlight.FillTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+
+	-- 0.2秒后隐藏红色高亮：透明度都设为 1，避免怪物皮肤/高亮一直维持红色
 	task.delay(0.2, function()
-		for part, origColor in pairs(originalColors) do
-			if part and part.Parent then
-				part.Color = origColor -- [修改原因: 恢复记录的初始颜色]
+		if highlight and highlight.Parent then
+			-- 如果这次受击刚好打死怪物并且尸体可拾取，则恢复为白色可拾取描边；否则关闭受击描边。
+			if monsterPart and monsterPart.Parent then
+				syncCollectibleMonsterOutline(monsterPart)
+			else
+				highlight.Enabled = false
+				highlight.OutlineTransparency = 1
+				highlight.FillTransparency = 1
 			end
 		end
 		
 		if monsterPart and monsterPart.Parent then
-			monsterPart:SetAttribute("IsColorChanging", false) -- [修改原因: 解除变色锁定状态]
+			monsterPart:SetAttribute("IsColorChanging", false) -- [修改原因: 解除受击描边锁定状态]
 		end
 	end)
 end
@@ -1002,6 +1079,25 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	task.delay(Config.MONSTER_LIFETIME_SECONDS, function()
 		if clone and clone.Parent then clone:Destroy() end
 	end)
+end
+
+function MonsterService.GetRandomAliveMonsterInZoneLevel(zoneLevel: number): BasePart?
+	local candidates: {BasePart} = {}
+	for monsterPart in pairs(aliveMonsters) do
+		if monsterPart.Parent ~= nil
+			and monsterPart:IsDescendantOf(monstersFolder)
+			and monsterPart:GetAttribute("IsMonster") == true
+			and monsterPart:GetAttribute("Dead") ~= true
+			and monsterPart:GetAttribute("Collected") ~= true
+			and monsterPart:GetAttribute("ZoneLevel") == zoneLevel then
+			table.insert(candidates, monsterPart)
+		end
+	end
+
+	if #candidates == 0 then
+		return nil
+	end
+	return candidates[math.random(1, #candidates)]
 end
 
 

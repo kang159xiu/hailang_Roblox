@@ -33,6 +33,33 @@ local setupViewport
 local hasGachaPreview
 local refreshGachaPreview
 
+local function appendUnique(list: {Instance}, inst: Instance?)
+	if not inst then
+		return
+	end
+	for _, existing in ipairs(list) do
+		if existing == inst then
+			return
+		end
+	end
+	table.insert(list, inst)
+end
+
+local function getMonsterFolderCandidates(): {Instance}
+	local folders = {}
+	appendUnique(folders, ReplicatedStorage:FindFirstChild("Monster image"))
+	appendUnique(folders, ReplicatedStorage:FindFirstChild("MonsterAppearances"))
+	appendUnique(folders, workspace:FindFirstChild("Monster image"))
+	return folders
+end
+
+local function findMonsterFolder(): Instance?
+	-- [资源路径] 怪物形象主路径是 ReplicatedStorage 下名为 "Monster image" 的文件夹。
+	-- 因为文件夹名中间有空格，代码里不能写 ReplicatedStorage.Monster image，必须用 FindFirstChild("Monster image")。
+	-- MonsterAppearances 是服务端整理后的兼容备用目录；Workspace.Monster image 作为最后兜底。
+	return getMonsterFolderCandidates()[1]
+end
+
 local touchDebounce = false
 local gachaTouchConnection: RBXScriptConnection? = nil
 
@@ -59,15 +86,14 @@ hasGachaPreview = function()
 end
 
 refreshGachaPreview = function(isDebug: boolean)
-	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
-		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
-		or workspace:FindFirstChild("Monster image")
+	local monsterFolder = findMonsterFolder()
 	if not monsterFolder then
 		warn("❌ [致命错误] 在 ReplicatedStorage 中没找到 'Monster image'（也未找到兼容目录 MonsterAppearances）！请检查名字。")
 		return false
 	end
 
 	print("📁 成功找到装怪物的文件夹:", monsterFolder:GetFullName())
+	task.wait(0.5)
 
 	for _, vpf in ipairs(vpfList) do
 		local randomLevel = math.random(1, 5)
@@ -165,14 +191,95 @@ findMonsterTemplate = function(folder, level)
 		strNormal, strZero
 	}
 
+	local nameSet = {}
 	for _, name in ipairs(names) do
-		local found = folder:FindFirstChild(name)
-		if found then 
-			return found 
+		nameSet[name] = true
+	end
+
+	local function isRenderableTemplate(inst: Instance): boolean
+		return inst:IsA("BasePart")
+			or ((inst:IsA("Model") or inst:IsA("Folder")) and inst:FindFirstChildWhichIsA("BasePart", true) ~= nil)
+	end
+
+	local function scoreTemplate(inst: Instance): number
+		if not isRenderableTemplate(inst) then
+			return -1
+		end
+
+		local score = #inst:GetDescendants()
+		if inst:IsA("Model") then
+			score += 1000000
+		elseif inst:IsA("Folder") then
+			score += 200000
+		elseif inst:IsA("BasePart") then
+			score += 100000
+		end
+		return score
+	end
+
+	local function findInRoot(root: Instance): Instance?
+		local best: Instance? = nil
+		local bestScore = -1
+
+		local function consider(candidate: Instance?)
+			if not candidate then
+				return
+			end
+			local score = scoreTemplate(candidate)
+			if score > bestScore then
+				best = candidate
+				bestScore = score
+			end
+		end
+
+		-- 先查直接子级，和 Studio 中 ReplicatedStorage.Monster image.怪物形象01 的结构对应。
+		for _, name in ipairs(names) do
+			consider(root:FindFirstChild(name))
+		end
+
+		if best then
+			return best
+		end
+
+		-- 再递归查找，兼容 Monster image 下面又套了一层文件夹/模型的情况。
+		for _, inst in ipairs(root:GetDescendants()) do
+			if nameSet[inst.Name] then
+				consider(inst)
+
+				-- 如果命中的是某个零件/子物件，向上找最近的 Model，避免只克隆一个定位 Part 导致看不到完整怪物。
+				local cur = inst.Parent
+				while cur and cur ~= root do
+					if cur:IsA("Model") then
+						consider(cur)
+						break
+					end
+					cur = cur.Parent
+				end
+			end
+		end
+
+		return best
+	end
+
+	local roots = {}
+	appendUnique(roots, folder)
+	for _, candidate in ipairs(getMonsterFolderCandidates()) do
+		appendUnique(roots, candidate)
+	end
+
+	for _, root in ipairs(roots) do
+		local found = findInRoot(root)
+		if found then
+			return found
 		end
 	end
+
+	local childNames = {}
+	for _, child in ipairs(folder:GetChildren()) do
+		table.insert(childNames, child.Name .. "(" .. child.ClassName .. ")")
+	end
 	
-	warn("⚠️ [查找失败] 目标等级:", level, " 在文件夹里穷举了所有可能的名字，都没有找到！")
+	warn("⚠️ [查找失败] 目标等级:", level, "候选名字:", table.concat(names, ", "), "主文件夹:", folder:GetFullName(), "直接子级:", table.concat(childNames, ", "))
 	return nil
 end
 
@@ -184,6 +291,10 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 	vpf:ClearAllChildren()
 	if not modelTemplate then return end
 
+	vpf.BackgroundTransparency = 1
+	vpf.Ambient = Color3.fromRGB(180, 180, 180)
+	vpf.LightColor = Color3.fromRGB(255, 255, 255)
+	vpf.LightDirection = Vector3.new(-1, -1, -1)
 
 	-- 1. 直接克隆整个外层 Model，不做任何多余的拆解
 	local clone = modelTemplate:Clone()
@@ -193,56 +304,153 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 	vpf.CurrentCamera = camera
 	camera.Parent = vpf
 
-	-- 2. 优先寻找模板里专门的定位 Part；找不到再多层兜底
-	local anchorPart = nil
-
-	local preferredNames = {
-		"RootPart",
-		clone.Name,
-		"HumanoidRootPart",
-		"Handle",
-		"PrimaryPart",
-		"Root",
-	}
-
-	for _, partName in ipairs(preferredNames) do
-		local found = clone:FindFirstChild(partName, true)
-		if found and found:IsA("BasePart") then
-			anchorPart = found
-			break
+	-- 如果模板本身是 Folder，先包成 Model，方便后续统一 PivotTo / GetBoundingBox。
+	if clone:IsA("Folder") then
+		local wrapper = Instance.new("Model")
+		wrapper.Name = clone.Name .. "_ViewportModel"
+		wrapper.Parent = vpf
+		for _, child in ipairs(clone:GetChildren()) do
+			child.Parent = wrapper
 		end
+		clone:Destroy()
+		clone = wrapper
 	end
 
-	if not anchorPart and clone:IsA("Model") and clone.PrimaryPart then
-		anchorPart = clone.PrimaryPart
+	-- 2. Studio 中的怪物模板结构是：外层怪物模板 > 内部名为 "Model" 的编组 > RootPart/真实外观。
+	-- 真正该显示的是内部 "Model"，不是外层模板；否则外层定位对象或 RootPart 可能把包围盒撑歪，导致相机看向空处。
+	local visualModel = clone:FindFirstChild("Model", true)
+	if visualModel and visualModel:IsA("Model") and visualModel:FindFirstChildWhichIsA("BasePart", true) then
+		visualModel.Parent = vpf
+		clone:Destroy()
+		clone = visualModel
+		print("🧩 使用内部 Model 作为抽奖预览:", clone:GetFullName())
 	end
 
-	if not anchorPart then
-		anchorPart = clone:FindFirstChildWhichIsA("BasePart", true)
+	local function isLikelyVisualPart(part: BasePart): boolean
+		-- RootPart 通常只是透明定位块，不应该决定镜头距离/中心。
+		-- 但如果整个模型只有 RootPart，后面会自动回退使用全部零件，避免完全没包围盒。
+		if part.Name == "RootPart" then
+			return false
+		end
+		if part.Transparency >= 1 then
+			return false
+		end
+		return true
 	end
 
+	local function getVisualBounds(root: Instance): (CFrame?, Vector3?)
+		local parts = {}
+		for _, inst in ipairs(root:GetDescendants()) do
+			if inst:IsA("BasePart") and isLikelyVisualPart(inst) then
+				table.insert(parts, inst)
+			end
+		end
 
-	-- 3. 精准架设摄像机
-	if anchorPart then
-		
-		-- 直接拿你的定位 Part 的大小和位置来对焦
-		local cf = anchorPart.CFrame
-		local size = anchorPart.Size
-		local maxDim = math.max(size.X, size.Y, size.Z)
-		if maxDim < 0.1 then maxDim = 5 end
+		-- 如果排除 RootPart/全透明零件后没有任何可见零件，则回退到全部 BasePart，至少保证能显示。
+		if #parts == 0 then
+			for _, inst in ipairs(root:GetDescendants()) do
+				if inst:IsA("BasePart") then
+					table.insert(parts, inst)
+				end
+			end
+		end
 
-		-- ==========================================
-		-- 🛠️ 调整大小的开关在这里 🛠️
-		local ZOOM_MULTIPLIER = 7  -- 数值越大，相机离定位块越远（怪物显得越小）
-		local HEIGHT_OFFSET = 0.5    -- 数值越大，相机抬得越高
-		-- ==========================================
+		if root:IsA("BasePart") and (#parts == 0 or isLikelyVisualPart(root)) then
+			table.insert(parts, root)
+		end
 
-		-- 使用斜角上帝视角看着你的定位 Part
-		local offset = Vector3.new(maxDim * ZOOM_MULTIPLIER, maxDim * HEIGHT_OFFSET, maxDim * ZOOM_MULTIPLIER)
-		camera.CFrame = CFrame.new(cf.Position + offset, cf.Position)
-	else
-		warn("⚠️ [渲染失败] 在", clone.Name, "里面完全找不到定位 Part，请检查！")
+		if #parts == 0 then
+			return nil, nil
+		end
+
+		local minX, minY, minZ = math.huge, math.huge, math.huge
+		local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+		for _, part in ipairs(parts) do
+			local cf = part.CFrame
+			local half = part.Size * 0.5
+			for x = -1, 1, 2 do
+				for y = -1, 1, 2 do
+					for z = -1, 1, 2 do
+						local p = (cf * CFrame.new(half.X * x, half.Y * y, half.Z * z)).Position
+						minX = math.min(minX, p.X)
+						minY = math.min(minY, p.Y)
+						minZ = math.min(minZ, p.Z)
+						maxX = math.max(maxX, p.X)
+						maxY = math.max(maxY, p.Y)
+						maxZ = math.max(maxZ, p.Z)
+					end
+				end
+			end
+		end
+
+		local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+		local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+		return CFrame.new(center), size
 	end
+
+	local function getModelBounds(root: Instance): (CFrame?, Vector3?)
+		-- 以怪物形象内部 Model 自身的整体中心作为摄像机定位点。
+		-- 和 getVisualBounds 不同，这里不排除 RootPart/透明 Part，目的是按内部 Model 的真实整体中心对齐。
+		if root:IsA("Model") then
+			local cf, size = root:GetBoundingBox()
+			return cf, size
+		elseif root:IsA("BasePart") then
+			return root.CFrame, root.Size
+		end
+
+		return nil, nil
+	end
+
+	-- 3. ViewportFrame 必须按“可见外观”计算镜头。
+	-- 旧版只用 Root/同名 Part 或整个外层模型对焦；如果 RootPart 是透明定位块，或者视觉模型相对根 Part 有偏移，
+	-- 相机会看向空位置，结果就是用户看到 5 个蓝色 ViewportFrame 但没有怪物。
+	local boundsCF: CFrame?
+	local boundsSize: Vector3?
+	boundsCF, boundsSize = getVisualBounds(clone)
+
+	if not boundsCF or not boundsSize then
+		warn("⚠️ [渲染失败] 在", clone.Name, "里面完全找不到可显示的 BasePart，请检查怪物模板！")
+		return
+	end
+
+	-- 4. 把模型中心移动到 ViewportFrame 原点附近，避免模板原始世界坐标太远导致相机看不到。
+	if clone:IsA("Model") then
+		local modelCF, modelSize = getModelBounds(clone)
+		if modelCF and modelSize then
+			clone:PivotTo(CFrame.new(0, modelSize.Y * 0.5, 0) * modelCF:Inverse() * clone:GetPivot())
+		else
+			clone:PivotTo(CFrame.new(0, boundsSize.Y * 0.5, 0) * boundsCF:Inverse() * clone:GetPivot())
+		end
+		boundsCF, boundsSize = getVisualBounds(clone)
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = CFrame.new(0, boundsSize.Y * 0.5, 0)
+		boundsCF, boundsSize = getVisualBounds(clone)
+	end
+
+	if not boundsCF or not boundsSize then
+		warn("⚠️ [渲染失败] 移动模型后无法计算包围盒:", clone.Name)
+		return
+	end
+
+	local maxDim = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z)
+	if maxDim < 0.1 then
+		maxDim = 5
+	end
+
+	print("📐 抽奖预览包围盒:", clone.Name, boundsSize)
+
+	local modelCF = getModelBounds(clone)
+	local center = if modelCF then modelCF.Position else boundsCF.Position
+	local distance = maxDim * 1
+	local height = math.max(boundsSize.Y * 0.1, maxDim * 0.15)
+
+	-- 摄像机水平位置：之前 Vector3.new(distance, height, distance) 拍到怪物背面；
+	-- 这里反转到另一侧，从怪物正面方向看内部 Model 中心。
+	local offset = Vector3.new(-distance, height, -distance)
+	camera.FieldOfView = 35
+	camera.CFrame = CFrame.new(center + offset, center)
+
+
 end
 
 -- =====================================================================
@@ -297,9 +505,7 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	isAnimating = true
 	print("🎯 收到服务端发来的抽奖结果！结果数量:", #results, " 动画延迟时长:", serverDuration)
 
-	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
-		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
-		or workspace:FindFirstChild("Monster image")
+	local monsterFolder = findMonsterFolder()
 	if not monsterFolder then
 		warn("❌ 找不到怪物展示文件夹")
 		isAnimating = false

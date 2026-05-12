@@ -43,7 +43,6 @@ local InventoryService = require(script.Parent:WaitForChild("Modules"):WaitForCh
 local HomeService = require(script.Parent:WaitForChild("Modules"):WaitForChild("HomeService"))
 local PlacementService = require(script.Parent:WaitForChild("Modules"):WaitForChild("PlacementService"))
 local MonsterService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MonsterService"))
-local LavaService = require(script.Parent:WaitForChild("Modules"):WaitForChild("LavaService"))
 local MerchantService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MerchantService"))
 local WeaponService = require(script.Parent:WaitForChild("Modules"):WaitForChild("WeaponService"))
 
@@ -52,7 +51,6 @@ InventoryService.Init()
 HomeService.Init()
 PlacementService.Init()
 MonsterService.Init()
-LavaService.Init()
 MerchantService.Init()
 WeaponService.Init()
 

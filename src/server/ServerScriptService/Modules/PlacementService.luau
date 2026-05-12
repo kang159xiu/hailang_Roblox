@@ -112,12 +112,23 @@ end
 
 local INCOME_DISPLAY_NAME_PREFIX = "怪物收益显示_"
 local PLACED_MONSTER_HEAD_DISPLAY_NAME = "PlacedMonsterHeadBillboard"
+local PLACED_PROMPT_INITIAL_HIDE_SECONDS = 1
+local PLACED_PROMPT_INITIAL_HIDE_UNTIL_ATTR = "PromptInitialHideUntilClock"
 
 local warnedMissingIncomeTemplate = false
 type IncomeDisplayGui = BillboardGui | SurfaceGui
 
 local cachedIncomeDisplayTemplate: IncomeDisplayGui? = nil
 local cachedPlacedMonsterHeadTemplate: BillboardGui? = nil
+
+local function getPlacedPromptInitialHideRemaining(rootPart: BasePart): number
+	local hideUntil = getNumAttr(rootPart, PLACED_PROMPT_INITIAL_HIDE_UNTIL_ATTR, 0)
+	return math.max(0, hideUntil - os.clock())
+end
+
+local function markPlacedPromptInitialHidden(rootPart: BasePart)
+	rootPart:SetAttribute(PLACED_PROMPT_INITIAL_HIDE_UNTIL_ATTR, os.clock() + PLACED_PROMPT_INITIAL_HIDE_SECONDS)
+end
 
 local function getPlacedMonsterHeadTemplate(): BillboardGui?
 	if cachedPlacedMonsterHeadTemplate then
@@ -747,6 +758,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 	if placedPart:GetAttribute("IsPlacedMonster") ~= true then return false end
 	if getNumAttr(placedPart, "OwnerUserId", -1) ~= player.UserId then return false end
 	if placedPart:GetAttribute("__InteractionLocked") == true then return false end
+	if getPlacedPromptInitialHideRemaining(placedPart) > 0 then return false end
 
 	placedPart:SetAttribute("__InteractionLocked", true)
 	addUnclaimedToPlayer(player, placedPart)
@@ -780,6 +792,7 @@ local function tryStorePlacedMonster(player: Player, slotPart: BasePart, placedP
 	if placedPart:GetAttribute("IsPlacedMonster") ~= true then return false end
 	if getNumAttr(placedPart, "OwnerUserId", -1) ~= player.UserId then return false end
 	if placedPart:GetAttribute("__InteractionLocked") == true then return false end
+	if getPlacedPromptInitialHideRemaining(placedPart) > 0 then return false end
 
 	placedPart:SetAttribute("__InteractionLocked", true)
 	addUnclaimedToPlayer(player, placedPart)
@@ -899,6 +912,9 @@ local function createPlacedMonsterPart(
 		setPlacedMonsterHeadBillboardText(p)
 
 		local function setPlacedMonsterPromptVisible(visible: boolean)
+			if visible and getPlacedPromptInitialHideRemaining(p) > 0 then
+				visible = false
+			end
 			local sellPrompt = p:FindFirstChild("SellPrompt")
 			if sellPrompt and sellPrompt:IsA("ProximityPrompt") then
 				local sp = sellPrompt :: ProximityPrompt
@@ -914,6 +930,18 @@ local function createPlacedMonsterPart(
 		local function revealPlacedMonsterPrompts(showSeconds: number?)
 			local token = getNumAttr(p, "PromptRevealToken", 0) + 1
 			p:SetAttribute("PromptRevealToken", token)
+
+			local hideRemaining = getPlacedPromptInitialHideRemaining(p)
+			if hideRemaining > 0 then
+				setPlacedMonsterPromptVisible(false)
+				task.delay(hideRemaining, function()
+					if p.Parent == nil then return end
+					if getNumAttr(p, "PromptRevealToken", 0) ~= token then return end
+					revealPlacedMonsterPrompts(showSeconds)
+				end)
+				return
+			end
+
 			setPlacedMonsterPromptVisible(true)
 
 			task.delay(showSeconds or 3, function()
@@ -963,44 +991,8 @@ local function createPlacedMonsterPart(
 			tryStorePlacedMonster(player, slotPart, p)
 		end)
 
-		p.Touched:Connect(function(hit)
-			if player:GetAttribute("__DataLoaded") ~= true then return end
-			local character = player.Character
-			if not character then return end
-			if not hit:IsDescendantOf(character) then return end
-
-			local now = os.clock()
-			local idx = getNumAttr(slotPart, "SlotIndex", 1)
-			local key = string.format("placed_prompt_touch_%d_%s", player.UserId, tostring(idx))
-			if (lastTouchAt[key] or 0) + 0.35 > now then return end
-			lastTouchAt[key] = now
-			revealPlacedMonsterPrompts(3)
-		end)
-
-		local function attachPromptClickDetector(targetPart: BasePart)
-			local detectorName = "PlacedMonsterPromptClickDetector"
-			local oldDetector = targetPart:FindFirstChild(detectorName)
-			if oldDetector and oldDetector:IsA("ClickDetector") then
-				oldDetector:Destroy()
-			end
-			local detector = Instance.new("ClickDetector") :: ClickDetector
-			detector.Name = detectorName
-			detector.MaxActivationDistance = 20
-			detector.Parent = targetPart
-			detector.MouseClick:Connect(function(clickPlayer: Player)
-				if player:GetAttribute("__DataLoaded") ~= true then return end
-				if clickPlayer.UserId ~= player.UserId then return end
-				revealPlacedMonsterPrompts(3)
-			end)
-		end
-
-		attachPromptClickDetector(p)
+		-- 不再通过点击怪物显示 Sell/Collect；只允许 Collector 领取点触发显示。
 		local container = getPlacedMonsterContainer(p)
-		for _, desc in ipairs(container:GetDescendants()) do
-			if desc:IsA("BasePart") then
-				attachPromptClickDetector(desc :: BasePart)
-			end
-		end
 
 		container.Destroying:Connect(function()
 			local m = slotStatesByUserId[player.UserId]
@@ -1049,6 +1041,9 @@ local function createPlacedMonsterPart(
 	setPlacedMonsterHeadBillboardText(p)
 
 	local function setPlacedMonsterPromptVisible(visible: boolean)
+		if visible and getPlacedPromptInitialHideRemaining(p) > 0 then
+			visible = false
+		end
 		local sellPrompt = p:FindFirstChild("SellPrompt")
 		if sellPrompt and sellPrompt:IsA("ProximityPrompt") then
 			local sp = sellPrompt :: ProximityPrompt
@@ -1064,6 +1059,18 @@ local function createPlacedMonsterPart(
 	local function revealPlacedMonsterPrompts(showSeconds: number?)
 		local token = getNumAttr(p, "PromptRevealToken", 0) + 1
 		p:SetAttribute("PromptRevealToken", token)
+
+		local hideRemaining = getPlacedPromptInitialHideRemaining(p)
+		if hideRemaining > 0 then
+			setPlacedMonsterPromptVisible(false)
+			task.delay(hideRemaining, function()
+				if p.Parent == nil then return end
+				if getNumAttr(p, "PromptRevealToken", 0) ~= token then return end
+				revealPlacedMonsterPrompts(showSeconds)
+			end)
+			return
+		end
+
 		setPlacedMonsterPromptVisible(true)
 
 		task.delay(showSeconds or 3, function()
@@ -1113,47 +1120,7 @@ local function createPlacedMonsterPart(
 		tryStorePlacedMonster(player, slotPart, p)
 	end)
 
-	p.Touched:Connect(function(hit)
-		if player:GetAttribute("__DataLoaded") ~= true then return end
-		local character = player.Character
-		if not character then return end
-		if not hit:IsDescendantOf(character) then return end
-
-		local now = os.clock()
-		local idx = getNumAttr(slotPart, "SlotIndex", 1)
-		local key = string.format("placed_prompt_touch_%d_%s", player.UserId, tostring(idx))
-		if (lastTouchAt[key] or 0) + 0.35 > now then return end
-		lastTouchAt[key] = now
-		revealPlacedMonsterPrompts(3)
-	end)
-
-	local function attachPromptClickDetector(targetPart: BasePart)
-		local detectorName = "PlacedMonsterPromptClickDetector"
-		local oldDetector = targetPart:FindFirstChild(detectorName)
-		if oldDetector and oldDetector:IsA("ClickDetector") then
-			oldDetector:Destroy()
-		end
-
-		local detector = Instance.new("ClickDetector") :: ClickDetector
-		detector.Name = detectorName
-		detector.MaxActivationDistance = 20
-		detector.Parent = targetPart
-		detector.MouseClick:Connect(function(clickPlayer: Player)
-			if player:GetAttribute("__DataLoaded") ~= true then return end
-			if clickPlayer.UserId ~= player.UserId then return end
-			revealPlacedMonsterPrompts(3)
-		end)
-	end
-
-	attachPromptClickDetector(p)
-	local appearanceFolder = p:FindFirstChild("Appearance")
-	if appearanceFolder then
-		for _, desc in ipairs(appearanceFolder:GetDescendants()) do
-			if desc:IsA("BasePart") then
-				attachPromptClickDetector(desc :: BasePart)
-			end
-		end
-	end
+	-- 不再通过点击怪物显示 Sell/Collect；只允许 Collector 领取点触发显示。
 
 	p.Destroying:Connect(function()
 		local m = slotStatesByUserId[player.UserId]
@@ -1168,6 +1135,168 @@ local function createPlacedMonsterPart(
 	end)
 
 	return p
+end
+
+local function findPlacementVfxTemplate(): Instance?
+	-- 兼容几种常见摆放方式：
+	-- 1) Workspace.放置特效.放置特效01
+	-- 2) Workspace 任意层级下的 放置特效01
+	-- 3) Workspace 任意层级下的 放置特效（本身就是模板）
+	local namedTemplate = Workspace:FindFirstChild("放置特效01", true)
+	if namedTemplate then
+		return namedTemplate
+	end
+
+	local vfxRoot = Workspace:FindFirstChild("放置特效", true)
+	if not vfxRoot then
+		return nil
+	end
+
+	local nestedTemplate = vfxRoot:FindFirstChild("放置特效01", true)
+	if nestedTemplate then
+		return nestedTemplate
+	end
+
+	return vfxRoot
+end
+
+local function createPlacementVfxAnchor(targetCFrame: CFrame): Part
+    local anchor = Instance.new("Part") :: Part
+    anchor.Name = "PlacementVFXAnchor"
+    anchor.Anchored = true
+    anchor.CanCollide = false
+    anchor.CanTouch = false
+    anchor.CanQuery = false
+    anchor.Transparency = 1
+    anchor.Size = Vector3.new(1, 1, 1)
+    anchor.CFrame = targetCFrame
+    anchor.Parent = Workspace
+    return anchor
+end
+
+local function movePlacementVfxFolderToCFrame(folder: Folder, targetCFrame: CFrame)
+    local rootPart = folder:FindFirstChildWhichIsA("BasePart", true)
+    if rootPart then
+        moveHierarchyToTarget(rootPart :: BasePart, folder, targetCFrame)
+    end
+end
+
+local function normalizeLoosePlacementVfxObjects(root: Instance, anchor: BasePart)
+	local looseAttachments: {Attachment} = {}
+	local looseEmitters: {ParticleEmitter} = {}
+
+	for _, desc in ipairs(root:GetDescendants()) do
+		if desc:IsA("Attachment") then
+			local parent = desc.Parent
+			if not (parent and (parent:IsA("BasePart") or parent:IsA("Terrain"))) then
+				table.insert(looseAttachments, desc :: Attachment)
+			end
+		elseif desc:IsA("ParticleEmitter") then
+			local parent = desc.Parent
+			if not (parent and (parent:IsA("Attachment") or parent:IsA("BasePart"))) then
+				table.insert(looseEmitters, desc :: ParticleEmitter)
+			end
+		end
+	end
+
+	for _, attachment in ipairs(looseAttachments) do
+		if attachment.Parent then
+			attachment.Parent = anchor
+		end
+	end
+
+	for _, emitter in ipairs(looseEmitters) do
+		if emitter.Parent then
+			local attachment = Instance.new("Attachment") :: Attachment
+			attachment.Name = "PlacementVFXAttachment"
+			attachment.Parent = anchor
+			emitter.Parent = attachment
+		end
+	end
+end
+
+local function movePlacementVfxToCFrame(vfxInst: Instance, targetCFrame: CFrame): Instance
+	if vfxInst:IsA("Model") then
+		(vfxInst :: Model):PivotTo(targetCFrame)
+		return vfxInst
+	elseif vfxInst:IsA("BasePart") then
+		(vfxInst :: BasePart).CFrame = targetCFrame
+		return vfxInst
+	elseif vfxInst:IsA("Folder") then
+		local folder = vfxInst :: Folder
+		local rootPart = folder:FindFirstChildWhichIsA("BasePart", true)
+		if rootPart then
+			movePlacementVfxFolderToCFrame(folder, targetCFrame)
+			return vfxInst
+		end
+
+		local anchor = createPlacementVfxAnchor(targetCFrame)
+		folder.Parent = anchor
+		normalizeLoosePlacementVfxObjects(folder, anchor)
+		return anchor
+	elseif vfxInst:IsA("Attachment") then
+		local attachment = vfxInst :: Attachment
+		local anchor = createPlacementVfxAnchor(targetCFrame)
+		attachment.Parent = anchor
+		return anchor
+	elseif vfxInst:IsA("ParticleEmitter") then
+		local emitter = vfxInst :: ParticleEmitter
+		local anchor = createPlacementVfxAnchor(targetCFrame)
+
+		local attachment = Instance.new("Attachment") :: Attachment
+		attachment.Name = "PlacementVFXAttachment"
+		attachment.Parent = anchor
+		emitter.Parent = attachment
+		return anchor
+	end
+
+	local anchor = createPlacementVfxAnchor(targetCFrame)
+	vfxInst.Parent = anchor
+	return anchor
+end
+
+local function emitPlacementVfxAt(targetCFrame: CFrame): boolean
+	local vfxTemplate = findPlacementVfxTemplate()
+	if not vfxTemplate then
+		warn("[VFX Debug] 警告：找不到放置特效模板。支持放置到 Workspace 任意层级：'放置特效01'，或 '放置特效/放置特效01'。")
+		return false
+	end
+
+	vfxTemplate.Archivable = true
+	local vfxClone = vfxTemplate:Clone()
+	local vfxInst = vfxClone :: Instance
+	vfxInst.Name = "PlacementVFX_Runtime"
+	vfxInst.Parent = Workspace
+	local runtimeRoot = movePlacementVfxToCFrame(vfxInst, targetCFrame)
+
+	local emitted = 0
+	local function emitIfParticle(inst: Instance)
+		if inst:IsA("ParticleEmitter") then
+			local pe = inst :: ParticleEmitter
+			pe.Enabled = true
+			pe:Emit(30)
+			emitted += 1
+		end
+	end
+
+	emitIfParticle(runtimeRoot)
+	for _, desc in ipairs(runtimeRoot:GetDescendants()) do
+		emitIfParticle(desc)
+	end
+
+	if emitted <= 0 then
+		warn("[VFX Debug] 警告：放置特效模板内没有 ParticleEmitter：" .. debugInstancePath(vfxTemplate))
+	else
+		print(string.format("[VFX Debug] 放置特效已播放，模板=%s，发射器数量=%d", debugInstancePath(vfxTemplate), emitted))
+	end
+
+	task.delay(2.5, function()
+		if runtimeRoot and runtimeRoot.Parent then
+			runtimeRoot:Destroy()
+		end
+	end)
+
+	return emitted > 0
 end
 
 local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
@@ -1210,48 +1339,13 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	
 	if placed then
 		local activePm = placed :: BasePart
+		markPlacedPromptInitialHidden(activePm)
 		activePm:SetAttribute("UpgradeLevel", upLevel)
 		activePm:SetAttribute("BaseValue", baseV)
 		activePm:SetAttribute("BaseGoldPerSec", baseGps)
 		setPlacedMonsterHeadBillboardText(activePm)
 
-		local vfxFolder = Workspace:FindFirstChild("放置特效")
-		if vfxFolder then
-			local vfxTemplate = vfxFolder:FindFirstChild("放置特效01")
-			if vfxTemplate then
-				vfxTemplate.Archivable = true 
-				local vfxClone = (vfxTemplate :: Instance):Clone()
-				local vfxInst = vfxClone :: Instance
-				
-				if vfxInst:IsA("Model") then
-					local m = vfxClone :: Model
-					m:PivotTo(activePm.CFrame)
-				elseif vfxInst:IsA("BasePart") then
-					local bp = vfxClone :: BasePart
-					bp.CFrame = activePm.CFrame
-				end
-				
-				vfxInst.Parent = Workspace
-				print("[VFX Debug] 放置特效已成功创建在: " .. tostring(activePm.Position))
-				
-				for _, desc in ipairs(vfxInst:GetDescendants()) do
-					if desc:IsA("ParticleEmitter") then
-						local pe = desc :: ParticleEmitter
-						pe:Emit(30)
-					end
-				end
-				
-				task.delay(1.5, function()
-					if vfxInst and vfxInst.Parent then
-						vfxInst:Destroy()
-					end
-				end)
-			else
-				warn("[VFX Debug] 警告：在 Workspace.放置特效 下找不到 '放置特效01'！")
-			end
-		else
-			warn("[VFX Debug] 警告：在 Workspace 下找不到 '放置特效' 文件夹！")
-		end
+		emitPlacementVfxAt(activePm.CFrame)
 	end
 
 	local home = HomeService.GetHome(player)
@@ -1280,6 +1374,10 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 	activeTool:Destroy()
 	DataDirtyService.MarkDirty(player, 5)
 	toast(player, string.format("Placed Monster in Area %d", idx))
+	task.defer(function()
+		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
+		TutorialService.OnMonsterPlaced(player, idx)
+	end)
 end
 	
 local function payoutIfAny(player: Player, slotPart: BasePart)
@@ -1304,6 +1402,10 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 
 	addUnclaimedToPlayer(player, activePm)
 	toast(player, string.format("Collected Gold +%d", math.floor(un)))
+	task.defer(function()
+		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
+		TutorialService.OnGoldCollected(player, idx)
+	end)
 end
 
 local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
@@ -1554,6 +1656,21 @@ function PlacementService.Init()
 
 					tryPlaceFromEquippedTool(player, slot.Part)
 					payoutIfAny(player, slot.Part)
+				end
+
+				local function handleCollectorTouch(hit)
+					if player:GetAttribute("__DataLoaded") ~= true then return end
+					local character = player.Character
+					if not character or not hit:IsDescendantOf(character) then return end
+
+					local rawIdx = slot.Part:GetAttribute("SlotIndex")
+					local idx = if type(rawIdx) == "number" then rawIdx :: number else slot.Index
+					local key = string.format("collector_touch_%d_%s", player.UserId, tostring(idx))
+					local now = os.clock()
+					if (lastTouchAt[key] or 0) + 0.35 > now then return end
+					lastTouchAt[key] = now
+
+					payoutIfAny(player, slot.Part)
 
 					local m = slotStatesByUserId[player.UserId]
 					if type(m) == "table" then
@@ -1568,7 +1685,7 @@ function PlacementService.Init()
 
 				slot.Part.Touched:Connect(handleSlotTouch)
 				if slot.Collector then
-					slot.Collector.Touched:Connect(handleSlotTouch)
+					slot.Collector.Touched:Connect(handleCollectorTouch)
 				end
 			end
 		end)

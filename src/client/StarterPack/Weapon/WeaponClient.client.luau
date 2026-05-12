@@ -3,7 +3,7 @@
 -- StarterPack.Weapon.WeaponClient
 -- 使用官方默认背包/热键栏来装备/卸下 Tool（不自建装备按钮）。
 -- 本脚本仅负责：
--- 1) Tool.Activated：攻击（前方2格、180°范围，服务端判定）
+-- 1) Tool.Activated：攻击（玩家周围3格、360°范围，服务端判定）
 -- 2) Q：释放技能（服务端处理）
 
 
@@ -12,6 +12,8 @@
 local Players 			= game:GetService("Players")
 -- ReplicatedStorage: 客户端和服务端都能访问的共享存储
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- RunService: 用于装备武器后持续检测附近怪物，实现自动攻击
+local RunService = game:GetService("RunService")
 --用户输入服务，监听键盘、鼠标、触摸等输入
 local UserInputService 	= game:GetService("UserInputService") 
 
@@ -30,8 +32,10 @@ local CUSTOM_IDLE_ANIMATION_ID = "135075227978653" -- 手持武器待机动画ID
 -- [修改内容] 新增：用于存储正在播放的待机动画轨道，以便在切换武器时正确关闭
 local idleTrack: AnimationTrack? = nil
 
--- [修改内容] 其他变量...
-local isAttacking = false
+-- 自动攻击检测间隔。数值越小响应越快，但不需要每帧都全量扫描怪物。
+local AUTO_ATTACK_SCAN_INTERVAL = 0.1
+local AUTO_ATTACK_ENABLED_ATTRIBUTE = "AutoAttackEnabled"
+local autoAttackRunning = false
 
 -- Players.LocalPlayer 只在本地脚本（LocalScript）里可用，表示“当前这个玩家自己”。
 -- script.Parent 一般就是当前脚本挂着的对象，这里它挂在 Tool 下面，所以把它当成 Tool 使用。
@@ -93,6 +97,10 @@ local useSkillRemote = remotes:WaitForChild("RequestUseWeaponSkill") :: RemoteEv
 
 local function isEquipped(): boolean
 	return tool.Parent == (player.Character or nil)
+end
+
+local function isAutoAttackEnabled(): boolean
+	return player:GetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE) == true
 end
 
 local function normalizeAnimationId(rawId: string): string?
@@ -257,6 +265,68 @@ end
 -- 3. 只有当整段攻击流程结束后，才会明确解锁
 local isAttacking = false
 
+type AttackTarget = {
+	Instance: Instance,
+	DistanceSquared: number,
+}
+
+local function getCharacterRootPart(): BasePart?
+	local character = player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function getAttackRangeStuds(): number
+	return 3 * (Config.GRID_STUDS or 4)
+end
+
+local function collectAliveMonstersInRange(): {AttackTarget}
+	local targets: {AttackTarget} = {}
+	local hrp = getCharacterRootPart()
+	if not hrp then
+		return targets
+	end
+
+	local monstersFolder = workspace:FindFirstChild("Monsters")
+	if not (monstersFolder and monstersFolder:IsA("Folder")) then
+		return targets
+	end
+
+	local maxDist = getAttackRangeStuds()
+	local maxDist2 = maxDist * maxDist
+
+	for _, inst in ipairs(monstersFolder:GetChildren()) do
+		if inst:GetAttribute("IsMonster") == true and inst:GetAttribute("Dead") ~= true then
+			local pos: Vector3?
+			local targetForRemote: Instance? = nil
+
+			if inst:IsA("BasePart") then
+				pos = inst.Position
+				targetForRemote = inst
+			elseif inst:IsA("Model") then
+				pos = inst:GetPivot().Position
+				targetForRemote = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+			end
+
+			if pos and targetForRemote then
+				local offset = pos - hrp.Position
+				local dist2 = offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z
+				if dist2 <= maxDist2 then
+					table.insert(targets, {
+						Instance = targetForRemote,
+						DistanceSquared = dist2,
+					})
+				end
+			end
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		return a.DistanceSquared < b.DistanceSquared
+	end)
+
+	return targets
+end
+
 local function getTargetFromScreenCenter(): Instance?
 	local camera = workspace.CurrentCamera
 	if not camera then
@@ -314,7 +384,7 @@ end
 -- mouse.Target 表示鼠标当前指向的 BasePart（或相关实例）。
 
 
-local function tryAttack()
+local function tryAttack(useFallbackTargeting: boolean?)
 	-- 这是本脚本最核心的函数：尝试进行一次普通攻击。
 --
 -- 现在的攻击流程被重构成“动作先开始，伤害后触发”的节奏：
@@ -322,7 +392,7 @@ local function tryAttack()
 -- 2. 再检查是否已经处于一次攻击周期中（Debounce 锁）
 -- 3. 立刻播放一次本地挥剑动作
 -- 4. 延迟 0.15 秒，等挥剑进入中段时再做伤害判定
--- 5. 优先用“前方 2 格、180 度”的扇形范围检测怪物
+-- 5. 优先用“玩家周围 3 格、360 度”的圆形范围检测怪物
 -- 6. 如果范围检测不可用，再退回到鼠标目标/屏幕中心射线兜底
 -- 7. 0.3 秒完整攻击周期结束后，再解除锁，允许下一次攻击
 --
@@ -331,8 +401,7 @@ local function tryAttack()
 -- task.delay(0.15, ...)：把真正的命中检测延后 0.15 秒。
 -- task.delay(0.3, ...)：在完整攻击周期结束后统一解锁。
 -- monstersFolder：怪物集合，优先用于近战范围判定。
--- forward = hrp.CFrame.LookVector：玩家当前朝向。
--- forward:Dot(dir) >= 0：判断目标是否位于角色前方半圆。
+-- 不再限制玩家朝向：只要怪物在玩家周围 3 格内即可命中。
 -- getMouseTarget() / getTargetFromScreenCenter()：兜底获取瞄准目标。
 -- damageRemote:FireServer(target)：通知服务端处理这次伤害请求。
 --
@@ -352,43 +421,11 @@ local function tryAttack()
 	task.delay(0.2, function()
 		if not isEquipped() then return end
 		
-		local character = player.Character
-		local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if not hrp then return end
-
-		-- 【修复点2】恢复前方的扇形检测逻辑，并保留 0.15s 的同步延迟
-		local monstersFolder = workspace:FindFirstChild("Monsters")
-		if monstersFolder and monstersFolder:IsA("Folder") then
-			local maxDist = 2 * (Config.GRID_STUDS or 4)
-			local maxDist2 = maxDist * maxDist
-			local forward = hrp.CFrame.LookVector
-
-			for _, inst in ipairs(monstersFolder:GetChildren()) do
-				if inst:GetAttribute("IsMonster") == true and inst:GetAttribute("Dead") ~= true then
-					local pos: Vector3?
-					local targetForRemote: Instance? = nil
-					
-					if inst:IsA("BasePart") then
-						pos = inst.Position
-						targetForRemote = inst
-					elseif inst:IsA("Model") then
-						pos = inst:GetPivot().Position
-						targetForRemote = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
-					end
-
-					if pos and targetForRemote then
-						local offset = pos - hrp.Position
-						local dist2 = offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z
-						if dist2 <= maxDist2 then
-							local dir = offset.Magnitude > 0 and offset.Unit or forward
-							if forward:Dot(dir) >= 0 then
-								damageRemote:FireServer(targetForRemote)
-							end
-						end
-					end
-				end
-			end
-		else
+		local nearbyTargets = collectAliveMonstersInRange()
+		if #nearbyTargets > 0 then
+			-- 自动攻击命中最近的怪物。服务端仍会再次做距离和目标合法性校验。
+			damageRemote:FireServer(nearbyTargets[1].Instance)
+		elseif useFallbackTargeting == true then
 			-- 兜底检测（以防找不到怪物文件夹）
 			local target = getMouseTarget() or getTargetFromScreenCenter()
 			if target then
@@ -403,23 +440,77 @@ local function tryAttack()
 	end)
 end
 
+local function startAutoAttackLoop()
+	if not isAutoAttackEnabled() then
+		return
+	end
+
+	if autoAttackRunning then
+		return
+	end
+	autoAttackRunning = true
+
+	task.spawn(function()
+		local elapsed = 0
+		while autoAttackRunning do
+			local dt = RunService.Heartbeat:Wait()
+			elapsed += dt
+
+			if not isAutoAttackEnabled() then
+				autoAttackRunning = false
+				break
+			end
+
+			if elapsed >= AUTO_ATTACK_SCAN_INTERVAL then
+				elapsed = 0
+
+				if not isEquipped() then
+					autoAttackRunning = false
+					break
+				end
+
+				-- 只有附近确实有活怪时才挥刀，避免玩家空挥和无意义 Remote 请求。
+				if not isAttacking and #collectAliveMonstersInRange() > 0 then
+					tryAttack(false)
+				end
+			end
+		end
+	end)
+end
+
+local function stopAutoAttackLoop()
+	autoAttackRunning = false
+end
+
 
 -- [修改内容] 修改事件绑定部分：增加装备与卸下的监听
-tool.Activated:Connect(tryAttack)
+tool.Activated:Connect(function()
+	-- 保留点击攻击作为手动兜底；即使自动攻击没扫到，也可以用鼠标/屏幕中心目标尝试一次。
+	tryAttack(true)
+end)
 
 -- [修改内容] 当玩家穿戴上武器时，触发待机动作
 tool.Equipped:Connect(function()
 	playIdleAnimation()
+	if isAutoAttackEnabled() then
+		startAutoAttackLoop()
+	end
 end)
 
 -- [修改内容] 当玩家收回武器时，停止待机动作，恢复正常走路姿势
 tool.Unequipped:Connect(function()
+	stopAutoAttackLoop()
 	stopIdleAnimation()
 end)
 
+player:GetAttributeChangedSignal(AUTO_ATTACK_ENABLED_ATTRIBUTE):Connect(function()
+	if isAutoAttackEnabled() and isEquipped() then
+		startAutoAttackLoop()
+	else
+		stopAutoAttackLoop()
+	end
+end)
 
-
-tool.Activated:Connect(tryAttack)
 
 -- Tool.Activated 是 Tool 的经典事件。
 -- 一般在玩家点击鼠标左键、点击触屏攻击按钮，或执行对应操作时触发。

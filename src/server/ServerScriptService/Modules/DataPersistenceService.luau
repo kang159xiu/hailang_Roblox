@@ -57,6 +57,10 @@ export type PersistedPlayerData = {
 	OwnedWeaponLevels: {number},
 }
 
+export type PersistedTutorialData = {
+	Completed: boolean,
+}
+
 export type PersistedProfileData = {
 	PlayerData: PersistedPlayerData,
 	Inventory: {
@@ -65,6 +69,7 @@ export type PersistedProfileData = {
 	Placement: {
 		Slots: {PersistedSlot},
 	},
+	Tutorial: PersistedTutorialData?,
 }
 
 local PROFILE_TEMPLATE: PersistedProfileData = {
@@ -93,6 +98,9 @@ local PROFILE_TEMPLATE: PersistedProfileData = {
 			end
 			return slots
 		end)(),
+	},
+	Tutorial = {
+		Completed = false,
 	},
 }
 
@@ -133,6 +141,9 @@ local function writeBack(player: Player, profile: any)
 	data.Placement = {
 		Slots = PlacementService.Export(player),
 	}
+	data.Tutorial = {
+		Completed = player:GetAttribute("TutorialCompleted") == true,
+	}
 end
 
 local function saveNowForUserId(userId: number)
@@ -167,6 +178,9 @@ local function markDirty(userId: number, saveSoonSeconds: number?)
 end
 
 local function applyLoadedData(player: Player, data: PersistedProfileData)
+	local tutorial = (data :: any).Tutorial
+	player:SetAttribute("TutorialCompleted", type(tutorial) == "table" and tutorial.Completed == true)
+
 	-- 1) PlayerData (gold/levels/weapon list)
 	PlayerData.ApplyLoaded(player, data.PlayerData)
 

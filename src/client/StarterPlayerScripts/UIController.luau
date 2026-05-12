@@ -3,6 +3,8 @@ local UIController = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
 -- [新增内容] 引入社交服务用于弹出邀请界面
 local SocialService = game:GetService("SocialService") 
 -- [新增内容] 引入市场服务用于处理通行证购买
@@ -28,6 +30,34 @@ local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") ::
 -- =====================
 local mainGui = player:WaitForChild("PlayerGui"):WaitForChild("MainUI") :: ScreenGui
 local goldLabel = mainGui:WaitForChild("GoldFrame"):WaitForChild("GoldLabel") :: TextLabel
+local atkLabel: TextLabel? = nil
+do
+	local atkDisplayFrame = mainGui:WaitForChild("ATK显示", 5)
+	if atkDisplayFrame then
+		local foundAtkLabel = atkDisplayFrame:WaitForChild("ATKLabel", 5)
+		if foundAtkLabel and foundAtkLabel:IsA("TextLabel") then
+			atkLabel = foundAtkLabel
+		else
+			warn("[UIController] ATK显示 下未找到 TextLabel: ATKLabel")
+		end
+	else
+		warn("[UIController] MainUI 下未找到 ATK显示，攻击力 UI 不会显示")
+	end
+end
+local speedLabel: TextLabel? = nil
+do
+	local speedDisplayFrame = mainGui:WaitForChild("速度显示", 5)
+	if speedDisplayFrame then
+		local foundSpeedLabel = speedDisplayFrame:WaitForChild("速度Label", 5)
+		if foundSpeedLabel and foundSpeedLabel:IsA("TextLabel") then
+			speedLabel = foundSpeedLabel
+		else
+			warn("[UIController] 速度显示 下未找到 TextLabel: 速度Label")
+		end
+	else
+		warn("[UIController] MainUI 下未找到 速度显示，速度 UI 不会显示")
+	end
+end
 -- 引用金币增减提示的 TextLabel
 local addGoldUI = mainGui:WaitForChild("GoldFrame"):WaitForChild("addGoldUI") :: TextLabel
 local monsterInventoryWindow = mainGui:WaitForChild("MonsterInventoryWindow") :: Frame
@@ -61,6 +91,8 @@ local normalSpeedBgOn = speedToggleButton and speedToggleButton:FindFirstChild("
 local normalSpeedBgOff = speedToggleButton and speedToggleButton:FindFirstChild("关闭常速背景") :: ImageLabel?
 local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("开/关速度状态") :: TextLabel?
 local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升级后的加速状态）
+
+local AUTO_ATTACK_ENABLED_ATTRIBUTE = "AutoAttackEnabled"
 
 -- 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
@@ -159,6 +191,49 @@ local function formatNumberShort(n: number): string
     end
 
     return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
+end
+
+local function getCurrentAttackPower(): number
+	local equippedWeaponLevel = player:GetAttribute("EquippedWeaponLevel") or player:GetAttribute("WeaponLevel") or 1
+	if type(equippedWeaponLevel) ~= "number" then
+		equippedWeaponLevel = 1
+	end
+
+	local attackLevel = player:GetAttribute("AttackLevel") or 0
+	if type(attackLevel) ~= "number" then
+		attackLevel = 0
+	end
+
+	local weaponAttack = Config.WEAPON_ATTACK_BY_LEVEL[equippedWeaponLevel] or 10
+	local upgradeAdd = Config.ATTACK_UPGRADE_ADD or 10
+	return weaponAttack + (attackLevel * upgradeAdd)
+end
+
+local function refreshAttackPowerLabel()
+	if not atkLabel then
+		return
+	end
+
+	atkLabel.Text = "ATK: " .. formatNumberShort(getCurrentAttackPower())
+end
+
+local function getCurrentMoveSpeed(): number
+	local speedLevel = player:GetAttribute("SpeedLevel") or 0
+	if type(speedLevel) ~= "number" then
+		speedLevel = 0
+	end
+
+	local baseSpeed = Config.WALK_SPEED_BASE or 20
+	local addPerLevel = Config.WALK_SPEED_PER_UPGRADE or 1
+	return baseSpeed + (speedLevel * addPerLevel)
+end
+
+local function refreshSpeedLabel()
+	if not speedLabel then
+		return
+	end
+
+	speedLabel.Text = "Speed: " .. formatNumberShort(getCurrentMoveSpeed())
 end
 
 -- [新增内容] 提示消息显示的计数器，防止多个提示动画冲突
@@ -792,6 +867,12 @@ function UIController.Init()
 	-- 1. 金币同步与飞行动效触发 (纯净版)
 	local lastGold = player:GetAttribute("Gold") or 0
 	goldLabel.Text = formatNumberShort(lastGold)
+	refreshAttackPowerLabel()
+	refreshSpeedLabel()
+	task.defer(refreshAttackPowerLabel)
+	task.defer(refreshSpeedLabel)
+	task.delay(1, refreshAttackPowerLabel)
+	task.delay(1, refreshSpeedLabel)
 	
 	if addGoldUI then addGoldUI.Visible = false end
 	
@@ -809,6 +890,14 @@ function UIController.Init()
 		lastGold = currentGold
 	end
 	player:GetAttributeChangedSignal("Gold"):Connect(onGoldChanged)
+	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(refreshAttackPowerLabel)
+	player:GetAttributeChangedSignal("WeaponLevel"):Connect(refreshAttackPowerLabel)
+	player:GetAttributeChangedSignal("AttackLevel"):Connect(refreshAttackPowerLabel)
+	player:GetAttributeChangedSignal("SpeedLevel"):Connect(refreshSpeedLabel)
+	player.CharacterAdded:Connect(function()
+		task.delay(0.5, refreshAttackPowerLabel)
+		task.delay(0.5, refreshSpeedLabel)
+	end)
 
 	-- 2. Toast 监听
 	toastRemote.OnClientEvent:Connect(showToast)
@@ -921,19 +1010,42 @@ function UIController.Init()
 
 	-- [终极修复] 攻击按钮逻辑（加入强力异步等待机制，100% 确保找到加载缓慢的按钮）
 	task.spawn(function()
-		-- 优先使用 WaitForChild 死等 5 秒，如果由于层级深没拿到，再使用递归全局寻找
-		local btn = mainGui:WaitForChild("ImageButton_攻击", 5) or mainGui:FindFirstChild("ImageButton_攻击", true)
+		local function findAttackButton(): ImageButton?
+			-- 运行时 UI 在 PlayerGui.MainUI；用户在 Studio 里看到的 StarterGui.MainUI 是模板。
+			-- 因此先找 PlayerGui.MainUI，再用 PlayerGui/StarterGui 递归兜底，避免层级或复制时序差异导致 attackButton 一直 nil。
+			local direct = mainGui:FindFirstChild("ImageButton_攻击", true)
+			if direct and direct:IsA("ImageButton") then
+				return direct :: ImageButton
+			end
+
+			local playerGuiButton = playerGui:FindFirstChild("ImageButton_攻击", true)
+			if playerGuiButton and playerGuiButton:IsA("ImageButton") then
+				return playerGuiButton :: ImageButton
+			end
+
+			local starterMainUi = StarterGui:FindFirstChild("MainUI")
+			local starterButton = starterMainUi and starterMainUi:FindFirstChild("ImageButton_攻击", true)
+			if starterButton and starterButton:IsA("ImageButton") then
+				warn("[UIController] 只在 StarterGui 模板中找到 ImageButton_攻击；运行时仍会继续等待 PlayerGui 副本。")
+			end
+
+			return nil
+		end
+
+		-- 优先使用 WaitForChild 等 5 秒，如果由于层级深没拿到，再使用递归全局寻找
+		local waited = mainGui:WaitForChild("ImageButton_攻击", 5)
+		local btn = if waited and waited:IsA("ImageButton") then waited :: ImageButton else findAttackButton()
 		
 		-- 如果 5 秒后网络还没把按钮发过来，开启后台无限扫描直到它出现为止
 		if not btn then
 			warn("[UIController] 5秒内未找到 ImageButton_攻击，正在后台持续扫描...")
 			while not btn do
 				task.wait(1)
-				btn = mainGui:FindFirstChild("ImageButton_攻击", true)
+				btn = findAttackButton()
 			end
 		end
 		
-		attackButton = btn :: ImageButton
+		attackButton = btn
 		attackButton.Visible = false -- 初始状态强制隐藏
 		
 		attackButton.Activated:Connect(function()
@@ -952,6 +1064,55 @@ function UIController.Init()
 					hum:EquipTool(backpackTool)
 				end
 			end
+		end)
+	end)
+
+	-- 自动攻击开关按钮逻辑
+	task.spawn(function()
+		local autoAttackButton = mainGui:WaitForChild("ImageButton_自动攻击", 5) or mainGui:FindFirstChild("ImageButton_自动攻击", true)
+		if not autoAttackButton then
+			warn("[UIController] 5秒内未找到 ImageButton_自动攻击，正在后台持续扫描...")
+			while not autoAttackButton do
+				task.wait(1)
+				autoAttackButton = mainGui:FindFirstChild("ImageButton_自动攻击", true)
+			end
+		end
+
+		if not autoAttackButton:IsA("GuiButton") then
+			warn("[UIController] ImageButton_自动攻击 不是 GuiButton，无法绑定点击事件")
+			return
+		end
+
+		local openAttackUI = autoAttackButton:FindFirstChild("开启攻击", true)
+		local closeAttackUI = autoAttackButton:FindFirstChild("关闭攻击", true)
+		local autoAttackStateText = autoAttackButton:FindFirstChild("开/关速度状态", true)
+
+		local function updateAutoAttackUI()
+			local enabled = player:GetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE) == true
+
+			if openAttackUI and openAttackUI:IsA("GuiObject") then
+				openAttackUI.Visible = not enabled
+			end
+
+			if closeAttackUI and closeAttackUI:IsA("GuiObject") then
+				closeAttackUI.Visible = enabled
+			end
+
+			if autoAttackStateText and autoAttackStateText:IsA("TextLabel") then
+				autoAttackStateText.Text = enabled and "Attack: On" or "Attack: Off"--自动攻击: 开/关
+			end
+		end
+
+		if player:GetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE) == nil then
+			player:SetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE, false)
+		end
+
+		updateAutoAttackUI()
+		player:GetAttributeChangedSignal(AUTO_ATTACK_ENABLED_ATTRIBUTE):Connect(updateAutoAttackUI)
+
+		autoAttackButton.Activated:Connect(function()
+			local enabled = player:GetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE) == true
+			player:SetAttribute(AUTO_ATTACK_ENABLED_ATTRIBUTE, not enabled)
 		end)
 	end)
 
@@ -976,20 +1137,32 @@ function UIController.Init()
 			if isNormalSpeedActive then
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = true end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = false end
-				if speedToggleText then speedToggleText.Text = "Speed-" end
+				if speedToggleText then speedToggleText.Text = "[T] Slow:OFF" end
 			else
 				if normalSpeedBgOn then normalSpeedBgOn.Visible = false end
 				if normalSpeedBgOff then normalSpeedBgOff.Visible = true end
-				if speedToggleText then speedToggleText.Text = "Speed+" end --UI显示关闭加速文字
+				if speedToggleText then speedToggleText.Text = "[T] Slow:ON" end --UI显示关闭加速文字
 			end
 		end
 
 		updateSpeedUI()
 
-		speedToggleButton.Activated:Connect(function()
+		local function toggleSpeedMode()
 			isNormalSpeedActive = not isNormalSpeedActive 
 			updateSpeedUI()
 			applyCurrentSpeed()
+		end
+
+		speedToggleButton.Activated:Connect(toggleSpeedMode)
+
+		UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
+			if gameProcessedEvent or input.UserInputType ~= Enum.UserInputType.Keyboard then
+				return
+			end
+
+			if input.KeyCode == Enum.KeyCode.T then
+				toggleSpeedMode()
+			end
 		end)
 
 		player.CharacterAdded:Connect(function(char)

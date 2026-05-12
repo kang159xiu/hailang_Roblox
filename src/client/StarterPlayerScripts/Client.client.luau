@@ -20,10 +20,15 @@ local player = Players.LocalPlayer
 
 -- [修改内容] 引入新创建的 UI 控制器模块
 local UIController = require(script.Parent:WaitForChild("UIController"))
+local TutorialController = require(script.Parent:WaitForChild("TutorialController"))
 
 -- 启动 UI 逻辑
 task.spawn(function()
     UIController.Init()
+end)
+
+task.spawn(function()
+	TutorialController.Init()
 end)
 
 -- 提高同时可见 Prompt 上限（默认 16）。
@@ -189,9 +194,22 @@ type TrackedMonster = {
 local tracked: {TrackedMonster} = {}
 local trackedSet: {[BasePart]: true} = {}
 
+-- 与武器客户端的攻击范围保持一致：3 格。
+-- 之前这里写死 10 studs，若 GRID_STUDS=4，则实际攻击范围是 12 studs，
+-- 会出现“能攻击/自动攻击范围内，但攻击按钮不显示”的不一致。
+local ATTACK_BUTTON_SHOW_DISTANCE = 3 * (Config.GRID_STUDS or 4)
+
+
+local function isTrackableAttackTarget(part: BasePart): boolean
+	if part:GetAttribute("IsMonster") == true then
+		return true
+	end
+
+	return false
+end
 
 local function trackMonster(monsterPart: BasePart)
-	if monsterPart:GetAttribute("IsMonster") ~= true then
+	if not isTrackableAttackTarget(monsterPart) then
 		return
 	end
 	if trackedSet[monsterPart] then
@@ -200,6 +218,30 @@ local function trackMonster(monsterPart: BasePart)
 	trackedSet[monsterPart] = true
 
 	table.insert(tracked, { Part = monsterPart })
+end
+
+local function findMonsterRootPart(inst: Instance): BasePart?
+	-- 新版怪物通常是 Model，IsMonster 可能挂在外层 Model 和内部根 BasePart 上。
+	-- 为了避免 PrimaryPart 尚未复制到客户端、或根部件不叫 Root 导致漏追踪，
+	-- 这里优先找自身/PrimaryPart，再递归找可作为攻击按钮距离目标的 BasePart。
+	if inst:IsA("BasePart") and isTrackableAttackTarget(inst) then
+		return inst
+	end
+
+	if inst:IsA("Model") then
+		local primary = inst.PrimaryPart
+		if primary and isTrackableAttackTarget(primary) then
+			return primary
+		end
+	end
+
+	for _, descendant in ipairs(inst:GetDescendants()) do
+		if descendant:IsA("BasePart") and isTrackableAttackTarget(descendant) then
+			return descendant
+		end
+	end
+
+	return nil
 end
 
 local function untrackDestroyed()
@@ -501,20 +543,20 @@ end
 
 local function initMonsterBillboards()
 	local function tryTrackFromChild(ch: Instance)
-		-- 新版：怪是 Model（内部有 Root BasePart）；旧版也兼容直接 BasePart
-		if ch:IsA("Model") and ch:GetAttribute("IsMonster") == true then
-			local root = (ch.PrimaryPart :: BasePart?)
-				or (ch:FindFirstChild("Root") :: BasePart?)
-				or ch:FindFirstChildWhichIsA("BasePart", true)
-			if root and root:IsA("BasePart") then
-				trackMonster(root)
-			end
+		-- 新版：怪是 Model（内部有带 IsMonster 的根 BasePart）；旧版也兼容直接 BasePart。
+		local root = findMonsterRootPart(ch)
+		if root then
+			trackMonster(root)
 			return
 		end
 
-		if ch:IsA("BasePart") then
-			trackMonster(ch)
-		end
+		-- 某些情况下 Model 先复制到客户端，Attribute/PrimaryPart 稍后才可用；延迟一帧再兜底追踪一次。
+		task.defer(function()
+			local deferredRoot = findMonsterRootPart(ch)
+			if deferredRoot then
+				trackMonster(deferredRoot)
+			end
+		end)
 	end
 
 	local function hookMonstersFolder(monstersFolder: Instance)
@@ -542,6 +584,12 @@ local function initMonsterBillboards()
 			end
 		end)
 	end
+
+	workspace.DescendantAdded:Connect(function(descendant)
+		if descendant:IsDescendantOf(workspace:FindFirstChild("Monsters") or workspace) and (descendant:IsA("BasePart") or descendant:IsA("Model")) then
+			tryTrackFromChild(descendant)
+		end
+	end)
 end
 
 initMonsterBillboards()
@@ -572,9 +620,9 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 		
-		-- [修改内容] 如果最近的活怪距离 <= 10，显示攻击按钮，否则隐藏
+		-- [修改内容] 如果最近的活怪进入武器攻击范围，显示攻击按钮，否则隐藏
 		if UIController.SetAttackButtonVisible then
-			UIController.SetAttackButtonVisible(closestDist <= 10)
+			UIController.SetAttackButtonVisible(closestDist <= ATTACK_BUTTON_SHOW_DISTANCE)
 		end
 	end
 	
@@ -869,6 +917,132 @@ end)
 local currentCamera = workspace.CurrentCamera
 local shakeIntensity = 0
 
+local hookedGuardians: {[Instance]: boolean} = {}
+
+local function getGuardianZoneKey(guardian: Instance): string
+	local zoneKey = guardian:GetAttribute("ZoneKey")
+	return type(zoneKey) == "string" and zoneKey or ""
+end
+
+local function collectLocalPersonalGuardianZones(guardiansFolder: Instance): ({[string]: boolean}, boolean)
+	local zones: {[string]: boolean} = {}
+	local hasLocalPersonalGuardian = false
+	for _, guardian in ipairs(guardiansFolder:GetChildren()) do
+		if guardian:GetAttribute("IsPersonalGuardian") == true
+			and guardian:GetAttribute("OwnerUserId") == player.UserId then
+			hasLocalPersonalGuardian = true
+			local zoneKey = getGuardianZoneKey(guardian)
+			if zoneKey ~= "" then
+				zones[zoneKey] = true
+			end
+		end
+	end
+	return zones, hasLocalPersonalGuardian
+end
+
+local function setGuardianLocalVisible(guardian: Instance, isVisible: boolean)
+	for _, descendant in ipairs(guardian:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.LocalTransparencyModifier = isVisible and 0 or 1
+		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+			descendant.Transparency = isVisible and 0 or 1
+		elseif descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") or descendant:IsA("Trail") then
+			descendant.Enabled = isVisible
+		elseif descendant:IsA("BillboardGui") or descendant:IsA("SurfaceGui") then
+			descendant.Enabled = isVisible
+		end
+	end
+end
+
+local function shouldGuardianBeVisibleToLocalPlayer(guardian: Instance, localPersonalZones: {[string]: boolean}, hasLocalPersonalGuardian: boolean): boolean
+	local isPersonal = guardian:GetAttribute("IsPersonalGuardian") == true
+	local ownerUserId = guardian:GetAttribute("OwnerUserId")
+
+	-- 其他玩家的专属追踪守护者永远不在本客户端显示。
+	if isPersonal then
+		return ownerUserId == player.UserId
+	end
+
+	-- 本玩家只要已有一个本地专属守护者，就隐藏所有公共守护者，
+	-- 确保当前客户端任意时刻最多只看到一个守护者模型。
+	if hasLocalPersonalGuardian then
+		return false
+	end
+
+	-- 如果本玩家在同一个区域已经有专属追踪守护者，则隐藏原地公共守护者，
+	-- 避免“追踪守护者 + 原地待机守护者”同时可见。
+	local zoneKey = getGuardianZoneKey(guardian)
+	if zoneKey ~= "" and localPersonalZones[zoneKey] == true then
+		return false
+	end
+
+	return true
+end
+
+local function refreshAllGuardianVisibility()
+	local guardiansFolder = workspace:FindFirstChild("Guardians")
+	if not guardiansFolder then
+		return
+	end
+
+	local localPersonalZones, hasLocalPersonalGuardian = collectLocalPersonalGuardianZones(guardiansFolder)
+	for _, guardian in ipairs(guardiansFolder:GetChildren()) do
+		setGuardianLocalVisible(guardian, shouldGuardianBeVisibleToLocalPlayer(guardian, localPersonalZones, hasLocalPersonalGuardian))
+	end
+end
+
+local function hookGuardianVisibility(guardian: Instance)
+	if hookedGuardians[guardian] then
+		refreshAllGuardianVisibility()
+		return
+	end
+	hookedGuardians[guardian] = true
+
+	refreshAllGuardianVisibility()
+	guardian:GetAttributeChangedSignal("IsPersonalGuardian"):Connect(function()
+		refreshAllGuardianVisibility()
+	end)
+	guardian:GetAttributeChangedSignal("OwnerUserId"):Connect(function()
+		refreshAllGuardianVisibility()
+	end)
+	guardian:GetAttributeChangedSignal("ZoneKey"):Connect(function()
+		refreshAllGuardianVisibility()
+	end)
+	guardian.DescendantAdded:Connect(function()
+		refreshAllGuardianVisibility()
+	end)
+	guardian.Destroying:Connect(function()
+		hookedGuardians[guardian] = nil
+		task.defer(refreshAllGuardianVisibility)
+	end)
+end
+
+local function initPersonalGuardianVisibility()
+	local function hookFolder(folder: Instance)
+		for _, guardian in ipairs(folder:GetChildren()) do
+			hookGuardianVisibility(guardian)
+		end
+		folder.ChildAdded:Connect(hookGuardianVisibility)
+		folder.ChildRemoved:Connect(function()
+			refreshAllGuardianVisibility()
+		end)
+		refreshAllGuardianVisibility()
+	end
+
+	local guardiansFolder = workspace:FindFirstChild("Guardians")
+	if guardiansFolder then
+		hookFolder(guardiansFolder)
+	else
+		workspace.ChildAdded:Connect(function(child)
+			if child.Name == "Guardians" then
+				hookFolder(child)
+			end
+		end)
+	end
+end
+
+initPersonalGuardianVisibility()
+
 -- 使用 BindToRenderStep 保证在默认相机脚本更新后，再叠加我们的抖动偏移
 RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Value + 1, function(dt)
 	local isChased = false
@@ -877,6 +1051,10 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 	local guardiansFolder = workspace:FindFirstChild("Guardians")
 	if guardiansFolder then
 		for _, guardian in ipairs(guardiansFolder:GetChildren()) do
+			if guardian:GetAttribute("IsPersonalGuardian") == true and guardian:GetAttribute("OwnerUserId") ~= player.UserId then
+				continue
+			end
+
 			-- 检测是否有守护者的追击目标是 LocalPlayer
 			if guardian:GetAttribute("TargetPlayerName") == player.Name then
 				isChased = true
