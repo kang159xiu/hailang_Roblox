@@ -16,6 +16,7 @@ local StarterPack = game:GetService("StarterPack")
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local HomeService = require(script.Parent:WaitForChild("HomeService"))
+local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local WeaponAppearanceService = require(script.Parent:WaitForChild("WeaponAppearanceService"))
 
 local WeaponToolService = {}
@@ -268,6 +269,53 @@ end
 -- [修改内容] 引入 CollectionService 用于监听场景中的标签 Part
 local CollectionService = game:GetService("CollectionService")
 
+local PICKUP_ZONE_TOUCH_MARGIN = 2
+
+local function isSameOrDescendantOf(inst: Instance, ancestor: Instance): boolean
+	return inst == ancestor or inst:IsDescendantOf(ancestor)
+end
+
+local function isPointInsidePartXZ(part: BasePart, point: Vector3, margin: number?): boolean
+	local localPos = part.CFrame:PointToObjectSpace(point)
+	local halfSize = part.Size * 0.5
+	local extra = margin or 0
+
+	return math.abs(localPos.X) <= halfSize.X + extra
+		and math.abs(localPos.Z) <= halfSize.Z + extra
+		and localPos.Y >= -halfSize.Y - extra
+		and localPos.Y <= halfSize.Y + 12 + extra
+end
+
+local function isPickupZonePart(inst: Instance): boolean
+	for _, zone in ipairs(ZoneService.GetPickupZones()) do
+		if isSameOrDescendantOf(inst, zone.Part) then
+			return true
+		end
+	end
+	return false
+end
+
+local function isPlayerInsidePickupZone(player: Player): boolean
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return false
+	end
+
+	for _, zone in ipairs(ZoneService.GetPickupZones()) do
+		if isPointInsidePartXZ(zone.Part, hrp.Position, PICKUP_ZONE_TOUCH_MARGIN) then
+			return true
+		end
+	end
+	return false
+end
+
+local function shouldForceWeaponForPickupZone(player: Player, touchedPart: Instance): boolean
+	-- 只在真正进入/站在“拿取区域”时强制拿武器。
+	-- 普通 di_mian/ground 只代表离开 home，不应该打断玩家手上拿着的怪物 Tool。
+	return isPickupZonePart(touchedPart) or isPlayerInsidePickupZone(player)
+end
+
 -- [修改内容] 新增方法：主动装备背包中的武器（用于离开 home/碰触 di_mian 时）
 function WeaponToolService.EquipWeapon(player: Player)
 	local character = player.Character
@@ -357,13 +405,17 @@ function WeaponToolService.Init()
 	end
 	CollectionService:GetInstanceAddedSignal("home"):Connect(onHomePartAdded)
 
-	-- 监听玩家碰触 "di_mian" 标签的 Part -> 拿起武器，并判断为离开 HOME
+	-- 监听玩家碰触 "di_mian" 标签的 Part -> 判断为离开 HOME。
+	-- 注意：普通 ground/di_mian 不再强制拿武器，否则玩家点击工具栏怪物时会被地面触碰事件立刻切回武器。
+	-- 只有确认玩家进入/站在“拿取区域”时，才保留强制拿武器规则。
 	local function onDimianPartAdded(part)
 		part.Touched:Connect(function(hit)
 			local player = Players:GetPlayerFromCharacter(hit.Parent)
 			if player then
 				HomeService.SetPlayerHomeGlowColor(player, false)
-				WeaponToolService.EquipWeapon(player)
+				if shouldForceWeaponForPickupZone(player, part) then
+					WeaponToolService.EquipWeapon(player)
+				end
 			end
 		end)
 	end
@@ -372,6 +424,17 @@ function WeaponToolService.Init()
 		onDimianPartAdded(part)
 	end
 	CollectionService:GetInstanceAddedSignal("di_mian"):Connect(onDimianPartAdded)
+
+	-- 额外直接监听拿取区域 Part：即使场景里的拿取区域没有打 di_mian 标签，进入拿取区域仍会强制拿武器。
+	for _, zone in ipairs(ZoneService.GetPickupZones()) do
+		zone.Part.Touched:Connect(function(hit)
+			local player = Players:GetPlayerFromCharacter(hit.Parent)
+			if player then
+				HomeService.SetPlayerHomeGlowColor(player, false)
+				WeaponToolService.EquipWeapon(player)
+			end
+		end)
+	end
 end
 
 return WeaponToolService

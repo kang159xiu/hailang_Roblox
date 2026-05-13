@@ -50,6 +50,7 @@ ensureRemoteEvent(remotesFolder, "OpenWeaponShopUI")
 ensureRemoteEvent(remotesFolder, "OpenUpgradeShopUI")
 ensureRemoteEvent(remotesFolder, "PushClientToast")
 ensureRemoteEvent(remotesFolder, "SetHomeGlowLocalColor")
+ensureRemoteEvent(remotesFolder, "PlayPlacedMonsterJump")
 ensureRemoteEvent(remotesFolder, "RequestRebirth")
 -- [修改原因] 使用统一的 ensureRemoteEvent 函数自动注册客户端到服务端的埋点通讯通道
 ensureRemoteEvent(remotesFolder, "Analytics_Remote")
@@ -170,6 +171,7 @@ end
 
 requestRebirthRemote.OnServerEvent:Connect(function(player: Player)
 	if PlayerData.PerformGoldRebirth(player) then
+		CharacterService.Refresh(player, true)
 		pushToast(player, string.format("Rebirth successful! Cash multiplier is now x%d", PlayerData.GetRebirthMultiplier(player)))
 	else
 		pushToast(player, string.format("Not enough gold. Need %d", PlayerData.GetRebirthCost(player)))
@@ -221,7 +223,8 @@ dropCarriedRemote.OnServerEvent:Connect(function(player: Player)
 			dropPos,
 			"PlayerManualDrop",
 			(item :: any).UpgradeLevel or 1,
-			(item :: any).SourceZoneLevel or 1
+			(item :: any).SourceZoneLevel or 1,
+			(item :: any).ExpireUnix
 		)
 	end
 end)

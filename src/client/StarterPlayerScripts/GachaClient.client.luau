@@ -92,7 +92,6 @@ refreshGachaPreview = function(isDebug: boolean)
 		return false
 	end
 
-	print("📁 成功找到装怪物的文件夹:", monsterFolder:GetFullName())
 	task.wait(0.5)
 
 	for _, vpf in ipairs(vpfList) do
@@ -323,7 +322,7 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 		visualModel.Parent = vpf
 		clone:Destroy()
 		clone = visualModel
-		print("🧩 使用内部 Model 作为抽奖预览:", clone:GetFullName())
+
 	end
 
 	local function isLikelyVisualPart(part: BasePart): boolean
@@ -437,7 +436,6 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 		maxDim = 5
 	end
 
-	print("📐 抽奖预览包围盒:", clone.Name, boundsSize)
 
 	local modelCF = getModelBounds(clone)
 	local center = if modelCF then modelCF.Position else boundsCF.Position
@@ -503,7 +501,6 @@ end)
 resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 	if isAnimating then return end
 	isAnimating = true
-	print("🎯 收到服务端发来的抽奖结果！结果数量:", #results, " 动画延迟时长:", serverDuration)
 
 	local monsterFolder = findMonsterFolder()
 	if not monsterFolder then
@@ -528,7 +525,6 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 				connection:Disconnect()
 				finished = true
 
-				print("🛑 第", drawIndex, "次抽奖动画结束，显示最终结果:", resLevel)
 
 				for _, vpf in ipairs(vpfList) do
 					local template = findMonsterTemplate(monsterFolder, resLevel)

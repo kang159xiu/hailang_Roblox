@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 
 local PlayerData = require(game.ServerScriptService.Modules.PlayerData)
 local InventoryService = require(game.ServerScriptService.Modules.InventoryService)
+local CharacterService = require(game.ServerScriptService.Modules.CharacterService)
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 
 -- [修改原因] 初始化 RemoteEvent 用于前后端通信
@@ -131,6 +132,7 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 	if receiptInfo.ProductId == PRODUCT_ID_REBIRTH then
 		PlayerData.PerformRobuxRebirth(player)
+		CharacterService.Refresh(player, true)
 		local toastEvent = remotes:FindFirstChild("PushClientToast")
 		if toastEvent and toastEvent:IsA("RemoteEvent") then
 			toastEvent:FireClient(player, string.format("Robux rebirth successful! Cash multiplier is now x%d", PlayerData.GetRebirthMultiplier(player)))

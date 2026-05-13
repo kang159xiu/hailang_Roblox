@@ -15,9 +15,14 @@ local function applyStats(player: Player, humanoid: Humanoid, fullHeal: boolean?
 	-- 设置移动速度: 基础速度 + 速度等级 * 每级增加速度
 	humanoid.WalkSpeed = Config.WALK_SPEED_BASE + stats.SpeedLevel * Config.WALK_SPEED_PER_UPGRADE
 
-	-- 计算最大血量: 基础血量 + 血量等级 * 每级增加血量
-	local maxHealth = Config.HEALTH_BASE + stats.HealthLevel * Config.HEALTH_PER_UPGRADE
+	-- 固定玩家最大血量：原“血量升级”已改为“跳跃升级”，不再提升 MaxHealth。
+	local maxHealth = Config.HEALTH_BASE or 100
 	humanoid.MaxHealth = maxHealth
+
+	-- 跳跃升级：复用旧存档键 HealthLevel，避免老玩家数据丢失。
+	humanoid.UseJumpPower = true
+	humanoid.JumpPower = if Config.GetJumpPowerForLevel then Config.GetJumpPowerForLevel(stats.HealthLevel) else math.clamp((Config.JUMP_POWER_BASE or 50) + stats.HealthLevel * (Config.JUMP_POWER_PER_UPGRADE or 1), Config.JUMP_POWER_BASE or 50, Config.JUMP_POWER_MAX or 150)
+
 	--如果要求完全恢复血量 (比如重生时)
 	if fullHeal == true then
 		humanoid.Health = maxHealth
@@ -56,7 +61,8 @@ local function hookCharacterDied(player: Player, character: Model, humanoid: Hum
 					spawnPos,
 					"PlayerDeathDrop", -- 掉落怪的特殊ZoneKey标识
 					(monsterData :: any).UpgradeLevel or 1,
-					(monsterData :: any).SourceZoneLevel or 1
+					(monsterData :: any).SourceZoneLevel or 1,
+					(monsterData :: any).ExpireUnix
 				)
 			end
 		end

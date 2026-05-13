@@ -266,6 +266,34 @@ local function isPlayerOnSafeGround(char: Model): boolean
 	end
 	return false
 end
+
+-- 玩家携带怪物时只要碰到带有 di_mian 标签的 Part，就停止守护者追踪。
+-- 这里和上面的 gorund 规则分开：gorund 负责把头顶携带态转换成 Tool；di_mian 只负责让守护者放弃追踪。
+local function isCharacterTouchingDimian(char: Model): boolean
+	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if hrp then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = {char}
+
+		local result = workspace:Raycast(hrp.Position, Vector3.new(0, -20, 0), params)
+		if result and result.Instance and CollectionService:HasTag(result.Instance, "di_mian") then
+			return true
+		end
+	end
+
+	for _, descendant in ipairs(char:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			for _, touchingPart in ipairs(descendant:GetTouchingParts()) do
+				if touchingPart and not touchingPart:IsDescendantOf(char) and CollectionService:HasTag(touchingPart, "di_mian") then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
 -- =======================================================
 
 local function getExistingPersonalGuardianForPlayer(player: Player)
@@ -312,7 +340,8 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 			dropPos,
 			guardian.ZoneKey,
 			(item :: any).UpgradeLevel or 1,
-			(item :: any).SourceZoneLevel or 1
+			(item :: any).SourceZoneLevel or 1,
+			(item :: any).ExpireUnix
 		)
 	end
 
@@ -612,8 +641,9 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 		local targetChar = g.TargetPlayer.Character
 		local targetHrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart") :: BasePart?
 		local isSafe = targetChar and isPlayerOnSafeGround(targetChar)
+		local isTouchingDimian = targetChar and isCharacterTouchingDimian(targetChar)
 
-		if not targetHrp or getPlayerCarriedSourceZoneLevel(g.TargetPlayer) == 0 or isSafe then
+		if not targetHrp or getPlayerCarriedSourceZoneLevel(g.TargetPlayer) == 0 or isSafe or isTouchingDimian then
 			g.TargetPlayer = nil
 			g.Model:SetAttribute("TargetPlayerName", "")
 			g.State = "Return"
@@ -725,7 +755,7 @@ local function onHeartbeat(dt: number)
 			continue
 		end
 
-		if isPlayerOnSafeGround(char) then
+		if isPlayerOnSafeGround(char) or isCharacterTouchingDimian(char) then
 			continue
 		end
 
@@ -776,8 +806,9 @@ local function onHeartbeat(dt: number)
 
 				local carriedSourceZoneLevel = getPlayerCarriedSourceZoneLevel(player)
 				local isSafe = isPlayerOnSafeGround(char)
+				local isTouchingDimian = isCharacterTouchingDimian(char)
 
-				if not isSafe then
+				if not isSafe and not isTouchingDimian then
 					-- 只在“当前区域等级 <= 怪物来源区域等级”时追击。
 					if carriedSourceZoneLevel > 0 and not playerHasActivePersonalGuardian(player) and g.ZoneLevel <= carriedSourceZoneLevel and preferredGuardianKeyByUserId[player.UserId] == key then
 						startPersonalGuardianTrack(player, g.ZonePart, g.ZoneLevel, g.ZoneKey)
@@ -856,7 +887,6 @@ function GuardianService.TriggerAlert(player: Player, zonePart: BasePart)
     startPersonalGuardianTrack(player, zonePart, zoneLevel, zoneKey)
 
     -- [修改原因] 使用 %s 作为容错占位符，防止类型不符导致 string.format 中断守护者线程。
-    print(string.format("[GuardianService] %s 触发拾取！(等级:%s 速度:%s) 专属守护者正在追击...", player.Name, tostring(zoneLevel), tostring(targetSpeed)))
 end
 
 function GuardianService.Init()

@@ -28,6 +28,7 @@ export type MonsterItem = {
 	BaseValue: number?,
 	BaseGoldPerSec: number?,
 	SourceZoneLevel: number?,
+	ExpireUnix: number?,
 	StorageKind: string?,
 }
 
@@ -37,6 +38,7 @@ type CarriedMonster = {
 	GoldPerSec: number,
 	UpgradeLevel: number,
 	SourceZoneLevel: number,
+	ExpireUnix: number,
 }
 
 
@@ -59,6 +61,7 @@ local function normalizeMonsterItem(raw: any): MonsterItem
 	local baseValue = math.floor(tonumber(raw.BaseValue) or math.floor(value / math.max(upgradeLevel, 1)))
 	local baseGoldPerSec = math.floor(tonumber(raw.BaseGoldPerSec) or math.floor(goldPerSec / math.max(upgradeLevel, 1)))
 	local sourceZoneLevel = math.max(1, math.floor(tonumber(raw.SourceZoneLevel) or 1))
+	local expireUnix = math.floor(tonumber(raw.ExpireUnix) or 0)
 	local storageKind = tostring(raw.StorageKind or "Inventory")
 
 	return {
@@ -70,6 +73,7 @@ local function normalizeMonsterItem(raw: any): MonsterItem
 		BaseValue = baseValue,
 		BaseGoldPerSec = baseGoldPerSec,
 		SourceZoneLevel = sourceZoneLevel,
+		ExpireUnix = expireUnix,
 		StorageKind = storageKind,
 	}
 end
@@ -729,7 +733,7 @@ end
 
 
 -- 刷怪区域拾取：进入携带态（头顶显示），不进入背包 UI
-function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number, sourceZoneLevel: number)
+function InventoryService.PickupCarryMonster(player: Player, level: number, value: number, gps: number, upgradeLevel: number, sourceZoneLevel: number, expireUnix: number?)
 	local stats = PlayerData.Get(player)
 	local maxCarry = Config.GetCarryMax(stats.CarryLevel)
 
@@ -739,12 +743,18 @@ function InventoryService.PickupCarryMonster(player: Player, level: number, valu
 		return false
 	end
 
+	local safeExpireUnix = math.floor(tonumber(expireUnix) or 0)
+	if safeExpireUnix <= 0 then
+		safeExpireUnix = os.time() + Config.MONSTER_LIFETIME_SECONDS
+	end
+
 	table.insert(list, {
 		MonsterLevel = level,
 		Value = value,
 		GoldPerSec = gps,
 		UpgradeLevel = upgradeLevel or 1,
 		SourceZoneLevel = math.max(1, math.floor(tonumber(sourceZoneLevel) or 1)),
+		ExpireUnix = safeExpireUnix,
 	})
 
 	rebuildCarriedVisual(player)
@@ -772,6 +782,7 @@ function InventoryService.DropAllCarried(player: Player, toastText: string?): {C
 			GoldPerSec = v.GoldPerSec,
 			UpgradeLevel = (v :: any).UpgradeLevel or 1,
 			SourceZoneLevel = (v :: any).SourceZoneLevel or 1,
+			ExpireUnix = (v :: any).ExpireUnix or (os.time() + Config.MONSTER_LIFETIME_SECONDS),
 		})
 
 	end
@@ -879,6 +890,7 @@ function InventoryService.Export(player: Player): {MonsterItem}
 			BaseValue = math.floor(it.Value / math.max(it.UpgradeLevel, 1)),
 			BaseGoldPerSec = math.floor(it.GoldPerSec / math.max(it.UpgradeLevel, 1)),
 			SourceZoneLevel = it.SourceZoneLevel,
+			ExpireUnix = it.ExpireUnix,
 			StorageKind = "Carried",
 		}))
 	end
@@ -902,12 +914,17 @@ function InventoryService.ApplyLoaded(player: Player, loadedItems: {MonsterItem}
 					if item.StorageKind == "Tool" then
 						table.insert(toolItems, item)
 					elseif item.StorageKind == "Carried" then
+						local safeExpireUnix = math.floor(tonumber((it :: any).ExpireUnix) or 0)
+						if safeExpireUnix <= 0 then
+							safeExpireUnix = os.time() + Config.MONSTER_LIFETIME_SECONDS
+						end
 						table.insert(carriedList, {
 							MonsterLevel = item.MonsterLevel,
 							Value = item.Value,
 							GoldPerSec = item.GoldPerSec,
 							UpgradeLevel = item.UpgradeLevel or 1,
 							SourceZoneLevel = item.SourceZoneLevel or 1,
+							ExpireUnix = safeExpireUnix,
 						})
 					else
 						table.insert(list, item)

@@ -67,26 +67,62 @@ Config.WALK_SPEED_PER_UPGRADE = 1
 
 -- 速度升级花费：level * (level * 50)
 function Config.GetSpeedUpgradeCost(level: number): number
-	return level * (level * 50)
+	return level * (level * 400)
 end
 
 -- 攻击力升级花费：level * (level * 100)
 function Config.GetAttackUpgradeCost(level: number): number
-	return level * (level * 100)
+	return level * (level * 2000)
 end
 
 -- 攻击力每次升级增加多少（你确认：+10/级）
-Config.ATTACK_UPGRADE_ADD = 10
+Config.ATTACK_UPGRADE_ADD = 5
 
 
 
--- 血量升级（你没给具体数值，这里先给一个常用占位，后期你再改）
+-- 玩家基础血量：现在升级项不再增加血量，只保留基础血量配置。
 Config.HEALTH_BASE = 100
-Config.HEALTH_PER_UPGRADE = 20
 
--- 血量升级花费：level * (level * 80)（占位，可改）
+-- 跳跃升级：Roblox 默认 JumpPower 通常是 50；每级增加 1 点跳跃力度，最高 150。
+Config.JUMP_POWER_BASE = 50
+Config.JUMP_POWER_PER_UPGRADE = 1
+Config.JUMP_POWER_MAX = 150
+
+-- 兼容旧代码/旧 UI 文案读取；升级效果已改为跳跃，不再用于增加 Max HP。
+Config.HEALTH_PER_UPGRADE = Config.JUMP_POWER_PER_UPGRADE
+
+-- 跳跃升级花费：第一次升级 5000；之后每次为前一次升级的 2 倍。
+Config.JUMP_UPGRADE_BASE_COST = 5000
+Config.JUMP_UPGRADE_COST_MULTIPLIER = 1.5
+
+function Config.GetJumpUpgradeCost(level: number): number
+	level = math.max(1, math.floor(tonumber(level) or 1))
+	local baseCost = tonumber(Config.JUMP_UPGRADE_BASE_COST) or 5000
+	local multiplier = tonumber(Config.JUMP_UPGRADE_COST_MULTIPLIER) or 2
+	return math.floor(baseCost * (multiplier ^ (level - 1)))
+end
+
+function Config.GetMaxJumpUpgradeLevel(): number
+	local basePower = tonumber(Config.JUMP_POWER_BASE) or 50
+	local maxPower = tonumber(Config.JUMP_POWER_MAX) or 150
+	local perUpgrade = tonumber(Config.JUMP_POWER_PER_UPGRADE) or 1
+	if perUpgrade <= 0 then
+		return 0
+	end
+	return math.max(0, math.floor((maxPower - basePower) / perUpgrade))
+end
+
+function Config.GetJumpPowerForLevel(level: number): number
+	level = math.max(0, math.floor(tonumber(level) or 0))
+	local basePower = tonumber(Config.JUMP_POWER_BASE) or 50
+	local perUpgrade = tonumber(Config.JUMP_POWER_PER_UPGRADE) or 1
+	local maxPower = tonumber(Config.JUMP_POWER_MAX) or 150
+	return math.clamp(basePower + level * perUpgrade, basePower, maxPower)
+end
+
+-- 兼容旧调用：Health 升级入口现在代表 Jump 升级。
 function Config.GetHealthUpgradeCost(level: number): number
-	return level * (level * 80)
+	return Config.GetJumpUpgradeCost(level)
 end
 
 -- =====================
@@ -126,7 +162,7 @@ end
 Config.UPGRADE_SHOP_ICON_BY_TYPE = {
 	Attack = "rbxassetid://127831794517025", -- 攻击升级图标
 	Speed = "rbxassetid://104534762878172", -- 速度升级图标
-	Health = "rbxassetid://104862583990197", -- 血量升级图标
+	Health = "rbxassetid://104862583990197", -- 跳跃升级图标（兼容旧 Health 类型）
 	Carry = "rbxassetid://81401681168713", -- 背包容量升级图标
 }
 

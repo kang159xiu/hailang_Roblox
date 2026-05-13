@@ -35,6 +35,7 @@ local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
 ensureRemoteEvent(remotesFolder, "PlayWeaponHitVFX")
 ensureRemoteEvent(remotesFolder, "ShowDamageNumber")
 ensureRemoteEvent(remotesFolder, "SetHomeGlowLocalColor")
+ensureRemoteEvent(remotesFolder, "PlayPlacedMonsterJump")
 ensureRemoteEvent(remotesFolder, "RequestRebirth")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")

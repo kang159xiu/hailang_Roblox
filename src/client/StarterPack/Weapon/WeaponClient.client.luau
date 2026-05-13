@@ -165,7 +165,6 @@ end
 local atktime , playSpeed ,cdTime = 0.2 , 1.5 , 0.5 --伤害生效时间，播放速度，攻击动作的 CD 时间
 
 local function playDefaultAttackAnimation()
-	print("默认攻击动画")
 
 	local v = Instance.new("StringValue")
 	v.Name = "toolanim"

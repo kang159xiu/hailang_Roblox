@@ -289,6 +289,35 @@ local function destroyMonsterInstance(monsterPart: BasePart)
 	end
 end
 
+local function startMonsterLifetimeCountdown(monsterPart: BasePart, monsterInstance: Instance)
+	-- 怪物死亡/掉落后仍然需要继续刷新头顶倒计时，直到生命周期结束。
+	-- 因此这里不再用 Dead 属性作为循环退出条件，而是按 ExpireUnix 统一计算剩余时间。
+	task.spawn(function()
+		while monsterPart and monsterPart.Parent and monsterInstance and monsterInstance.Parent do
+			setMonsterBillboardText(monsterPart)
+
+			local expireUnix = tonumber(monsterPart:GetAttribute("ExpireUnix")) or 0
+			if expireUnix > 0 and os.time() >= expireUnix then
+				break
+			end
+
+			task.wait(1)
+		end
+	end)
+
+	local expireUnix = tonumber(monsterPart:GetAttribute("ExpireUnix")) or 0
+	local delaySeconds = Config.MONSTER_LIFETIME_SECONDS or 60
+	if expireUnix > 0 then
+		delaySeconds = math.max(0, expireUnix - os.time())
+	end
+
+	task.delay(delaySeconds, function()
+		if monsterInstance and monsterInstance.Parent then
+			monsterInstance:Destroy()
+		end
+	end)
+end
+
 local function ensureCollectPrompt(monsterPart: BasePart)
 	-- 给死亡后的怪物添加 ProximityPrompt（接近交互提示）。
 	--
@@ -370,6 +399,7 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 	local level = monsterPart:GetAttribute("MonsterLevel")
 	local value = monsterPart:GetAttribute("Value")
 	local gps = monsterPart:GetAttribute("GoldPerSec")
+	local expireUnix = monsterPart:GetAttribute("ExpireUnix")
 	-- 【新增】读取强化等级
 	local upLevel = monsterPart:GetAttribute("UpgradeLevel") or 1 
 	local sourceZoneLevel = monsterPart:GetAttribute("SourceZoneLevel")
@@ -384,7 +414,8 @@ local function tryCollectDeadMonster(player: Player, monsterPart: BasePart, prom
 		type(value) == "number" and value or 0,
 		type(gps) == "number" and gps or 0,
 		type(upLevel) == "number" and upLevel or 1,
-		type(sourceZoneLevel) == "number" and sourceZoneLevel or 1
+		type(sourceZoneLevel) == "number" and sourceZoneLevel or 1,
+		type(expireUnix) == "number" and expireUnix or nil
 	)
 
 	if ok then
@@ -650,6 +681,7 @@ local function markDead(monsterPart: BasePart, killerPlayer: Player?)
 		local level = monsterPart:GetAttribute("MonsterLevel")
 		local value = monsterPart:GetAttribute("Value")
 		local gps = monsterPart:GetAttribute("GoldPerSec")
+		local expireUnix = monsterPart:GetAttribute("ExpireUnix")
 		local upLevel = monsterPart:GetAttribute("UpgradeLevel") or 1
 		local sourceZoneLevel = monsterPart:GetAttribute("SourceZoneLevel")
 		if type(sourceZoneLevel) ~= "number" then
@@ -662,7 +694,8 @@ local function markDead(monsterPart: BasePart, killerPlayer: Player?)
 			type(value) == "number" and value or 0,
 			type(gps) == "number" and gps or 0,
 			type(upLevel) == "number" and upLevel or 1,
-			type(sourceZoneLevel) == "number" and sourceZoneLevel or 1
+			type(sourceZoneLevel) == "number" and sourceZoneLevel or 1,
+			type(expireUnix) == "number" and expireUnix or nil
 		)
 
 		if pickedUp then
@@ -707,23 +740,18 @@ end
 
 function MonsterService.TryHandlePromptInteraction(player: Player, promptInstance: Instance): boolean
 	if not promptInstance:IsA("ProximityPrompt") then
-		print(string.format("[PromptDebug][Monster] reject player=%s reason=not_prompt class=%s", player.Name, promptInstance.ClassName))
 		return false
 	end
 	if promptInstance.Name ~= "CollectPrompt" then
-		print(string.format("[PromptDebug][Monster] reject player=%s prompt=%s reason=not_collect_prompt name=%s", player.Name, debugInstancePath(promptInstance), promptInstance.Name))
 		return false
 	end
 
 	local promptParent = promptInstance.Parent
 	if not (promptParent and promptParent:IsA("BasePart")) then
-		print(string.format("[PromptDebug][Monster] reject player=%s prompt=%s reason=parent_not_basepart parent=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(promptParent)))
 		return false
 	end
 
-	print(string.format("[PromptDebug][Monster] attempt action=CollectPrompt player=%s prompt=%s target=%s", player.Name, debugInstancePath(promptInstance), debugInstancePath(promptParent)))
 	local ok = tryCollectDeadMonster(player, promptParent, promptInstance)
-	print(string.format("[PromptDebug][Monster] result action=CollectPrompt player=%s success=%s", player.Name, tostring(ok)))
 	return ok
 end
 
@@ -766,13 +794,8 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 	aliveMonsters[monster] = true
 
 	-- 找到 spawnMonsterInZone 函数，在 aliveMonsters[monster] = true 之后添加：
-	-- 开启一个循环任务，每秒更新一次头顶 UI 的倒计时
-	task.spawn(function()
-		while monster and monster.Parent and monster:GetAttribute("Dead") ~= true do
-			setMonsterBillboardText(monster)
-			task.wait(1)
-		end
-	end)
+	-- 开启生命周期倒计时：即使怪物死亡变成尸体，头顶 UI 仍然每秒刷新，并在倒计时为 0 时消失。
+	startMonsterLifetimeCountdown(monster, monsterInstance)
 
 	-- 统一在 Destroying 中做字典清理 + 触发“保底补怪”（分批 1~3 只，每批间隔 5s）
 	monsterInstance.Destroying:Connect(function()
@@ -784,12 +807,6 @@ local function spawnMonsterInZone(zonePart: BasePart, zoneLevel: number, zoneKey
 			task.defer(function()
 				replenishZoneToTarget(z, key, minDesired)
 			end)
-		end
-	end)
-
-	task.delay(Config.MONSTER_LIFETIME_SECONDS, function()
-		if monsterInstance and monsterInstance.Parent then
-			monsterInstance:Destroy()
 		end
 	end)
 
@@ -1027,7 +1044,7 @@ end
 
 
 -- [新增] 爆装备接口：在指定坐标散落一只立刻死亡的怪物尸体
-function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number?, sourceZoneLevel: number?)
+function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number?, sourceZoneLevel: number?, expireUnix: number?)
 	local template = getMonsterTemplate(level)
 	if not template then return end
 
@@ -1048,8 +1065,12 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	p:SetAttribute("HP", 0)
 	p:SetAttribute("Value", value)
 	p:SetAttribute("GoldPerSec", gps)
+	local safeExpireUnix = math.floor(tonumber(expireUnix) or 0)
+	if safeExpireUnix <= 0 then
+		safeExpireUnix = os.time() + Config.MONSTER_LIFETIME_SECONDS
+	end
 	p:SetAttribute("SpawnUnix", os.time())
-	p:SetAttribute("ExpireUnix", os.time() + Config.MONSTER_LIFETIME_SECONDS)
+	p:SetAttribute("ExpireUnix", safeExpireUnix)
 	p:SetAttribute("Dead", false)
 	p:SetAttribute("Collected", false)
 	p:SetAttribute("UpgradeLevel", upgradeLevel or 1) -- 【新增】保存强化等级
@@ -1067,12 +1088,8 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	clone.Parent = monstersFolder
 	aliveMonsters[p] = true
 
-	task.spawn(function()
-		while p and p.Parent and p:GetAttribute("Dead") ~= true do
-			setMonsterBillboardText(p)
-			task.wait(1)
-		end
-	end)
+	-- 掉落怪会立刻被 markDead 标记为尸体，但仍需要继续倒计时并按 ExpireUnix 自动消失。
+	startMonsterLifetimeCountdown(p, clone)
 
 	-- 直接标记为死亡尸体，挂上交互提示
 	markDead(p)
@@ -1081,9 +1098,6 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 		aliveMonsters[p] = nil
 	end)
 
-	task.delay(Config.MONSTER_LIFETIME_SECONDS, function()
-		if clone and clone.Parent then clone:Destroy() end
-	end)
 end
 
 function MonsterService.GetRandomAliveMonsterInZoneLevel(zoneLevel: number): BasePart?

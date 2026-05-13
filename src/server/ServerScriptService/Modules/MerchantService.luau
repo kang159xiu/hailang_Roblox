@@ -163,7 +163,7 @@ function MerchantService.Init()
 		pushToast(player, string.format("Equipped: Weapon Lv.%d", desired))
 	end)
 
-	-- 4. [修改内容] 处理升级请求（攻击/速度/血量/携带数量）
+	-- 4. [修改内容] 处理升级请求（攻击/速度/跳跃/携带数量）
 	requestPurchaseUpgrade.OnServerEvent:Connect(function(player: Player, upgradeType: any)
 		local m = ZoneService.GetMerchantPart()
 		if not m or not isNear(player, m, 12) then return end
@@ -216,11 +216,16 @@ function MerchantService.Init()
 			else
 				pushToast(player, "Not enough gold")
 			end
-		elseif t == "Health" then
+		elseif t == "Health" or t == "Jump" then
 			local nextLevel = stats.HealthLevel + 1
-			local cost = Config.GetHealthUpgradeCost(nextLevel)
+			local maxJumpLevel = if Config.GetMaxJumpUpgradeLevel then Config.GetMaxJumpUpgradeLevel() else math.max(0, math.floor(((Config.JUMP_POWER_MAX or 150) - (Config.JUMP_POWER_BASE or 50)) / (Config.JUMP_POWER_PER_UPGRADE or 1)))
+			if stats.HealthLevel >= maxJumpLevel then
+				pushToast(player, "Jump is max level")
+				return
+			end
+			local cost = if Config.GetJumpUpgradeCost then Config.GetJumpUpgradeCost(nextLevel) else Config.GetHealthUpgradeCost(nextLevel)
 			if PlayerData.TrySpendGold(player, cost) then
-				-- [修改原因] 经济埋点：上报血量升级造成的金币消耗
+				-- [修改原因] 经济埋点：上报跳跃升级造成的金币消耗
 				local AnalyticsService = game:GetService("AnalyticsService")
 				AnalyticsService:LogEconomyEvent(
 					player,
@@ -229,13 +234,14 @@ function MerchantService.Init()
 					cost,
 					PlayerData.Get(player).Gold,
 					"Gameplay",
-					"Upgrade_Health"
+					"Upgrade_Jump"
 				)
 				
+				-- 复用 HealthLevel 作为旧存档键；实际效果由 CharacterService 应用为 JumpPower。
 				PlayerData.AddHealthLevel(player, 1)
 				CharacterService.Refresh(player)
 				DataDirtyService.MarkDirty(player, 5)
-				pushToast(player, string.format("Health upgraded! Cost: %s", Util.FormatMoney(cost)))
+				pushToast(player, string.format("Jump upgraded! Cost: %s", Util.FormatMoney(cost)))
 			else
 				pushToast(player, "Not enough gold")
 			end

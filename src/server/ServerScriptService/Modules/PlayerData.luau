@@ -12,6 +12,7 @@ export type PlayerStats = {
 	RebirthCount: number,
 	SpeedLevel: number,
 	AttackLevel: number,
+	-- 兼容旧存档键：HealthLevel 现在代表“跳跃升级等级”，不再提升玩家血量。
 	HealthLevel: number,
 
 	-- 携带怪升级：每级 +1 最大携带数量（默认 1，最多 5）
@@ -77,6 +78,14 @@ local function getOrCreate(player: Player): PlayerStats
 	return stats
 end
 
+local function resetRebirthUpgradeableStats(stats: PlayerStats)
+	-- 重生后把战斗/移动成长重置为基础数值。
+	-- HealthLevel 是旧存档键，现在语义代表“跳跃升级等级”。
+	stats.SpeedLevel = 0
+	stats.AttackLevel = 0
+	stats.HealthLevel = 0
+end
+
 function PlayerData.Get(player: Player): PlayerStats
 	return getOrCreate(player)
 end
@@ -96,18 +105,16 @@ function PlayerData.AddGold(player: Player, amount: number): number
 	local added = math.floor(amount * multiplier)
 	stats.Gold += added
 
-	if rebirthCount > 0 then
-		warn(string.format(
-			"[RebirthGoldDebug] player=%s base=%d rebirth=%d multiplier=x%d added=%d gold=%d->%d",
-			player.Name,
-			amount,
-			rebirthCount,
-			multiplier,
-			added,
-			beforeGold,
-			stats.Gold
-		))
-	end
+	warn(string.format(
+		"[RebirthGoldDebug] source=PlayerData.AddGold player=%s base=%d rebirth=%d multiplier=x%d added=%d gold=%d->%d",
+		player.Name,
+		amount,
+		rebirthCount,
+		multiplier,
+		added,
+		beforeGold,
+		stats.Gold
+	))
 
 	PlayerData.Sync(player)
 	DataDirtyService.MarkDirty(player)
@@ -134,6 +141,7 @@ function PlayerData.PerformGoldRebirth(player: Player): boolean
 
 	stats.Gold -= cost
 	stats.RebirthCount += 1
+	resetRebirthUpgradeableStats(stats)
 	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
 	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
 	warn(string.format(
@@ -153,6 +161,7 @@ function PlayerData.PerformRobuxRebirth(player: Player): boolean
 	local stats = getOrCreate(player)
 	stats.RebirthCount = math.max(0, math.floor(tonumber(stats.RebirthCount) or 0))
 	stats.RebirthCount += 1
+	resetRebirthUpgradeableStats(stats)
 	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
 	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
 	warn(string.format(
@@ -284,6 +293,11 @@ function PlayerData.AddHealthLevel(player: Player, amount: number)
 	stats.HealthLevel += amount
 	PlayerData.Sync(player)
 	DataDirtyService.MarkDirty(player)
+end
+
+-- 语义别名：底层仍写入 HealthLevel，保证旧存档和旧客户端类型兼容。
+function PlayerData.AddJumpLevel(player: Player, amount: number)
+	PlayerData.AddHealthLevel(player, amount)
 end
 
 function PlayerData.AddCarryLevel(player: Player, amount: number)

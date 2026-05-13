@@ -21,8 +21,12 @@ local Util = require(script.Parent:WaitForChild("Util"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local HomeService = require(script.Parent:WaitForChild("HomeService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
+local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 
 local PlacementService = {}
+
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local playPlacedMonsterJumpRemote = remotesFolder:WaitForChild("PlayPlacedMonsterJump") :: RemoteEvent
 
 ------------------------
 -- 终极类型安全属性提取器 (彻底消灭 unknown 报错)
@@ -64,6 +68,7 @@ end
 
 export type PersistedPlacedMonster = {
   MonsterLevel: number,
+  AppearanceLevel: number?,
   Value: number,
   GoldPerSec: number,
   UnclaimedGold: number,
@@ -90,6 +95,48 @@ local placementInitStartedByUserId: {[number]: boolean} = {}
 
 -- While placed monsters are producing, UnclaimedGold changes every second.
 local lastDirtyPulseUnixByUserId: {[number]: number} = {}
+
+local function getClampedMonsterLevel(level: number): number
+	return math.max(1, math.floor(tonumber(level) or 1))
+end
+
+local function inferAppearanceLevelFromStats(fallbackLevel: number, baseValue: number?, baseGoldPerSec: number?): number
+	local fallback = getClampedMonsterLevel(fallbackLevel)
+	local gps = if type(baseGoldPerSec) == "number" then math.floor(baseGoldPerSec :: number) else nil
+	local value = if type(baseValue) == "number" then math.floor(baseValue :: number) else nil
+
+	local gpsByLevel = Config.MONSTER_GOLD_PER_SEC_BY_LEVEL
+	if gps and type(gpsByLevel) == "table" then
+		for level, configuredGps in ipairs(gpsByLevel :: {number}) do
+			if math.floor(tonumber(configuredGps) or -1) == gps then
+				return getClampedMonsterLevel(level)
+			end
+		end
+	end
+
+	local valueByLevel = Config.MONSTER_VALUE_BY_LEVEL
+	if value and type(valueByLevel) == "table" then
+		for level, configuredValue in ipairs(valueByLevel :: {number}) do
+			if math.floor(tonumber(configuredValue) or -1) == value then
+				return getClampedMonsterLevel(level)
+			end
+		end
+	end
+
+	return fallback
+end
+
+local function getAppearanceLevelFromPlacedData(pData: PersistedPlacedMonster): number
+	if type(pData.AppearanceLevel) == "number" then
+		return getClampedMonsterLevel(pData.AppearanceLevel :: number)
+	end
+
+	return inferAppearanceLevelFromStats(
+		pData.MonsterLevel,
+		pData.BaseValue or pData.Value,
+		pData.BaseGoldPerSec or pData.GoldPerSec
+	)
+end
 
 -- 这个函数用于把实例转换成便于日志输出的完整路径字符串，方便排查交互问题。
 local function debugInstancePath(instance: Instance?): string
@@ -301,9 +348,6 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 	local level = math.floor(getNumAttr(rootPart, "UpgradeLevel", getNumAttr(rootPart, "MonsterLevel", 1)))
 	local value = math.floor(getNumAttr(rootPart, "Value", 0))
 	local goldPerSec = math.floor(getNumAttr(rootPart, "GoldPerSec", 0))
-	local multiplier = getOwnerCashMultiplierFromPlaced(rootPart)
-	local actualValue = applyCashMultiplier(value, multiplier)
-	local actualGoldPerSec = applyCashMultiplier(goldPerSec, multiplier)
 
 	local bInst = billboard :: Instance
 	for _, child in ipairs(bInst:GetDescendants()) do
@@ -312,9 +356,10 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 			if t.Name == "lv" then
 				t.Text = string.format("[Lv. %d]", level)
 			elseif t.Name == "cost" then
-				t.Text = formatMoney(actualValue)
+				t.Text = formatMoney(value)
 			elseif t.Name == "gold" then
-				t.Text = string.format("$%s/s", formatMoney(actualGoldPerSec))
+				-- 怪物头顶每秒产出显示基础产量；只有领取到账/提示时才乘重生倍率。
+				t.Text = string.format("$%s/s", formatMoney(goldPerSec))
 			end
 		end
 	end
@@ -400,9 +445,10 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 		local activePm = placed :: BasePart
 		local upLevel = getNumAttr(activePm, "UpgradeLevel", 1)
 		local baseGps = getNumAttr(activePm, "BaseGoldPerSec", getNumAttr(activePm, "GoldPerSec", 0))
-		local upgradeCost = upLevel * 10 * baseGps
-		local multiplier = getPlayerCashMultiplier(player)
-		local unclaimed = applyCashMultiplier(getNumAttr(activePm, "UnclaimedGold", 0), multiplier)
+		local upgradeCost = upLevel * 100 * baseGps
+		-- 收益牌显示“基础未领取金额”。
+		-- 实际领取到账、Toast、addGoldUI 仍由 PlayerData.AddGold 按重生倍率计算。
+		local unclaimed = math.floor(getNumAttr(activePm, "UnclaimedGold", 0))
 
 		if costLabel and costLabel:IsA("TextLabel") then (costLabel :: TextLabel).Text = "$" .. formatMoney(upgradeCost) end
 		if levelLabel and levelLabel:IsA("TextLabel") then (levelLabel :: TextLabel).Text = string.format("LV.%d ▶ LV.%d", upLevel, upLevel + 1) end
@@ -662,6 +708,16 @@ local function playPlacedMonsterJump(rootPart: BasePart)
 	end)
 end
 
+local function requestPlacedMonsterJump(player: Player, rootPart: BasePart)
+	-- 收钱后的怪物跳跃只是表现动画，不参与金币结算。
+	-- 改为只通知领取收益的玩家客户端本地播放，避免服务端 Tween 每帧同步模型位置造成卡顿。
+	if rootPart.Parent == nil then
+		return
+	end
+
+	playPlacedMonsterJumpRemote:FireClient(player, rootPart)
+end
+
 local function destroyPlacedMonster(rootPart: BasePart)
 	getPlacedMonsterContainer(rootPart):Destroy()
 end
@@ -820,11 +876,24 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart): number
 	if un <= 0 then
 		return 0
 	end
+	local idx = getNumAttr(placed, "SlotIndex", 1)
+	local unBase = math.floor(un)
+	local multiplier = getPlayerCashMultiplier(player)
+	local expectedAdded = applyCashMultiplier(unBase, multiplier)
 	placed:SetAttribute("UnclaimedGold", 0)
-	local added = PlayerData.AddGold(player, math.floor(un))
+	local added = PlayerData.AddGold(player, unBase)
 	PlayerData.Sync(player)
 
-	local idx = getNumAttr(placed, "SlotIndex", 1)
+	warn(string.format(
+		"[PlacementGoldDebug] collect player=%s slot=%d unclaimedBase=%d multiplier=x%d expectedAdded=%d actualAdded=%d",
+		player.Name,
+		idx,
+		unBase,
+		multiplier,
+		expectedAdded,
+		added
+	))
+
 	local states = ensureState(player)
 	local st = states[idx]
 	if st and st.PlacedData then
@@ -995,6 +1064,7 @@ local function createPlacedMonsterPart(
 		p:SetAttribute("OwnerUserId", player.UserId)
 		p:SetAttribute("SlotIndex", getNumAttr(slotPart, "SlotIndex", 1))
 		p:SetAttribute("MonsterLevel", monsterLevel)
+		p:SetAttribute("AppearanceLevel", monsterLevel)
 		p:SetAttribute("Value", value)
 		p:SetAttribute("GoldPerSec", goldPerSec)
 		p:SetAttribute("UnclaimedGold", unclaimedGold or 0)
@@ -1082,7 +1152,7 @@ local function createPlacedMonsterPart(
 			tryStorePlacedMonster(player, slotPart, p)
 		end)
 
-		-- 不再通过点击怪物显示 Sell/Collect；只允许 Collector 领取点触发显示。
+		-- 不再通过点击怪物或 Collector 显示 Sell/Collect；只允许站到 Platform/放置区域时触发显示。
 		local container = getPlacedMonsterContainer(p)
 
 		container.Destroying:Connect(function()
@@ -1123,6 +1193,7 @@ local function createPlacedMonsterPart(
 	p:SetAttribute("OwnerUserId", player.UserId)
 	p:SetAttribute("SlotIndex", getNumAttr(slotPart, "SlotIndex", 1))
 	p:SetAttribute("MonsterLevel", monsterLevel)
+	p:SetAttribute("AppearanceLevel", monsterLevel)
 	p:SetAttribute("Value", value)
 	p:SetAttribute("GoldPerSec", goldPerSec)
 	p:SetAttribute("UnclaimedGold", unclaimedGold or 0)
@@ -1211,7 +1282,7 @@ local function createPlacedMonsterPart(
 		tryStorePlacedMonster(player, slotPart, p)
 	end)
 
-	-- 不再通过点击怪物显示 Sell/Collect；只允许 Collector 领取点触发显示。
+	-- 不再通过点击怪物或 Collector 显示 Sell/Collect；只允许站到 Platform/放置区域时触发显示。
 
 	p.Destroying:Connect(function()
 		local m = slotStatesByUserId[player.UserId]
@@ -1390,23 +1461,23 @@ local function emitPlacementVfxAt(targetCFrame: CFrame): boolean
 	return emitted > 0
 end
 
-local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
-	if player:GetAttribute("__DataLoaded") ~= true then return end
+local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart): boolean
+	if player:GetAttribute("__DataLoaded") ~= true then return false end
 
 	local rawIdx = slotPart:GetAttribute("SlotIndex")
-	if type(rawIdx) ~= "number" then return end
+	if type(rawIdx) ~= "number" then return false end
 	local idx = rawIdx :: number
 
-	if not canUseSlotByHomeLevel(player, idx) then return end
+	if not canUseSlotByHomeLevel(player, idx) then return false end
 
 	local stateMap = ensureState(player)
 	local state = stateMap[idx]
-	if not state then return end
-	if not state.Unlocked then return end
-	if state.PlacedMonster and state.PlacedMonster.Parent then return end
+	if not state then return false end
+	if not state.Unlocked then return false end
+	if state.PlacedMonster and state.PlacedMonster.Parent then return false end
 
 	local character = player.Character
-	if not character then return end
+	if not character then return false end
 
 	local equipped: Tool? = nil
 	for _, ch in ipairs(character:GetChildren()) do
@@ -1415,29 +1486,31 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 			break
 		end
 	end
-	if not equipped then return end
+	if not equipped then return false end
 
 	local activeTool = equipped :: Tool
 	local lvl = getNumAttr(activeTool, "MonsterLevel", 1)
 	local v = getNumAttr(activeTool, "Value", 0)
 	local gps = getNumAttr(activeTool, "GoldPerSec", 0)
+	local appearanceLevel = getNumAttr(activeTool, "AppearanceLevel", lvl)
 
 	local upLevel = getNumAttr(activeTool, "UpgradeLevel", 1)
 	local baseV = getNumAttr(activeTool, "BaseValue", v)
 	local baseGps = getNumAttr(activeTool, "BaseGoldPerSec", gps)
 
-	local placed = createPlacedMonsterPart(player, slotPart, lvl, v, gps)
+	local placed = createPlacedMonsterPart(player, slotPart, appearanceLevel, v, gps)
+	if not placed then return false end
 	
-	if placed then
-		local activePm = placed :: BasePart
-		markPlacedPromptInitialHidden(activePm)
-		activePm:SetAttribute("UpgradeLevel", upLevel)
-		activePm:SetAttribute("BaseValue", baseV)
-		activePm:SetAttribute("BaseGoldPerSec", baseGps)
-		setPlacedMonsterHeadBillboardText(activePm)
+	local activePm = placed :: BasePart
+	markPlacedPromptInitialHidden(activePm)
+	activePm:SetAttribute("MonsterLevel", appearanceLevel)
+	activePm:SetAttribute("AppearanceLevel", appearanceLevel)
+	activePm:SetAttribute("UpgradeLevel", upLevel)
+	activePm:SetAttribute("BaseValue", baseV)
+	activePm:SetAttribute("BaseGoldPerSec", baseGps)
+	setPlacedMonsterHeadBillboardText(activePm)
 
-		emitPlacementVfxAt(activePm.CFrame)
-	end
+	emitPlacementVfxAt(activePm.CFrame)
 
 	local home = HomeService.GetHome(player)
 	if home then
@@ -1452,7 +1525,8 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 
 	state.PlacedMonster = placed
 	state.PlacedData = {
-		MonsterLevel = lvl,
+		MonsterLevel = appearanceLevel,
+		AppearanceLevel = appearanceLevel,
 		Value = v,
 		GoldPerSec = gps,
 		UnclaimedGold = 0,
@@ -1469,6 +1543,7 @@ local function tryPlaceFromEquippedTool(player: Player, slotPart: BasePart)
 		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 		TutorialService.OnMonsterPlaced(player, idx)
 	end)
+	return true
 end
 	
 local function payoutIfAny(player: Player, slotPart: BasePart)
@@ -1492,12 +1567,29 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 	if un <= 0 then return end
 
 	local actualCollected = addUnclaimedToPlayer(player, activePm)
-	playPlacedMonsterJump(activePm)
+	requestPlacedMonsterJump(player, activePm)
 	toast(player, string.format("Collected Gold +%d", actualCollected))
 	task.defer(function()
 		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 		TutorialService.OnGoldCollected(player, idx)
 	end)
+end
+
+local function revealPlacedMonsterPromptsFromPlatform(player: Player, slotIndex: number, now: number)
+	local m = slotStatesByUserId[player.UserId]
+	if type(m) ~= "table" then return end
+
+	local safeMap = m :: {[number]: SlotState}
+	local state = safeMap[slotIndex]
+	if not (state and state.PlacedMonster and state.PlacedMonster.Parent) then return end
+
+	local pmInst = state.PlacedMonster :: BasePart
+	-- 首次放置后的隐藏保护期内，不触发延迟显示，避免玩家刚放下怪就看到回收/卖出。
+	if getPlacedPromptInitialHideRemaining(pmInst) > 0 then
+		return
+	end
+
+	pmInst:SetAttribute("TriggerPromptReveal", now)
 end
 
 local function ensureUnlockPrompt(player: Player, slotPart: BasePart)
@@ -1701,7 +1793,7 @@ function PlacementService.Init()
 									local activePm = pm :: BasePart
 									local upLevel = getNumAttr(activePm, "UpgradeLevel", 1)
 									local baseGps = getNumAttr(activePm, "BaseGoldPerSec", getNumAttr(activePm, "GoldPerSec", 0))
-									local upgradeCost = upLevel * 10 * baseGps
+									local upgradeCost = upLevel * 100 * baseGps
 									
 									if PlayerData.TrySpendGold(player, upgradeCost) then
 										local newLevel = upLevel + 1
@@ -1709,12 +1801,13 @@ function PlacementService.Init()
 										local baseValue = getNumAttr(activePm, "BaseValue", getNumAttr(activePm, "Value", 0))
 										local newValue = baseValue * newLevel
 										activePm:SetAttribute("UpgradeLevel", newLevel)
-										activePm:SetAttribute("MonsterLevel", newLevel)
 										activePm:SetAttribute("GoldPerSec", newGps)
 										activePm:SetAttribute("Value", newValue)
 
 										if state.PlacedData then
-											state.PlacedData.MonsterLevel = newLevel
+											local appearanceLevel = getNumAttr(activePm, "AppearanceLevel", getNumAttr(activePm, "MonsterLevel", 1))
+											state.PlacedData.MonsterLevel = appearanceLevel
+											state.PlacedData.AppearanceLevel = appearanceLevel
 											state.PlacedData.UpgradeLevel = newLevel
 											state.PlacedData.GoldPerSec = newGps
 											state.PlacedData.Value = newValue
@@ -1746,8 +1839,13 @@ function PlacementService.Init()
 					if (lastTouchAt[key] or 0) + 0.35 > now then return end
 					lastTouchAt[key] = now
 
-					tryPlaceFromEquippedTool(player, slot.Part)
+					local placedNow = tryPlaceFromEquippedTool(player, slot.Part)
 					payoutIfAny(player, slot.Part)
+					if placedNow then
+						return
+					end
+
+					revealPlacedMonsterPromptsFromPlatform(player, idx, now)
 				end
 
 				local function handleCollectorTouch(hit)
@@ -1763,16 +1861,6 @@ function PlacementService.Init()
 					lastTouchAt[key] = now
 
 					payoutIfAny(player, slot.Part)
-
-					local m = slotStatesByUserId[player.UserId]
-					if type(m) == "table" then
-						local safeMap = m :: {[number]: SlotState}
-						local state = safeMap[idx]
-						if state and state.PlacedMonster and state.PlacedMonster.Parent then
-							local pmInst = state.PlacedMonster :: BasePart
-							pmInst:SetAttribute("TriggerPromptReveal", now)
-						end
-					end
 				end
 
 				slot.Part.Touched:Connect(handleSlotTouch)
@@ -1882,10 +1970,14 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 				pData.LastTickUnix = nowUnix
 			end
 
+			local appearanceLevel = getAppearanceLevelFromPlacedData(pData)
+			pData.MonsterLevel = appearanceLevel
+			pData.AppearanceLevel = appearanceLevel
+
 			local placed = createPlacedMonsterPart(
 				player,
 				slot.Part,
-				math.max(1, math.floor(pData.MonsterLevel)),
+				appearanceLevel,
 				math.floor(pData.Value),
 				math.floor(pData.GoldPerSec),
 				un,
@@ -1894,6 +1986,8 @@ local function rebuildPlacedMonstersWhenHomeReady(player: Player)
 			
 			if placed then
 				local activePm = placed :: BasePart
+				activePm:SetAttribute("MonsterLevel", appearanceLevel)
+				activePm:SetAttribute("AppearanceLevel", appearanceLevel)
 				activePm:SetAttribute("UpgradeLevel", pData.UpgradeLevel or 1)
 				activePm:SetAttribute("BaseValue", pData.BaseValue or getNumAttr(activePm, "Value", 0))
 				activePm:SetAttribute("BaseGoldPerSec", pData.BaseGoldPerSec or getNumAttr(activePm, "GoldPerSec", 0))
@@ -1917,8 +2011,10 @@ function PlacementService.Export(player: Player): {PersistedSlot}
 		if st then
 			if st.PlacedMonster and st.PlacedMonster.Parent then
 				local pm = st.PlacedMonster :: BasePart
+				local appearanceLevel = getClampedMonsterLevel(getNumAttr(pm, "AppearanceLevel", getNumAttr(pm, "MonsterLevel", 1)))
 				placedData = {
-					MonsterLevel = math.max(1, math.floor(getNumAttr(pm, "MonsterLevel", 1))),
+					MonsterLevel = appearanceLevel,
+					AppearanceLevel = appearanceLevel,
 					Value = math.floor(getNumAttr(pm, "Value", 0)),
 					GoldPerSec = math.floor(getNumAttr(pm, "GoldPerSec", 0)),
 					UnclaimedGold = math.floor(getNumAttr(pm, "UnclaimedGold", 0)),
@@ -1959,15 +2055,25 @@ function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlo
 		if type(loaded) == "table" then
 			local placed = (loaded :: any).Placed :: any
 			if type(placed) == "table" then
+				local monsterLevel = math.max(1, math.floor(if type(placed.MonsterLevel) == "number" then placed.MonsterLevel else 1))
+				local value = math.floor(if type(placed.Value) == "number" then placed.Value else 0)
+				local goldPerSec = math.floor(if type(placed.GoldPerSec) == "number" then placed.GoldPerSec else 0)
+				local baseValue = math.floor(if type(placed.BaseValue) == "number" then placed.BaseValue else value)
+				local baseGoldPerSec = math.floor(if type(placed.BaseGoldPerSec) == "number" then placed.BaseGoldPerSec else goldPerSec)
+				local appearanceLevel = if type(placed.AppearanceLevel) == "number"
+					then getClampedMonsterLevel(placed.AppearanceLevel)
+					else inferAppearanceLevelFromStats(monsterLevel, baseValue, baseGoldPerSec)
+
 				states[i].PlacedData = {
-					MonsterLevel = math.max(1, math.floor(if type(placed.MonsterLevel) == "number" then placed.MonsterLevel else 1)),
-					Value = math.floor(if type(placed.Value) == "number" then placed.Value else 0),
-					GoldPerSec = math.floor(if type(placed.GoldPerSec) == "number" then placed.GoldPerSec else 0),
+					MonsterLevel = appearanceLevel,
+					AppearanceLevel = appearanceLevel,
+					Value = value,
+					GoldPerSec = goldPerSec,
 					UnclaimedGold = math.floor(if type(placed.UnclaimedGold) == "number" then placed.UnclaimedGold else 0),
 					LastTickUnix = math.floor(if type(placed.LastTickUnix) == "number" then placed.LastTickUnix else os.time()),
 					UpgradeLevel = math.floor(if type(placed.UpgradeLevel) == "number" then placed.UpgradeLevel else 1),
-					BaseValue = math.floor(if type(placed.BaseValue) == "number" then placed.BaseValue else (if type(placed.Value) == "number" then placed.Value else 0)),
-					BaseGoldPerSec = math.floor(if type(placed.BaseGoldPerSec) == "number" then placed.BaseGoldPerSec else (if type(placed.GoldPerSec) == "number" then placed.GoldPerSec else 0)),
+					BaseValue = baseValue,
+					BaseGoldPerSec = baseGoldPerSec,
 				}
 			end
 		end

@@ -198,6 +198,7 @@ local legacyUpgradeTemplate = upgradeWindow:FindFirstChild("RowTemplate") :: Gui
 
 -- 升级商店现在使用你放在 List 下的 4 个独立模板：
 -- StarterGui.ShopsUI.升级商店Window.List.HP升级 / 攻击升级 / 速度升级 / 拿取个数升级
+-- 注意：HP升级 模板名称保留不改，但现在显示和功能都代表“跳跃升级”。
 local UPGRADE_TEMPLATE_NAME_BY_TYPE = {
 	Attack = "攻击升级",
 	Speed = "速度升级",
@@ -352,7 +353,9 @@ local function refreshRebirthUI()
 	end
 	local nextMultiplier = multiplier + 1
 
-	local currentHitCount = setAllRebirthTextLabels("当前现金倍率textlable", string.format("%dx", multiplier))
+	local currentHitCount = 0
+	currentHitCount += setAllRebirthTextLabels("当前现金倍率", string.format("%dx", multiplier))
+	currentHitCount += setAllRebirthTextLabels("当前现金倍率textlable", string.format("%dx", multiplier))
 	local nextHitCount = setAllRebirthTextLabels("升级后倍率", string.format("%dx", nextMultiplier))
 	if currentHitCount == 0 or nextHitCount == 0 then
 		debugRebirthTextLabels(string.format("missing label currentHits=%d nextHits=%d", currentHitCount, nextHitCount))
@@ -537,7 +540,7 @@ local function refreshUpgradeShopUI()
 	local upgradeTypes = {
 		{ name = "Upgrade Attack", type = "Attack", getLv = "AttackLevel" },--升级攻击
 		{ name = "Upgrade Speed", type = "Speed", getLv = "SpeedLevel" },--升级速度
-		{ name = "Upgrade Health", type = "Health", getLv = "HealthLevel" },--升级血量
+		{ name = "Upgrade Jump", type = "Health", getLv = "HealthLevel" },--升级跳跃（复用 HealthLevel 存档键）
 		{ name = "Upgrade Carry Capacity", type = "Carry", getLv = "CarryLevel" },--升级背包容量
 	}
 
@@ -548,24 +551,36 @@ local function refreshUpgradeShopUI()
 		-- 获取花费和增加数值字符串
 		local cost = 0
 		local incrementText = ""
+		local currentValueText = ""
 		local isMaxed = false
 
 		if info.type == "Attack" then
 			cost = Config.GetAttackUpgradeCost and Config.GetAttackUpgradeCost(nextLv) or 0
 			incrementText = string.format("+%d Attack", Config.ATTACK_UPGRADE_ADD or 10)--升级攻击力
+			currentValueText = string.format("ATK: %s", formatNumberShort(getCurrentAttackPower()))
 		elseif info.type == "Speed" then
 			cost = Config.GetSpeedUpgradeCost and Config.GetSpeedUpgradeCost(nextLv) or 0
 			incrementText = string.format("+%d Speed", Config.WALK_SPEED_PER_UPGRADE or 2)--升级速度
+			currentValueText = string.format("Speed: %s", formatNumberShort(getCurrentMoveSpeed()))
 		elseif info.type == "Health" then
-			cost = Config.GetHealthUpgradeCost and Config.GetHealthUpgradeCost(nextLv) or 0
-			incrementText = string.format("+%d Max HP", Config.HEALTH_PER_UPGRADE or 100)--升级血量
+			local maxJumpLevel = if Config.GetMaxJumpUpgradeLevel then Config.GetMaxJumpUpgradeLevel() else math.max(0, math.floor(((Config.JUMP_POWER_MAX or 150) - (Config.JUMP_POWER_BASE or 50)) / (Config.JUMP_POWER_PER_UPGRADE or 1)))
+			local currentJump = if Config.GetJumpPowerForLevel then Config.GetJumpPowerForLevel(currentLv) else math.clamp((Config.JUMP_POWER_BASE or 50) + currentLv * (Config.JUMP_POWER_PER_UPGRADE or 1), Config.JUMP_POWER_BASE or 50, Config.JUMP_POWER_MAX or 150)
+			currentValueText = string.format("Jump: %s", formatNumberShort(currentJump))
+			if currentLv >= maxJumpLevel then
+				isMaxed = true
+			else
+				cost = if Config.GetJumpUpgradeCost then Config.GetJumpUpgradeCost(nextLv) else (Config.GetHealthUpgradeCost and Config.GetHealthUpgradeCost(nextLv) or 0)
+				local nextJump = if Config.GetJumpPowerForLevel then Config.GetJumpPowerForLevel(nextLv) else math.clamp((Config.JUMP_POWER_BASE or 50) + nextLv * (Config.JUMP_POWER_PER_UPGRADE or 1), Config.JUMP_POWER_BASE or 50, Config.JUMP_POWER_MAX or 150)
+				incrementText = string.format("Jump: %d → %d", currentJump, nextJump)--升级跳跃
+			end
 		elseif info.type == "Carry" then
+			local currentCarry = Config.GetCarryMax and Config.GetCarryMax(currentLv) or (currentLv + 1)
+			currentValueText = string.format("Carry: %s", formatNumberShort(currentCarry))
 			local nextCost = Config.GetCarryUpgradeCost and Config.GetCarryUpgradeCost(nextLv)
 			if nextCost == nil then
 				isMaxed = true -- 如果获取不到下一级价格，说明满了
 			else
 				cost = nextCost
-				local currentCarry = Config.GetCarryMax and Config.GetCarryMax(currentLv) or (currentLv + 1)
 				local nextCarry = Config.GetCarryMax and Config.GetCarryMax(nextLv) or (nextLv + 1)
 				incrementText = string.format("Carry: %d → %d", currentCarry, nextCarry)
 			end
@@ -605,10 +620,10 @@ local function refreshUpgradeShopUI()
 		local costInfoLabel = row:FindFirstChild("花费+增加数值", true)
 		if costInfoLabel and costInfoLabel:IsA("TextLabel") then
 			if isMaxed then
-				costInfoLabel.Text = "Max Level" --已满级
+				costInfoLabel.Text = if currentValueText ~= "" then string.format("Max Level   %s", currentValueText) else "Max Level" --已满级
 
 			else
-				costInfoLabel.Text = string.format("Cost: %s   %s", formatNumberShort(cost), incrementText)
+				costInfoLabel.Text = if currentValueText ~= "" then string.format("Cost: %s   %s   %s", formatNumberShort(cost), incrementText, currentValueText) else string.format("Cost: %s   %s", formatNumberShort(cost), incrementText)
 			end
 		end
 
@@ -857,59 +872,17 @@ local function refreshWeaponShopUI()
 		return ok and fullName or instance.Name
 	end
 
-	print("[WeaponShopDebug] ===== 开始刷新武器商店 =====")
-	print(string.format(
-		"[WeaponShopDebug] weaponWindow=%s | weaponShopList=%s | weaponShopTemplate=%s",
-		safeFullName(weaponWindow),
-		safeFullName(weaponShopList),
-		safeFullName(weaponShopTemplate)
-	))
-	print(string.format(
-		"[WeaponShopDebug] weaponShopTemplate.Parent=%s | weaponShopList.Parent=%s",
-		safeFullName(weaponShopTemplate and weaponShopTemplate.Parent),
-		safeFullName(weaponShopList and weaponShopList.Parent)
-	))
-	if weaponShopList and weaponShopList:IsA("GuiObject") then
-		print(string.format(
-			"[WeaponShopDebug] List.Visible=%s | Size=%s | Position=%s | ClipsDescendants=%s",
-			tostring(weaponShopList.Visible),
-			tostring(weaponShopList.Size),
-			tostring(weaponShopList.Position),
-			tostring(weaponShopList.ClipsDescendants)
-		))
-	end
-	if weaponShopList and weaponShopList:IsA("ScrollingFrame") then
-		print(string.format(
-			"[WeaponShopDebug] CanvasPosition=%s | CanvasSize=%s | AbsoluteCanvasSize=%s | AutomaticCanvasSize=%s",
-			tostring(weaponShopList.CanvasPosition),
-			tostring(weaponShopList.CanvasSize),
-			tostring(weaponShopList.AbsoluteCanvasSize),
-			tostring(weaponShopList.AutomaticCanvasSize)
-		))
-	end
-	print(string.format(
-		"[WeaponShopDebug] 当前玩家武器属性: WeaponLevel=%s | EquippedWeaponLevel=%s",
-		tostring(player:GetAttribute("WeaponLevel")),
-		tostring(player:GetAttribute("EquippedWeaponLevel"))
-	))
 
 	if weaponShopList:IsA("ScrollingFrame") then
 		weaponShopList.CanvasPosition = Vector2.new(0, 0)
 	end
 
-	-- [修改原因] 彻底清理：不仅删除条目，还要删除可能存在冲突设置的旧布局(UILayout)和边距(UIPadding)组件
+	-- 只清理代码克隆出来的武器条目，保留你在 Studio 中配置好的 UIListLayout / UIPadding。
 	for _, ch in ipairs(weaponShopList:GetChildren()) do
-		if (ch:IsA("GuiObject") and ch.Name ~= "单个武器背景") or ch:IsA("UILayout") or ch:IsA("UIPadding") then
+		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" then
 			ch:Destroy()
 		end
 	end
-
-	-- [修改原因] 重新创建一个纯净的 UIListLayout，确保 VerticalAlignment 强制为 Top（置顶）
-	local newListLayout = Instance.new("UIListLayout")
-	newListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	newListLayout.VerticalAlignment = Enum.VerticalAlignment.Top -- 核心修复：确保从最顶端开始排
-	newListLayout.Padding = UDim.new(0, 10) -- 设定一个固定的间距
-	newListLayout.Parent = weaponShopList
 
 	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
@@ -933,14 +906,6 @@ local function refreshWeaponShopUI()
 		row.Visible = true
 		row.Parent = weaponShopList
 		createdCount += 1
-		print(string.format(
-			"[WeaponShopDebug] 创建条目 #%d -> %s | Parent=%s | LayoutOrder=%s | Visible=%s",
-			i,
-			safeFullName(row),
-			safeFullName(row.Parent),
-			tostring(row.LayoutOrder),
-			tostring(row.Visible)
-		))
 
 		local nameLabel = row:FindFirstChild("武器名称")
 		if nameLabel and nameLabel:IsA("TextLabel") then
@@ -1006,13 +971,12 @@ local function refreshWeaponShopUI()
 			-- 2. 强制 UI 刷新一次位置计算
 			task.wait() 
 			
-			-- 3. 重新启用自动尺寸，让它根据刚才创建的 newListLayout 重新计算
+			-- 3. 重新启用自动尺寸，让它根据 Studio 中保留的 UIListLayout 重新计算
 			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 			
 			-- 4. 最终复位滚动条到最上方
 			weaponShopList.CanvasPosition = Vector2.new(0, 0)
 			
-			print(string.format("[WeaponShopDebug] 深度重置完成。最终画布高度: %.2f", weaponShopList.AbsoluteCanvasSize.Y))
 		end
 	end)
 end
