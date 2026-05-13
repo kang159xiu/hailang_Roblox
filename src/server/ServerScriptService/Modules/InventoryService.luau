@@ -756,8 +756,8 @@ function InventoryService.PickupCarryMonster(player: Player, level: number, valu
 	return true
 end
 
--- [新增] 玩家被打飞时：强制清空携带中的怪物，并返回数据给外部掉落
-function InventoryService.DropAllCarried(player: Player): {CarriedMonster}
+-- [新增] 玩家被打飞/主动放下时：强制清空携带中的怪物，并返回数据给外部掉落
+function InventoryService.DropAllCarried(player: Player, toastText: string?): {CarriedMonster}
 	local list = carriedByUserId[player.UserId]
 	if not list or #list == 0 then
 		return {}
@@ -778,7 +778,9 @@ function InventoryService.DropAllCarried(player: Player): {CarriedMonster}
 
 	-- 清空玩家头顶的模型和数据
 	clearCarried(player)
-	pushToast(player, "You were knocked back by the Guardian and dropped all carried monsters!")
+	if toastText ~= "" then
+		pushToast(player, toastText or "You were knocked back by the Guardian and dropped all carried monsters!")
+	end
 	
 	return dropped
 end

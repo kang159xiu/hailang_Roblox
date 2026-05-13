@@ -253,6 +253,27 @@ local function applyHomeLevelToHome(homeRoot: Instance, homeLevel: number)
 	end
 end
 
+local function getHomeGlowRemote(): RemoteEvent?
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local ev = remotes and remotes:FindFirstChild("SetHomeGlowLocalColor")
+	if ev and ev:IsA("RemoteEvent") then
+		return ev
+	end
+	return nil
+end
+
+function HomeService.SetPlayerHomeGlowColor(player: Player, isInsideHome: boolean)
+	local ph = homesByUserId[player.UserId]
+	if not ph then
+		return
+	end
+
+	local ev = getHomeGlowRemote()
+	if ev then
+		ev:FireClient(player, ph.HomeRoot, isInsideHome)
+	end
+end
+
 local function teleportToSpawn(player: Player, spawnPoint: BasePart)
 	local function doTeleport(character: Model)
 		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -345,6 +366,7 @@ local function ensureUpgradePrompt(homeRoot: Instance, upgradeArea: Instance, up
 			local newLevel = math.min(3, curLevel + 1)
 			PlayerData.SetHomeLevel(triggerPlayer, newLevel)
 			applyHomeLevelToHome(homeRoot, newLevel)
+			HomeService.SetPlayerHomeGlowColor(triggerPlayer, true)
 			updateUpgradeGui(upgradeArea, newLevel)
 			refreshUpgradePromptEnabled(homeRoot, upgradeArea, upgradePart)
 
@@ -442,6 +464,7 @@ local function assignHomeToPlayer(player: Player)
 
 	local homeLevel = PlayerData.GetHomeLevel(player)
 	applyHomeLevelToHome(picked, homeLevel)
+	HomeService.SetPlayerHomeGlowColor(player, true)
 	updateUpgradeGui(upgradeArea, homeLevel)
 	refreshUpgradePromptEnabled(picked, upgradeArea, upgradePart)
 

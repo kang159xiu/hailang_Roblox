@@ -36,7 +36,7 @@ continue开场白
 
 场景：允许使用 MCP 操作 Studio 里的 Part、属性和对象。
 
-禁止：严禁使用 execute_luau 工具在 Studio 内直接写入脚本。
+禁止：严禁使用 execute_luau 工具在 Studio 内直接写入脚本。& "C:\Tools\Rojo\rojo.exe" serve
 
 -------------------------
 交接文件

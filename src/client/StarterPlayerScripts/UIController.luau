@@ -24,6 +24,8 @@ local requestPurchaseWeapon = remotes:WaitForChild("RequestPurchaseWeapon") :: R
 local requestEquipWeapon = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
 local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
+local requestDropCarriedMonsters = remotes:WaitForChild("RequestDropCarriedMonsters") :: RemoteEvent
+local requestRebirth = remotes:WaitForChild("RequestRebirth") :: RemoteEvent
 
 -- =====================
 -- 基础 UI 变量
@@ -69,8 +71,6 @@ local inventoryCloseBtn = monsterInventoryWindow:WaitForChild("guanbibb", 5) :: 
 
 -- 引用删除数据按钮
 local deleteBtn = mainGui:WaitForChild("delete") :: ImageButton
--- 引用清空数据的远程事件
-local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
 
 -- 新增武器列表、武器模板和选项卡按钮的变量引用
 local weaponList = monsterInventoryWindow:WaitForChild("weaponList") :: ScrollingFrame
@@ -84,6 +84,12 @@ local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton
 local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
 -- [终极修复] 先声明攻击按钮变量，但不立刻查找，避免由于 UI 加载延迟导致永远为 nil
 local attackButton: ImageButton? = nil
+local dropCarriedFrame: GuiObject? = nil
+local dropCarriedButton: GuiButton? = nil
+local carriedFolderChildAddedConnection: RBXScriptConnection? = nil
+local carriedFolderChildRemovedConnection: RBXScriptConnection? = nil
+local carriedCharacterChildAddedConnection: RBXScriptConnection? = nil
+local carriedCharacterChildRemovedConnection: RBXScriptConnection? = nil
 
 -- 必须加上 true 开启深层递归查找，否则移入 List 文件夹后代码将无法定位该按钮
 local speedToggleButton = mainGui:FindFirstChild("ImageButton_正常速度", true) :: ImageButton?
@@ -93,6 +99,92 @@ local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("
 local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升级后的加速状态）
 
 local AUTO_ATTACK_ENABLED_ATTRIBUTE = "AutoAttackEnabled"
+
+local rebirthButton = mainGui:FindFirstChild("ImageButton_重生", true) :: GuiButton?
+local rebirthWindow = mainGui:FindFirstChild("重生界面", true) :: GuiObject?
+local rebirthProgressBar = rebirthWindow and rebirthWindow:FindFirstChild("ImageLabel1_进度", true) :: GuiObject?
+local rebirthNeedMoneyLabel = rebirthWindow and rebirthWindow:FindFirstChild("需要钱比例", true) :: TextLabel?
+local rebirthRobuxButton = rebirthWindow and rebirthWindow:FindFirstChild("r币重生", true) :: GuiButton?
+local rebirthCloseButton = rebirthWindow and rebirthWindow:FindFirstChild("关闭", true) :: GuiButton?
+local rebirthConfirmButton = rebirthWindow and rebirthWindow:FindFirstChild("重生", true) :: GuiButton?
+local rebirthProgressBaseSize = rebirthProgressBar and rebirthProgressBar.Size or UDim2.new(1.5, 0, 1, 0)
+local rebirthUIDebugPrints = 0
+
+local function hasCarriedMonsters(): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	local holder = character:FindFirstChild("CarriedMonsters")
+	return holder ~= nil and #holder:GetChildren() > 0
+end
+
+local function setDropCarriedVisible(visible: boolean)
+	if dropCarriedFrame and dropCarriedFrame.Visible ~= visible then
+		dropCarriedFrame.Visible = visible
+	end
+end
+
+local function refreshDropCarriedVisible()
+	setDropCarriedVisible(hasCarriedMonsters())
+end
+
+local function bindCarriedFolderWatcher(character: Model?)
+	if carriedFolderChildAddedConnection then
+		carriedFolderChildAddedConnection:Disconnect()
+		carriedFolderChildAddedConnection = nil
+	end
+	if carriedFolderChildRemovedConnection then
+		carriedFolderChildRemovedConnection:Disconnect()
+		carriedFolderChildRemovedConnection = nil
+	end
+	if carriedCharacterChildAddedConnection then
+		carriedCharacterChildAddedConnection:Disconnect()
+		carriedCharacterChildAddedConnection = nil
+	end
+	if carriedCharacterChildRemovedConnection then
+		carriedCharacterChildRemovedConnection:Disconnect()
+		carriedCharacterChildRemovedConnection = nil
+	end
+
+	if not character then
+		refreshDropCarriedVisible()
+		return
+	end
+
+	local function attachToHolder(holder: Instance?)
+		if carriedFolderChildAddedConnection then
+			carriedFolderChildAddedConnection:Disconnect()
+			carriedFolderChildAddedConnection = nil
+		end
+		if carriedFolderChildRemovedConnection then
+			carriedFolderChildRemovedConnection:Disconnect()
+			carriedFolderChildRemovedConnection = nil
+		end
+
+		if holder then
+			carriedFolderChildAddedConnection = holder.ChildAdded:Connect(refreshDropCarriedVisible)
+			carriedFolderChildRemovedConnection = holder.ChildRemoved:Connect(function()
+				task.defer(refreshDropCarriedVisible)
+			end)
+		end
+
+		refreshDropCarriedVisible()
+	end
+
+	attachToHolder(character:FindFirstChild("CarriedMonsters"))
+	carriedCharacterChildAddedConnection = character.ChildAdded:Connect(function(child)
+		if child.Name == "CarriedMonsters" then
+			attachToHolder(child)
+		end
+	end)
+	carriedCharacterChildRemovedConnection = character.ChildRemoved:Connect(function(child)
+		if child.Name == "CarriedMonsters" then
+			attachToHolder(nil)
+		end
+	end)
+end
 
 -- 引用您预设的商店 UI
 local playerGui = player:WaitForChild("PlayerGui")
@@ -191,6 +283,93 @@ local function formatNumberShort(n: number): string
     end
 
     return (n < 0 and "-" or "") .. formatted .. suffixes[suffixIndex]
+end
+
+local function refreshRebirthUI()
+	-- 重生 UI 中可能存在模板/重复 TextLabel；每次刷新时动态更新所有同名标签，避免缓存到旧引用或模板导致显示停在 1x。
+	local function setAllRebirthTextLabels(labelName: string, text: string): number
+		if not rebirthWindow then
+			return 0
+		end
+
+		local hitCount = 0
+		for _, desc in ipairs(rebirthWindow:GetDescendants()) do
+			if desc.Name == labelName and desc:IsA("TextLabel") then
+				(desc :: TextLabel).Text = text
+				hitCount += 1
+			end
+		end
+		return hitCount
+	end
+
+	local function debugRebirthTextLabels(reason: string)
+		if not rebirthWindow then
+			return
+		end
+		if rebirthUIDebugPrints >= 3 then
+			return
+		end
+		rebirthUIDebugPrints += 1
+
+		warn(string.format("[RebirthUIDebug] %s window=%s", reason, rebirthWindow:GetFullName()))
+		warn(string.format(
+			"[RebirthUIDebug] attrs Gold=%s RebirthCount=%s RebirthMultiplier=%s NextRebirthCost=%s",
+			tostring(player:GetAttribute("Gold")),
+			tostring(player:GetAttribute("RebirthCount")),
+			tostring(player:GetAttribute("RebirthMultiplier")),
+			tostring(player:GetAttribute("NextRebirthCost"))
+		))
+
+		for _, desc in ipairs(rebirthWindow:GetDescendants()) do
+			if desc:IsA("TextLabel") then
+				warn(string.format(
+					"[RebirthUIDebug] label path=%s name=%s text=%s visible=%s",
+					desc:GetFullName(),
+					desc.Name,
+					desc.Text,
+					tostring((desc :: TextLabel).Visible)
+				))
+			end
+		end
+	end
+
+	local gold = player:GetAttribute("Gold") or 0
+	local rebirthCount = player:GetAttribute("RebirthCount") or 0
+	if type(rebirthCount) ~= "number" then
+		rebirthCount = 0
+	end
+	rebirthCount = math.max(0, math.floor(rebirthCount))
+
+	local multiplier = player:GetAttribute("RebirthMultiplier")
+	if type(multiplier) ~= "number" then
+		multiplier = Config.GetRebirthCashMultiplier and Config.GetRebirthCashMultiplier(rebirthCount) or (rebirthCount + 1)
+	end
+	multiplier = math.max(1, math.floor(multiplier :: number))
+
+	local cost = player:GetAttribute("NextRebirthCost")
+	if type(cost) ~= "number" then
+		cost = Config.GetRebirthCost and Config.GetRebirthCost(rebirthCount) or 10000
+	end
+	local nextMultiplier = multiplier + 1
+
+	local currentHitCount = setAllRebirthTextLabels("当前现金倍率textlable", string.format("%dx", multiplier))
+	local nextHitCount = setAllRebirthTextLabels("升级后倍率", string.format("%dx", nextMultiplier))
+	if currentHitCount == 0 or nextHitCount == 0 then
+		debugRebirthTextLabels(string.format("missing label currentHits=%d nextHits=%d", currentHitCount, nextHitCount))
+	elseif rebirthUIDebugPrints < 1 then
+		debugRebirthTextLabels(string.format("label hits currentHits=%d nextHits=%d", currentHitCount, nextHitCount))
+	end
+
+	if rebirthNeedMoneyLabel then
+		rebirthNeedMoneyLabel.Text = string.format("%s/%s", formatNumberShort(gold), formatNumberShort(cost))
+	end
+	if rebirthProgressBar then
+		local ratio = 0
+		if cost > 0 then
+			ratio = math.clamp(gold / cost, 0, 1)
+		end
+		rebirthProgressBar.Size = UDim2.new(1.5 * ratio, rebirthProgressBaseSize.X.Offset, rebirthProgressBaseSize.Y.Scale, rebirthProgressBaseSize.Y.Offset)
+	end
 end
 
 local function getCurrentAttackPower(): number
@@ -899,6 +1078,61 @@ function UIController.Init()
 		task.delay(0.5, refreshSpeedLabel)
 	end)
 
+	-- 重生界面：开关、倍率展示、进度条、普通金币重生与 R 币重生
+	if rebirthWindow then
+		rebirthWindow.Visible = false
+		refreshRebirthUI()
+	else
+		warn("[UIController] 未找到 MainUI.重生界面，重生 UI 不会显示")
+	end
+
+	if rebirthButton then
+		rebirthButton.Activated:Connect(function()
+			if not rebirthWindow then
+				return
+			end
+			rebirthWindow.Visible = not rebirthWindow.Visible
+			if rebirthWindow.Visible then
+				refreshRebirthUI()
+			end
+		end)
+	else
+		warn("[UIController] 未找到 ImageButton_重生，无法打开重生界面")
+	end
+
+	if rebirthCloseButton then
+		rebirthCloseButton.Activated:Connect(function()
+			if rebirthWindow then
+				rebirthWindow.Visible = false
+			end
+		end)
+	end
+
+	if rebirthConfirmButton then
+		rebirthConfirmButton.Activated:Connect(function()
+			requestRebirth:FireServer()
+		end)
+	end
+
+	if rebirthRobuxButton then
+		rebirthRobuxButton.Activated:Connect(function()
+			local productId = Config.REBIRTH_PRODUCT_ID
+			if type(productId) == "number" and productId > 0 then
+				local analyticsRemote = game.ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Analytics_Remote")
+				if analyticsRemote then
+					analyticsRemote:FireServer("Funnel", "Rebirth_Robux_Prompt_Shown")
+				end
+				MarketplaceService:PromptProductPurchase(player, productId)
+			else
+				showToast("Rebirth product is not configured")
+			end
+		end)
+	end
+
+	for _, attr in ipairs({ "Gold", "RebirthCount", "RebirthMultiplier", "NextRebirthCost" }) do
+		player:GetAttributeChangedSignal(attr):Connect(refreshRebirthUI)
+	end
+
 	-- 2. Toast 监听
 	toastRemote.OnClientEvent:Connect(showToast)
 
@@ -923,6 +1157,73 @@ function UIController.Init()
 
 	if monsterTabBtn then monsterTabBtn.Activated:Connect(function() switchInventoryTab("monster") end) end
 	if weaponTabBtn then weaponTabBtn.Activated:Connect(function() switchInventoryTab("weapon") end) end
+
+	-- 放下怪按钮：运行时 UI 在 PlayerGui.MainUI，Studio 中的 StarterGui.MainUI 只是模板。
+	task.spawn(function()
+		local function findDropCarriedFrame(): GuiObject?
+			local frame = mainGui:FindFirstChild("放下怪/回家", true) or playerGui:FindFirstChild("放下怪/回家", true)
+			if frame and frame:IsA("GuiObject") then
+				return frame :: GuiObject
+			end
+
+			local starterMainUi = StarterGui:FindFirstChild("MainUI")
+			local starterFrame = starterMainUi and starterMainUi:FindFirstChild("放下怪/回家", true)
+			if starterFrame and starterFrame:IsA("GuiObject") then
+				warn("[UIController] 只在 StarterGui 模板中找到 放下怪/回家；运行时仍会继续等待 PlayerGui 副本。")
+			end
+
+			return nil
+		end
+
+		local frame = findDropCarriedFrame()
+		if not frame then
+			warn("[UIController] 未找到 放下怪/回家，正在后台持续扫描...")
+			while not frame do
+				task.wait(1)
+				frame = findDropCarriedFrame()
+			end
+		end
+
+		dropCarriedFrame = frame
+		dropCarriedFrame.Visible = false
+
+		local button = dropCarriedFrame:FindFirstChild("ImageButton_放下怪", true)
+		if not button then
+			warn("[UIController] 放下怪/回家 下未找到 ImageButton_放下怪，正在后台持续扫描...")
+			while not button do
+				task.wait(1)
+				button = dropCarriedFrame:FindFirstChild("ImageButton_放下怪", true)
+			end
+		end
+
+		if not button:IsA("GuiButton") then
+			warn("[UIController] ImageButton_放下怪 不是 GuiButton，无法绑定点击事件")
+			return
+		end
+
+		dropCarriedButton = button :: GuiButton
+		dropCarriedButton.Activated:Connect(function()
+			if not hasCarriedMonsters() then
+				refreshDropCarriedVisible()
+				return
+			end
+
+			setDropCarriedVisible(false)
+			requestDropCarriedMonsters:FireServer()
+			task.delay(0.5, refreshDropCarriedVisible)
+		end)
+
+		bindCarriedFolderWatcher(player.Character)
+		player.CharacterAdded:Connect(function(character)
+			task.defer(function()
+				bindCarriedFolderWatcher(character)
+			end)
+		end)
+		player.CharacterRemoving:Connect(function()
+			bindCarriedFolderWatcher(nil)
+		end)
+		refreshDropCarriedVisible()
+	end)
 
 	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
 		if monsterInventoryWindow.Visible and weaponList.Visible then

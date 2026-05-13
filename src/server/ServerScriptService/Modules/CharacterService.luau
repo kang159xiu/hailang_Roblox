@@ -55,7 +55,8 @@ local function hookCharacterDied(player: Player, character: Model, humanoid: Hum
 					monsterData.GoldPerSec,
 					spawnPos,
 					"PlayerDeathDrop", -- 掉落怪的特殊ZoneKey标识
-					(monsterData :: any).UpgradeLevel or 1
+					(monsterData :: any).UpgradeLevel or 1,
+					(monsterData :: any).SourceZoneLevel or 1
 				)
 			end
 		end

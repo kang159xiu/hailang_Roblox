@@ -49,12 +49,15 @@ ensureRemoteEvent(remotesFolder, "RequestPurchaseUpgrade")
 ensureRemoteEvent(remotesFolder, "OpenWeaponShopUI")
 ensureRemoteEvent(remotesFolder, "OpenUpgradeShopUI")
 ensureRemoteEvent(remotesFolder, "PushClientToast")
+ensureRemoteEvent(remotesFolder, "SetHomeGlowLocalColor")
+ensureRemoteEvent(remotesFolder, "RequestRebirth")
 -- [修改原因] 使用统一的 ensureRemoteEvent 函数自动注册客户端到服务端的埋点通讯通道
 ensureRemoteEvent(remotesFolder, "Analytics_Remote")
 
 -- 怪物背包（自定义 UI）同步与交互
 ensureRemoteEvent(remotesFolder, "SyncMonsterInventory")
 ensureRemoteEvent(remotesFolder, "RequestTakeOutMonsterItem")
+ensureRemoteEvent(remotesFolder, "RequestDropCarriedMonsters")
 
 -- 测试：清空玩家数据
 ensureRemoteEvent(remotesFolder, "RequestClearPlayerData")
@@ -92,6 +95,7 @@ ensureWeaponToolHasHandle()
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local takeOutRemote = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
+local dropCarriedRemote = remotes:WaitForChild("RequestDropCarriedMonsters") :: RemoteEvent
 -- [修改内容] 自动创建清空数据事件
 local clearDataRemote = remotes:FindFirstChild("RequestClearPlayerData")
 if not clearDataRemote then
@@ -100,6 +104,7 @@ if not clearDataRemote then
 	clearDataRemote.Parent = remotes
 end
 local requestPromptInteractionRemote = remotes:WaitForChild("RequestPromptInteraction") :: RemoteEvent
+local requestRebirthRemote = remotes:WaitForChild("RequestRebirth") :: RemoteEvent
 -- [修改内容] 引用装备武器事件
 local requestEquipWeaponRemote = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
 
@@ -155,6 +160,22 @@ GuardianService.Init()
 
 -- [修改内容] 客户端背包 UI：请求装备武器
 local PlayerData = require(script.Parent:WaitForChild("Modules"):WaitForChild("PlayerData"))
+
+local function pushToast(player: Player, text: string)
+	local toast = remotesFolder:FindFirstChild("PushClientToast")
+	if toast and toast:IsA("RemoteEvent") then
+		toast:FireClient(player, text)
+	end
+end
+
+requestRebirthRemote.OnServerEvent:Connect(function(player: Player)
+	if PlayerData.PerformGoldRebirth(player) then
+		pushToast(player, string.format("Rebirth successful! Cash multiplier is now x%d", PlayerData.GetRebirthMultiplier(player)))
+	else
+		pushToast(player, string.format("Not enough gold. Need %d", PlayerData.GetRebirthCost(player)))
+	end
+end)
+
 requestEquipWeaponRemote.OnServerEvent:Connect(function(player: Player, weaponLevel: any)
 	if type(weaponLevel) ~= "number" then
 		return
@@ -172,6 +193,37 @@ takeOutRemote.OnServerEvent:Connect(function(player: Player, itemId: any)
 		return
 	end
 	InventoryService.TakeOutToTool(player, itemId)
+end)
+
+-- 客户端点击“放下怪”：把头顶携带的怪物丢回玩家附近。
+-- 清空 CarriedMonsters 后，GuardianService 会在下一次追踪检查中自动停止追踪并返回。
+dropCarriedRemote.OnServerEvent:Connect(function(player: Player)
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if not (hrp and hrp:IsA("BasePart")) then
+		return
+	end
+
+	local dropped = InventoryService.DropAllCarried(player, "Dropped carried monsters.")
+	if #dropped == 0 then
+		return
+	end
+
+	local basePosition = hrp.Position + (hrp.CFrame.LookVector * 6)
+	for index, item in ipairs(dropped) do
+		local angle = ((index - 1) / math.max(#dropped, 1)) * math.pi * 2
+		local offset = Vector3.new(math.cos(angle) * 2.5, 0, math.sin(angle) * 2.5)
+		local dropPos = basePosition + offset
+		MonsterService.SpawnDroppedMonster(
+			item.MonsterLevel,
+			item.Value,
+			item.GoldPerSec,
+			dropPos,
+			"PlayerManualDrop",
+			(item :: any).UpgradeLevel or 1,
+			(item :: any).SourceZoneLevel or 1
+		)
+	end
 end)
 
 -- 测试：清空玩家数据（仅 Studio）

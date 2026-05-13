@@ -47,6 +47,7 @@ export type PersistedInventoryMonsterItem = {
 
 export type PersistedPlayerData = {
 	Gold: number,
+	RebirthCount: number?,
 	SpeedLevel: number,
 	AttackLevel: number,
 	HealthLevel: number,
@@ -75,6 +76,7 @@ export type PersistedProfileData = {
 local PROFILE_TEMPLATE: PersistedProfileData = {
 	PlayerData = {
 		Gold = 0,
+		RebirthCount = 0,
 		SpeedLevel = 0,
 		AttackLevel = 0,
 		HealthLevel = 0,

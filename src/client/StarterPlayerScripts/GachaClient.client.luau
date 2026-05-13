@@ -441,8 +441,8 @@ setupViewport = function(vpf: Instance, modelTemplate: Instance?, isDebug: boole
 
 	local modelCF = getModelBounds(clone)
 	local center = if modelCF then modelCF.Position else boundsCF.Position
-	local distance = maxDim * 1
-	local height = math.max(boundsSize.Y * 0.1, maxDim * 0.15)
+	local distance = maxDim * 1 --镜头距离
+	local height = math.max(boundsSize.Y * 0.02, maxDim * 0.15) --控制高度 boundsSize.Y 越小越低
 
 	-- 摄像机水平位置：之前 Vector3.new(distance, height, distance) 拍到怪物背面；
 	-- 这里反转到另一侧，从怪物正面方向看内部 Model 中心。

@@ -15,6 +15,7 @@ local StarterPack = game:GetService("StarterPack")
 
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local HomeService = require(script.Parent:WaitForChild("HomeService"))
 local WeaponAppearanceService = require(script.Parent:WaitForChild("WeaponAppearanceService"))
 
 local WeaponToolService = {}
@@ -345,6 +346,7 @@ function WeaponToolService.Init()
 		part.Touched:Connect(function(hit)
 			local player = Players:GetPlayerFromCharacter(hit.Parent)
 			if player then
+				HomeService.SetPlayerHomeGlowColor(player, true)
 				WeaponToolService.UnequipWeapon(player)
 			end
 		end)
@@ -355,20 +357,21 @@ function WeaponToolService.Init()
 	end
 	CollectionService:GetInstanceAddedSignal("home"):Connect(onHomePartAdded)
 
-	-- 监听玩家碰触 "na_qu_area" 标签的 Part -> 拿起武器
+	-- 监听玩家碰触 "di_mian" 标签的 Part -> 拿起武器，并判断为离开 HOME
 	local function onDimianPartAdded(part)
 		part.Touched:Connect(function(hit)
 			local player = Players:GetPlayerFromCharacter(hit.Parent)
 			if player then
+				HomeService.SetPlayerHomeGlowColor(player, false)
 				WeaponToolService.EquipWeapon(player)
 			end
 		end)
 	end
 
-	for _, part in ipairs(CollectionService:GetTagged("na_qu_area")) do
+	for _, part in ipairs(CollectionService:GetTagged("di_mian")) do
 		onDimianPartAdded(part)
 	end
-	CollectionService:GetInstanceAddedSignal("na_qu_area"):Connect(onDimianPartAdded)
+	CollectionService:GetInstanceAddedSignal("di_mian"):Connect(onDimianPartAdded)
 end
 
 return WeaponToolService

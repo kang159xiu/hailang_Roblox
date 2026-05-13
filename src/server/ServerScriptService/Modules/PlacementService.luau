@@ -12,6 +12,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
@@ -38,6 +39,27 @@ end
 -- 金币单位换算函数
 local function formatMoney(amount: number): string
     return Util.FormatMoney(amount)
+end
+
+local function getPlayerCashMultiplier(player: Player): number
+	local multiplier = PlayerData.GetRebirthMultiplier(player)
+	if type(multiplier) ~= "number" then
+		return 1
+	end
+	return math.max(1, math.floor(multiplier))
+end
+
+local function getOwnerCashMultiplierFromPlaced(rootPart: BasePart): number
+	local ownerUserId = getNumAttr(rootPart, "OwnerUserId", -1)
+	local owner = ownerUserId > 0 and Players:GetPlayerByUserId(ownerUserId) or nil
+	if owner then
+		return getPlayerCashMultiplier(owner)
+	end
+	return 1
+end
+
+local function applyCashMultiplier(amount: number, multiplier: number): number
+	return math.floor(amount * math.max(1, multiplier))
 end
 
 export type PersistedPlacedMonster = {
@@ -279,6 +301,9 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 	local level = math.floor(getNumAttr(rootPart, "UpgradeLevel", getNumAttr(rootPart, "MonsterLevel", 1)))
 	local value = math.floor(getNumAttr(rootPart, "Value", 0))
 	local goldPerSec = math.floor(getNumAttr(rootPart, "GoldPerSec", 0))
+	local multiplier = getOwnerCashMultiplierFromPlaced(rootPart)
+	local actualValue = applyCashMultiplier(value, multiplier)
+	local actualGoldPerSec = applyCashMultiplier(goldPerSec, multiplier)
 
 	local bInst = billboard :: Instance
 	for _, child in ipairs(bInst:GetDescendants()) do
@@ -287,9 +312,9 @@ local function setPlacedMonsterHeadBillboardText(rootPart: BasePart)
 			if t.Name == "lv" then
 				t.Text = string.format("[Lv. %d]", level)
 			elseif t.Name == "cost" then
-				t.Text = formatMoney(value)
+				t.Text = formatMoney(actualValue)
 			elseif t.Name == "gold" then
-				t.Text = string.format("$%s/s", formatMoney(goldPerSec))
+				t.Text = string.format("$%s/s", formatMoney(actualGoldPerSec))
 			end
 		end
 	end
@@ -376,7 +401,8 @@ local function refreshIncomeDisplayForSlot(player: Player, slotPart: BasePart, c
 		local upLevel = getNumAttr(activePm, "UpgradeLevel", 1)
 		local baseGps = getNumAttr(activePm, "BaseGoldPerSec", getNumAttr(activePm, "GoldPerSec", 0))
 		local upgradeCost = upLevel * 10 * baseGps
-		local unclaimed = math.floor(getNumAttr(activePm, "UnclaimedGold", 0))
+		local multiplier = getPlayerCashMultiplier(player)
+		local unclaimed = applyCashMultiplier(getNumAttr(activePm, "UnclaimedGold", 0), multiplier)
 
 		if costLabel and costLabel:IsA("TextLabel") then (costLabel :: TextLabel).Text = "$" .. formatMoney(upgradeCost) end
 		if levelLabel and levelLabel:IsA("TextLabel") then (levelLabel :: TextLabel).Text = string.format("LV.%d ▶ LV.%d", upLevel, upLevel + 1) end
@@ -572,6 +598,70 @@ local function getPlacedMonsterContainer(rootPart: BasePart): Instance
 	return rootPart
 end
 
+local placedMonsterJumping: {[BasePart]: boolean} = {}
+
+local function getPlacedMonsterPivot(rootPart: BasePart): CFrame
+	local container = getPlacedMonsterContainer(rootPart)
+	if container:IsA("Model") then
+		return (container :: Model):GetPivot()
+	elseif container:IsA("BasePart") then
+		return (container :: BasePart).CFrame
+	end
+	return rootPart.CFrame
+end
+
+local function pivotPlacedMonster(rootPart: BasePart, targetCFrame: CFrame)
+	local container = getPlacedMonsterContainer(rootPart)
+	if container:IsA("Model") then
+		(container :: Model):PivotTo(targetCFrame)
+	elseif container:IsA("BasePart") then
+		(container :: BasePart).CFrame = targetCFrame
+	else
+		rootPart.CFrame = targetCFrame
+	end
+end
+
+local function playPlacedMonsterJump(rootPart: BasePart)
+	if placedMonsterJumping[rootPart] then
+		return
+	end
+	placedMonsterJumping[rootPart] = true
+
+	task.spawn(function()
+		if rootPart.Parent == nil then
+			placedMonsterJumping[rootPart] = nil
+			return
+		end
+
+		local originalCFrame = getPlacedMonsterPivot(rootPart)
+		local peakCFrame = originalCFrame * CFrame.new(0, 2, 0)
+		local cframeValue = Instance.new("CFrameValue")
+		cframeValue.Value = originalCFrame
+
+		local conn = cframeValue:GetPropertyChangedSignal("Value"):Connect(function()
+			if rootPart.Parent ~= nil then
+				pivotPlacedMonster(rootPart, cframeValue.Value)
+			end
+		end)
+
+		local tween = TweenService:Create(
+			cframeValue,
+			TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true),
+			{ Value = peakCFrame }
+		)
+
+		tween:Play()
+		tween.Completed:Wait()
+		conn:Disconnect()
+		cframeValue:Destroy()
+
+		if rootPart.Parent ~= nil then
+			pivotPlacedMonster(rootPart, originalCFrame)
+		end
+		placedMonsterJumping[rootPart] = nil
+	end)
+end
+
 local function destroyPlacedMonster(rootPart: BasePart)
 	getPlacedMonsterContainer(rootPart):Destroy()
 end
@@ -725,13 +815,13 @@ local function isPrevUnlocked(player: Player, slotIndex: number): boolean
 	return st ~= nil and st.Unlocked == true
 end
 
-local function addUnclaimedToPlayer(player: Player, placed: BasePart)
+local function addUnclaimedToPlayer(player: Player, placed: BasePart): number
 	local un = getNumAttr(placed, "UnclaimedGold", 0)
 	if un <= 0 then
-		return
+		return 0
 	end
 	placed:SetAttribute("UnclaimedGold", 0)
-	PlayerData.AddGold(player, math.floor(un))
+	local added = PlayerData.AddGold(player, math.floor(un))
 	PlayerData.Sync(player)
 
 	local idx = getNumAttr(placed, "SlotIndex", 1)
@@ -742,6 +832,7 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart)
 	end
 
 	DataDirtyService.MarkDirty(player)
+	return added
 end
 
 local function isPlayerWithinInteractionDistance(player: Player, targetPart: BasePart, maxDistance: number?): boolean
@@ -764,7 +855,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 	addUnclaimedToPlayer(player, placedPart)
 
 	local val = getNumAttr(placedPart, "Value", 0)
-	PlayerData.AddGold(player, val)
+	local actualSoldGold = PlayerData.AddGold(player, val)
 	PlayerData.Sync(player)
 
 	local idx = getNumAttr(slotPart, "SlotIndex", 1)
@@ -782,7 +873,7 @@ local function trySellPlacedMonster(player: Player, slotPart: BasePart, placedPa
 		refreshIncomeDisplayForSlot(player, slotPart, slot and slot.Collector or nil, nil)
 	end
 
-	toast(player, string.format("Sold for %d Gold", val))
+	toast(player, string.format("Sold for %d Gold", actualSoldGold))
 	destroyPlacedMonster(placedPart)
 	return true
 end
@@ -1400,8 +1491,9 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 	local un = getNumAttr(activePm, "UnclaimedGold", 0)
 	if un <= 0 then return end
 
-	addUnclaimedToPlayer(player, activePm)
-	toast(player, string.format("Collected Gold +%d", math.floor(un)))
+	local actualCollected = addUnclaimedToPlayer(player, activePm)
+	playPlacedMonsterJump(activePm)
+	toast(player, string.format("Collected Gold +%d", actualCollected))
 	task.defer(function()
 		local TutorialService = require(script.Parent:WaitForChild("TutorialService"))
 		TutorialService.OnGoldCollected(player, idx)
@@ -1738,6 +1830,7 @@ function PlacementService.Init()
 						st.PlacedData.LastTickUnix = nowUnix
 					end
 
+					setPlacedMonsterHeadBillboardText(activePm)
 					refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
 
 					local lastPulse = lastDirtyPulseUnixByUserId[player.UserId] or 0

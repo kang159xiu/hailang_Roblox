@@ -18,6 +18,10 @@ local GuardianService = {}
 local DIRECT_CHASE_DISTANCE = 12
 local CATCH_DISTANCE = 5
 local ZONE_TRACK_MARGIN = 3
+local PATH_RECALC_INTERVAL = 0.8
+local PATH_RECALC_TARGET_MOVE_DISTANCE = 8
+local GUARDIAN_ACCEL_START_SPEED = 20 --初始速度
+local GUARDIAN_ACCEL_DURATION = 3 --守护者加速时间
 
 
 -- 1. 守护者配置表（1~30 级）
@@ -61,7 +65,6 @@ end
 
 
 -- 2. 运行时状态记录
-
 local activeGuardians = {}
 local personalGuardians = {}
 local guardiansFolder: Folder
@@ -145,6 +148,55 @@ local function lookAtFlat(model: Model, rootPart: BasePart, targetPos: Vector3)
 		-- 必须乘以 rootPart.PivotOffset，否则每次转身都会导致坐标叠加偏移，引起跳动。
 		model:PivotTo(targetCFrame * rootPart.PivotOffset)
 	end
+end
+
+local function getFlatLookCFrame(position: Vector3, targetPos: Vector3, fallbackCFrame: CFrame): CFrame
+	local flatTarget = Vector3.new(targetPos.X, position.Y, targetPos.Z)
+	if (flatTarget - position).Magnitude > 0.1 then
+		return CFrame.lookAt(position, flatTarget)
+	end
+
+	return CFrame.new(position) * fallbackCFrame.Rotation
+end
+
+local function pivotGuardianAt(g, position: Vector3, lookTargetPos: Vector3)
+	local nextCF = getFlatLookCFrame(position, lookTargetPos, g.RootPart.CFrame)
+	g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
+end
+
+local function getCurrentGuardianTrackSpeed(g, now: number): number
+	local targetSpeed = g.TargetSpeed or g.Speed or GUARDIAN_ACCEL_START_SPEED
+	local startedAt = g.TrackStartedAt
+
+	if type(startedAt) ~= "number" or startedAt <= 0 then
+		return targetSpeed
+	end
+
+	if targetSpeed <= GUARDIAN_ACCEL_START_SPEED then
+		return targetSpeed
+	end
+
+	local alpha = math.clamp((now - startedAt) / GUARDIAN_ACCEL_DURATION, 0, 1)
+	return GUARDIAN_ACCEL_START_SPEED + ((targetSpeed - GUARDIAN_ACCEL_START_SPEED) * alpha)
+end
+
+local function moveGuardianTowards(g, targetPos: Vector3, dt: number, moveSpeed: number?): boolean
+	local currentPos = g.RootPart.Position
+	local moveVec = targetPos - currentPos
+	local flatMoveVec = Vector3.new(moveVec.X, 0, moveVec.Z)
+	local distance = flatMoveVec.Magnitude
+
+	if distance < 0.05 then
+		pivotGuardianAt(g, currentPos, targetPos)
+		return true
+	end
+
+	local speed = moveSpeed or g.Speed
+	local step = math.min(speed * dt, distance)
+	local nextPos = currentPos + (flatMoveVec.Unit * step)
+	pivotGuardianAt(g, nextPos, targetPos)
+
+	return distance - step <= 0.05
 end
 
 -- =======================================================
@@ -253,7 +305,15 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	for _, item in ipairs(droppedItems) do
 		local offset = Vector3.new(math.random(-4, 4), 0, math.random(-4, 4))
 		local dropPos = playerHRP.Position + offset
-		MonsterService.SpawnDroppedMonster(item.MonsterLevel, item.Value, item.GoldPerSec, dropPos, guardian.ZoneKey)
+		MonsterService.SpawnDroppedMonster(
+			item.MonsterLevel,
+			item.Value,
+			item.GoldPerSec,
+			dropPos,
+			guardian.ZoneKey,
+			(item :: any).UpgradeLevel or 1,
+			(item :: any).SourceZoneLevel or 1
+		)
 	end
 
 	-- 2. 物理表现：击飞 + 短暂平躺无序翻滚
@@ -415,6 +475,8 @@ local function createGuardianState(zonePart: BasePart, zoneLevel: number, zoneKe
 		Model = clone,
 		RootPart = root,
 		Speed = config.Speed,
+		TargetSpeed = config.Speed,
+		TrackStartedAt = 0,
 		AnimTracks = loadAnimations(animator, config.Animations),
 		State = "Idle",
 		SpawnCFrame = spawnCFrame,
@@ -423,6 +485,7 @@ local function createGuardianState(zonePart: BasePart, zoneLevel: number, zoneKe
 		Waypoints = {},
 		CurrentWaypointIdx = 1,
 		LastPathTime = 0,
+		LastPathTargetPosition = nil,
 		AttackTimer = 0,
 	}
 end
@@ -516,7 +579,9 @@ local function startPersonalGuardianTrack(player: Player, zonePart: BasePart, zo
 	end
 
 	local targetSpeed = getGuardianSpeedByZoneLevel(zoneLevel)
-	g.Speed = targetSpeed
+	g.TargetSpeed = targetSpeed
+	g.Speed = GUARDIAN_ACCEL_START_SPEED
+	g.TrackStartedAt = os.clock()
 	g.TargetPlayer = player
 	g.Model:SetAttribute("TargetPlayerName", player.Name)
 	g.Model:SetAttribute("OwnerUserId", player.UserId)
@@ -552,11 +617,13 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 			g.TargetPlayer = nil
 			g.Model:SetAttribute("TargetPlayerName", "")
 			g.State = "Return"
+			g.Speed = g.TargetSpeed or g.Speed
 			playAnim(g, "Track")
 			return
 		end
 
-		lookAtFlat(g.Model, g.RootPart, targetHrp.Position)
+		local currentSpeed = getCurrentGuardianTrackSpeed(g, now)
+		g.Speed = currentSpeed
 
 		local targetOffset = targetHrp.Position - g.RootPart.Position
 		local flatTargetOffset = Vector3.new(targetOffset.X, 0, targetOffset.Z)
@@ -567,22 +634,28 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 			return
 		end
 
-		if targetDistance > DIRECT_CHASE_DISTANCE and now - g.LastPathTime > 0.3 then
+		local shouldRecalcPath = now - g.LastPathTime > PATH_RECALC_INTERVAL
+		local hasUsablePath = g.Waypoints and #g.Waypoints > 0 and g.CurrentWaypointIdx <= #g.Waypoints
+		if g.LastPathTargetPosition then
+			shouldRecalcPath = shouldRecalcPath and ((targetHrp.Position - g.LastPathTargetPosition).Magnitude >= PATH_RECALC_TARGET_MOVE_DISTANCE or not hasUsablePath)
+		end
+
+		if targetDistance > DIRECT_CHASE_DISTANCE and shouldRecalcPath then
 			g.LastPathTime = now
 			local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 4, AgentCanJump = false})
 			pcall(function() path:ComputeAsync(g.RootPart.Position, targetHrp.Position) end)
 			if path.Status == Enum.PathStatus.Success then
+				g.LastPathTargetPosition = targetHrp.Position
 				g.Waypoints = path:GetWaypoints()
 				g.CurrentWaypointIdx = 2
+			else
+				g.Waypoints = {}
+				g.CurrentWaypointIdx = 1
 			end
 		end
 
 		if targetDistance <= DIRECT_CHASE_DISTANCE then
-			if targetDistance > 0.05 then
-				local step = math.min(g.Speed * dt, targetDistance)
-				local nextCF = g.RootPart.CFrame + (flatTargetOffset.Unit * step)
-				g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
-			end
+			moveGuardianTowards(g, targetHrp.Position, dt, currentSpeed)
 			return
 		end
 
@@ -595,8 +668,10 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 				if flatMoveVec.Magnitude < 1 then
 					g.CurrentWaypointIdx += 1
 				else
-					local nextCF = g.RootPart.CFrame + (flatMoveVec.Unit * g.Speed * dt)
-					g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
+					local reachedWaypoint = moveGuardianTowards(g, targetWP, dt, currentSpeed)
+					if reachedWaypoint then
+						g.CurrentWaypointIdx += 1
+					end
 				end
 			else
 				g.CurrentWaypointIdx += 1
@@ -622,9 +697,7 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 				destroyPersonalGuardian(key)
 			end
 		else
-			local nextCF = g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt)
-			g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
-			lookAtFlat(g.Model, g.RootPart, targetIdleCFrame.Position)
+			moveGuardianTowards(g, targetIdleCFrame.Position, dt)
 		end
 	end
 end
@@ -753,10 +826,8 @@ local function onHeartbeat(dt: number)
 				g.State = "Idle"
 				playAnim(g, "Idle")
 			else
-				-- 移动时看向出生点，并应用 PivotOffset 补偿。
-				local nextCF = g.RootPart.CFrame + (moveVec.Unit * g.Speed * dt)
-				g.Model:PivotTo(nextCF * g.RootPart.PivotOffset)
-				lookAtFlat(g.Model, g.RootPart, targetIdleCFrame.Position)
+				-- 移动与朝向合并成一次 PivotTo，减少模型在客户端看到的抖动。
+				moveGuardianTowards(g, targetIdleCFrame.Position, dt)
 			end
 		end
 	end

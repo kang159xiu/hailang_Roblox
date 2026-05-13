@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 
 local PlayerData = require(game.ServerScriptService.Modules.PlayerData)
 local InventoryService = require(game.ServerScriptService.Modules.InventoryService)
+local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
 
 -- [修改原因] 初始化 RemoteEvent 用于前后端通信
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -21,6 +22,7 @@ resultEvent.Name = "GachaResult"
 
 local PRODUCT_ID_10_PULL = 3580035858
 local PRODUCT_ID_5_PULL = 3580661228
+local PRODUCT_ID_REBIRTH = Config.REBIRTH_PRODUCT_ID
 local COST_1_PULL_GOLD = 1000000
 
 
@@ -124,6 +126,15 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 
 	if receiptInfo.ProductId == PRODUCT_ID_5_PULL then
 		performGacha(player, 5)
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
+	if receiptInfo.ProductId == PRODUCT_ID_REBIRTH then
+		PlayerData.PerformRobuxRebirth(player)
+		local toastEvent = remotes:FindFirstChild("PushClientToast")
+		if toastEvent and toastEvent:IsA("RemoteEvent") then
+			toastEvent:FireClient(player, string.format("Robux rebirth successful! Cash multiplier is now x%d", PlayerData.GetRebirthMultiplier(player)))
+		end
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 

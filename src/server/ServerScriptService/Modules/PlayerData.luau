@@ -9,6 +9,7 @@ local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 
 export type PlayerStats = {
 	Gold: number,
+	RebirthCount: number,
 	SpeedLevel: number,
 	AttackLevel: number,
 	HealthLevel: number,
@@ -29,6 +30,7 @@ export type PlayerStats = {
 
 export type PersistedPlayerData = {
 	Gold: number,
+	RebirthCount: number?,
 	SpeedLevel: number,
 	AttackLevel: number,
 	HealthLevel: number,
@@ -59,6 +61,7 @@ local function getOrCreate(player: Player): PlayerStats
 	end
 	stats = {
 		Gold = (type(Config.PLAYER_START_GOLD) == "number" and math.floor(Config.PLAYER_START_GOLD) or 0),
+		RebirthCount = 0,
 		SpeedLevel = 0,
 		AttackLevel = 0,
 		HealthLevel = 0,
@@ -78,11 +81,91 @@ function PlayerData.Get(player: Player): PlayerStats
 	return getOrCreate(player)
 end
 
-function PlayerData.AddGold(player: Player, amount: number)
+function PlayerData.AddGold(player: Player, amount: number): number
 	local stats = getOrCreate(player)
-	stats.Gold += amount
+	amount = math.floor(tonumber(amount) or 0)
+	if amount <= 0 then
+		return 0
+	end
+
+	local rebirthCount = math.max(0, math.floor(tonumber(stats.RebirthCount) or 0))
+	stats.RebirthCount = rebirthCount
+
+	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(rebirthCount)) or 1))
+	local beforeGold = stats.Gold
+	local added = math.floor(amount * multiplier)
+	stats.Gold += added
+
+	if rebirthCount > 0 then
+		warn(string.format(
+			"[RebirthGoldDebug] player=%s base=%d rebirth=%d multiplier=x%d added=%d gold=%d->%d",
+			player.Name,
+			amount,
+			rebirthCount,
+			multiplier,
+			added,
+			beforeGold,
+			stats.Gold
+		))
+	end
+
 	PlayerData.Sync(player)
 	DataDirtyService.MarkDirty(player)
+	return added
+end
+
+function PlayerData.GetRebirthCost(player: Player): number
+	local stats = getOrCreate(player)
+	return Config.GetRebirthCost(stats.RebirthCount)
+end
+
+function PlayerData.GetRebirthMultiplier(player: Player): number
+	local stats = getOrCreate(player)
+	return Config.GetRebirthCashMultiplier(stats.RebirthCount)
+end
+
+function PlayerData.PerformGoldRebirth(player: Player): boolean
+	local stats = getOrCreate(player)
+	stats.RebirthCount = math.max(0, math.floor(tonumber(stats.RebirthCount) or 0))
+	local cost = Config.GetRebirthCost(stats.RebirthCount)
+	if stats.Gold < cost then
+		return false
+	end
+
+	stats.Gold -= cost
+	stats.RebirthCount += 1
+	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
+	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
+	warn(string.format(
+		"[RebirthDebug] GoldRebirth player=%s rebirth=%d multiplier=x%d nextCost=%d gold=%d",
+		player.Name,
+		stats.RebirthCount,
+		multiplier,
+		nextCost,
+		stats.Gold
+	))
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player, 5)
+	return true
+end
+
+function PlayerData.PerformRobuxRebirth(player: Player): boolean
+	local stats = getOrCreate(player)
+	stats.RebirthCount = math.max(0, math.floor(tonumber(stats.RebirthCount) or 0))
+	stats.RebirthCount += 1
+	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
+	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
+	warn(string.format(
+		"[RebirthDebug] RobuxRebirth player=%s rebirth=%d multiplier=x%d nextCost=%d gold=%d",
+		player.Name,
+		stats.RebirthCount,
+		multiplier,
+		nextCost,
+		stats.Gold
+	))
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player, 5)
+	return true
 end
 
 function PlayerData.SetGold(player: Player, amount: number)
@@ -237,6 +320,9 @@ local function syncLeaderstatsAndAttributes(player: Player)
 	end
 
 	player:SetAttribute("Gold", stats.Gold)
+	player:SetAttribute("RebirthCount", stats.RebirthCount)
+	player:SetAttribute("RebirthMultiplier", Config.GetRebirthCashMultiplier(stats.RebirthCount))
+	player:SetAttribute("NextRebirthCost", Config.GetRebirthCost(stats.RebirthCount))
 	player:SetAttribute("SpeedLevel", stats.SpeedLevel)
 	player:SetAttribute("AttackLevel", stats.AttackLevel)
 	player:SetAttribute("HealthLevel", stats.HealthLevel)
@@ -267,6 +353,7 @@ function PlayerData.Export(player: Player): PersistedPlayerData
 	local stats = getOrCreate(player)
 	return {
 		Gold = math.floor(stats.Gold),
+		RebirthCount = math.floor(stats.RebirthCount),
 		SpeedLevel = math.floor(stats.SpeedLevel),
 		AttackLevel = math.floor(stats.AttackLevel),
 		HealthLevel = math.floor(stats.HealthLevel),
@@ -302,6 +389,7 @@ function PlayerData.ApplyLoaded(player: Player, loaded: PersistedPlayerData)
 	local stats = getOrCreate(player)
 
 	stats.Gold = math.max(0, math.floor(tonumber(loaded.Gold) or stats.Gold))
+	stats.RebirthCount = math.max(0, math.floor(tonumber((loaded :: any).RebirthCount) or stats.RebirthCount))
 	stats.SpeedLevel = math.max(0, math.floor(tonumber(loaded.SpeedLevel) or stats.SpeedLevel))
 	stats.AttackLevel = math.max(0, math.floor(tonumber(loaded.AttackLevel) or stats.AttackLevel))
 	stats.HealthLevel = math.max(0, math.floor(tonumber(loaded.HealthLevel) or stats.HealthLevel))
@@ -331,6 +419,7 @@ function PlayerData.ResetData(player: Player)
 	if not stats then return end
 	
 	stats.Gold = 10
+	stats.RebirthCount = 0
 	stats.SpeedLevel = 0
 	stats.AttackLevel = 0
 	stats.HealthLevel = 0

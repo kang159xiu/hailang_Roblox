@@ -1025,8 +1025,9 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 end
 
 
+
 -- [新增] 爆装备接口：在指定坐标散落一只立刻死亡的怪物尸体
-function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number)	
+function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: number, position: Vector3, zoneKey: string, upgradeLevel: number?, sourceZoneLevel: number?)
 	local template = getMonsterTemplate(level)
 	if not template then return end
 
@@ -1039,7 +1040,9 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 
 	p:SetAttribute("IsMonster", true)
 	p:SetAttribute("ZoneKey", zoneKey)
-	p:SetAttribute("ZoneLevel", 1) 
+	local safeSourceZoneLevel = math.max(1, math.floor(tonumber(sourceZoneLevel) or 1))
+	p:SetAttribute("ZoneLevel", safeSourceZoneLevel)
+	p:SetAttribute("SourceZoneLevel", safeSourceZoneLevel)
 	p:SetAttribute("MonsterLevel", level)
 	p:SetAttribute("MaxHP", 1)
 	p:SetAttribute("HP", 0)
@@ -1055,6 +1058,8 @@ function MonsterService.SpawnDroppedMonster(level: number, value: number, gps: n
 	clone:SetAttribute("Dead", false)
 	clone:SetAttribute("MonsterLevel", level)
 	clone:SetAttribute("ZoneKey", zoneKey)
+	clone:SetAttribute("ZoneLevel", safeSourceZoneLevel)
+	clone:SetAttribute("SourceZoneLevel", safeSourceZoneLevel)
 
 	buildBillboard(p)
 	setMonsterBillboardText(p)

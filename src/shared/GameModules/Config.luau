@@ -38,6 +38,29 @@ Config.REPLENISH_BATCH_INTERVAL_SECONDS = 5
 -- 新玩家初始金币（只在 PlayerAdded 初始化时生效）
 Config.PLAYER_START_GOLD = 8000000
 
+-- =====================
+-- 重生系统
+-- =====================
+
+-- 第 1 次金币重生所需金币；之后每次 = 上一次 * 5
+Config.REBIRTH_BASE_COST = 10000
+Config.REBIRTH_COST_MULTIPLIER = 5
+
+-- R 币重生 Developer Product ID
+Config.REBIRTH_PRODUCT_ID = 3591432502
+
+function Config.GetRebirthCost(rebirthCount: number): number
+	rebirthCount = math.max(0, math.floor(tonumber(rebirthCount) or 0))
+	local baseCost = tonumber(Config.REBIRTH_BASE_COST) or 10000
+	local multiplier = tonumber(Config.REBIRTH_COST_MULTIPLIER) or 5
+	return math.floor(baseCost * (multiplier ^ rebirthCount))
+end
+
+function Config.GetRebirthCashMultiplier(rebirthCount: number): number
+	rebirthCount = math.max(0, math.floor(tonumber(rebirthCount) or 0))
+	return 1 + rebirthCount
+end
+
 -- 玩家的初始移动速度。Roblox 默认值是 16，你可以把它改大，比如 25 或 30
 Config.WALK_SPEED_BASE = 25
 Config.WALK_SPEED_PER_UPGRADE = 1
