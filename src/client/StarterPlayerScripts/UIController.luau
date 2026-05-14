@@ -1460,6 +1460,17 @@ function UIController.Init()
 		end
 	end
 
+	-- [新增内容] 3. 升级商店列表滚动修复
+	if upgradeList and upgradeList:IsA("ScrollingFrame") then
+		upgradeList.AutomaticCanvasSize = Enum.AutomaticSize.None
+		local layout = upgradeList:FindFirstChildWhichIsA("UIListLayout")
+		if layout then
+			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+				upgradeList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+			end)
+		end
+	end
+
 	-- 1. 金币同步与飞行动效触发 (纯净版)
 	local lastGold = player:GetAttribute("Gold") or 0
 	goldLabel.Text = formatNumberShort(lastGold)

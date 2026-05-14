@@ -12,7 +12,7 @@ local bounceInfo = TweenInfo.new(0.3, Enum.EasingStyle.Bounce, Enum.EasingDirect
 -- 1. 负责 UI 点击缩放动画
 local boundButtons: {[Instance]: boolean} = {}
 
-local function getSlotIndexFrom(instance: Instance): number?
+local function getSlotIndexOnAncestry(instance: Instance?): number?
 	local current: Instance? = instance
 	while current do
 		local slotIndex = current:GetAttribute("SlotIndex")
@@ -24,14 +24,40 @@ local function getSlotIndexFrom(instance: Instance): number?
 	return nil
 end
 
+local function getSlotIndexFrom(instance: Instance): number?
+	local slotIndex = getSlotIndexOnAncestry(instance)
+	if slotIndex then
+		return slotIndex
+	end
+
+	-- SurfaceGui 可能挂在点击升级 Part 下，也可能通过 Adornee 指向 Part。
+	-- 如果按钮祖先链没有 SlotIndex，就继续从 SurfaceGui.Adornee 及其祖先兜底查找。
+	local ancestorGui = instance:FindFirstAncestorWhichIsA("SurfaceGui")
+	if ancestorGui and ancestorGui:IsA("SurfaceGui") then
+		local surfaceGui = ancestorGui :: SurfaceGui
+		local adorneeSlotIndex = getSlotIndexOnAncestry(surfaceGui.Adornee)
+		if adorneeSlotIndex then
+			return adorneeSlotIndex
+		end
+	end
+
+	return nil
+end
+
 local function bindUpgradeButton(button: GuiButton)
 	if boundButtons[button] then
 		return
 	end
 	boundButtons[button] = true
+	button.Active = true
+	button.Visible = true
+	button.Selectable = true
 
 	local ancestorGui = button:FindFirstAncestorWhichIsA("SurfaceGui")
 	local surfaceGui = if ancestorGui and ancestorGui:IsA("SurfaceGui") then ancestorGui :: SurfaceGui else nil
+	if surfaceGui then
+		surfaceGui.Active = true
+	end
 	local bg: GuiObject = button
 	if surfaceGui then
 		local bgCandidate = surfaceGui:FindFirstChild("升级背景", true)
@@ -45,6 +71,7 @@ local function bindUpgradeButton(button: GuiButton)
 	button.Activated:Connect(function()
 		local slotIndex = getSlotIndexFrom(button)
 		if not slotIndex then
+			warn(string.format("[UpgradeButtonDebug][Client] missing SlotIndex button=%s", button:GetFullName()))
 			return
 		end
 
@@ -52,15 +79,25 @@ local function bindUpgradeButton(button: GuiButton)
 		task.wait(0.1)
 		TweenService:Create(bg, bounceInfo, {Size = originalSize}):Play()
 
+		warn(string.format("[UpgradeButtonDebug][Client] fire slot=%d button=%s", math.floor(slotIndex), button:GetFullName()))
 		requestUpgradePlacedMonster:FireServer(slotIndex)
 	end)
 end
 
 local function bindClicker(part: BasePart)
-	local surfaceGui = part:WaitForChild("SurfaceGui", 5) :: SurfaceGui?
-	local button = surfaceGui and surfaceGui:FindFirstChild("ImageButton_升级按钮", true)
+	local button = part:FindFirstChild("ImageButton_升级按钮", true)
+	if not button then
+		local surfaceGui = part:WaitForChild("SurfaceGui", 5)
+		button = surfaceGui and surfaceGui:FindFirstChild("ImageButton_升级按钮", true)
+	end
+	if not button then
+		task.wait(0.5)
+		button = part:FindFirstChild("ImageButton_升级按钮", true)
+	end
 	if button and button:IsA("GuiButton") then
 		bindUpgradeButton(button :: GuiButton)
+	else
+		warn(string.format("[UpgradeButtonDebug][Client] ImageButton_升级按钮 not found under clicker=%s", part:GetFullName()))
 	end
 end
 
