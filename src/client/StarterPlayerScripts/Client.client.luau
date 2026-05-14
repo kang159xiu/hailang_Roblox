@@ -916,6 +916,12 @@ end)
 -- =======================================================
 local currentCamera = workspace.CurrentCamera
 local shakeIntensity = 0
+local chaseCameraHeightOffset = 0
+local activeChaseGlowGuardians: {[Instance]: Highlight} = {}
+
+local CHASE_CAMERA_HEIGHT = 1
+local CHASE_CAMERA_LERP_SPEED = 5
+local CHASE_GLOW_FLASH_SPEED = 7
 
 local hookedGuardians: {[Instance]: boolean} = {}
 
@@ -950,6 +956,74 @@ local function setGuardianLocalVisible(guardian: Instance, isVisible: boolean)
 			descendant.Enabled = isVisible
 		elseif descendant:IsA("BillboardGui") or descendant:IsA("SurfaceGui") then
 			descendant.Enabled = isVisible
+		end
+	end
+end
+
+local function getOrCreateGuardianGlowOutline(guardian: Instance): Highlight?
+	local glowOutline = guardian:FindFirstChild("GlowOutline")
+	if glowOutline and not glowOutline:IsA("Highlight") then
+		glowOutline:Destroy()
+		glowOutline = nil
+	end
+
+	if not glowOutline then
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "GlowOutline"
+		highlight.Adornee = guardian
+		highlight.FillColor = Color3.fromRGB(255, 0, 0)
+		highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		highlight.Enabled = false
+		highlight.Parent = guardian
+		return highlight
+	end
+
+	local highlight = glowOutline :: Highlight
+	highlight.Adornee = guardian
+	highlight.FillColor = Color3.fromRGB(255, 0, 0)
+	highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	return highlight
+end
+
+local function setGuardianChaseGlow(guardian: Instance, enabled: boolean, now: number?)
+	if enabled then
+		local highlight = activeChaseGlowGuardians[guardian] or getOrCreateGuardianGlowOutline(guardian)
+		if not highlight then
+			return
+		end
+
+		activeChaseGlowGuardians[guardian] = highlight
+		highlight.Enabled = true
+
+		-- “内部一直闪红色”：FillTransparency 在半透明与高亮之间循环，Outline 保持红色可见。
+		local pulse = (math.sin((now or os.clock()) * CHASE_GLOW_FLASH_SPEED) + 1) * 0.5
+		highlight.FillTransparency = 0.15 + (pulse * 0.45)
+		highlight.OutlineTransparency = 0
+		return
+	end
+
+	local highlight = activeChaseGlowGuardians[guardian]
+	if not highlight then
+		local existing = guardian:FindFirstChild("GlowOutline")
+		if existing and existing:IsA("Highlight") then
+			highlight = existing
+		end
+	end
+
+	if highlight then
+		highlight.Enabled = false
+		highlight.FillTransparency = 1
+		highlight.OutlineTransparency = 1
+	end
+	activeChaseGlowGuardians[guardian] = nil
+end
+
+local function clearStaleGuardianChaseGlows(chasingGuardians: {[Instance]: boolean})
+	for guardian in pairs(activeChaseGlowGuardians) do
+		if guardian.Parent == nil or not chasingGuardians[guardian] then
+			setGuardianChaseGlow(guardian, false)
 		end
 	end
 end
@@ -1013,6 +1087,7 @@ local function hookGuardianVisibility(guardian: Instance)
 	end)
 	guardian.Destroying:Connect(function()
 		hookedGuardians[guardian] = nil
+		setGuardianChaseGlow(guardian, false)
 		task.defer(refreshAllGuardianVisibility)
 	end)
 end
@@ -1045,8 +1120,15 @@ initPersonalGuardianVisibility()
 
 -- 使用 BindToRenderStep 保证在默认相机脚本更新后，再叠加我们的抖动偏移
 RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Value + 1, function(dt)
+	currentCamera = workspace.CurrentCamera
+	if not currentCamera then
+		return
+	end
+
 	local isChased = false
 	local minDistance = 100
+	local chasingGuardians: {[Instance]: boolean} = {}
+	local nowClock = os.clock()
 	
 	local guardiansFolder = workspace:FindFirstChild("Guardians")
 	if guardiansFolder then
@@ -1058,6 +1140,8 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 			-- 检测是否有守护者的追击目标是 LocalPlayer
 			if guardian:GetAttribute("TargetPlayerName") == player.Name then
 				isChased = true
+				chasingGuardians[guardian] = true
+				setGuardianChaseGlow(guardian, true, nowClock)
 				local hrp = getHRP()
 				if hrp and guardian.PrimaryPart then
 					local dist = (hrp.Position - guardian.PrimaryPart.Position).Magnitude
@@ -1068,6 +1152,7 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 			end
 		end
 	end
+	clearStaleGuardianChaseGlows(chasingGuardians)
 
 	-- 计算目标抖动强度（距离越近抖动越强烈，距离 60 开始有感）
 	local targetIntensity = 0
@@ -1079,9 +1164,16 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 	-- 平滑过渡抖动强度，防止开始和停止时画面突兀
 	shakeIntensity = shakeIntensity + (targetIntensity - shakeIntensity) * 8 * dt
 
+	-- 被追逐时把视角整体拉高；脱离追逐后平滑恢复。
+	local targetCameraHeightOffset = isChased and CHASE_CAMERA_HEIGHT or 0
+	chaseCameraHeightOffset = chaseCameraHeightOffset + (targetCameraHeightOffset - chaseCameraHeightOffset) * math.clamp(CHASE_CAMERA_LERP_SPEED * dt, 0, 1)
+	if math.abs(chaseCameraHeightOffset) > 0.02 then
+		currentCamera.CFrame = currentCamera.CFrame * CFrame.new(0, chaseCameraHeightOffset, 0)
+	end
+
 	-- 如果强度足够大，则计算相机抖动
 	if shakeIntensity > 0.02 then
-		local now = os.clock() * 25 -- 控制抖动频率(速度)
+		local now = nowClock * 25 -- 控制抖动频率(速度)
 		
 		-- 使用柏林噪声(math.noise)生成平缓随机的 XYZ 偏移
 		local xOffset = math.noise(now, 100, 0) * shakeIntensity

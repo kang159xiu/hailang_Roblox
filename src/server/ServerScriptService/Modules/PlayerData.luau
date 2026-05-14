@@ -121,6 +121,19 @@ function PlayerData.AddGold(player: Player, amount: number): number
 	return added
 end
 
+function PlayerData.AddRawGold(player: Player, amount: number): number
+	local stats = getOrCreate(player)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount <= 0 then
+		return 0
+	end
+
+	stats.Gold += amount
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player)
+	return amount
+end
+
 function PlayerData.GetRebirthCost(player: Player): number
 	local stats = getOrCreate(player)
 	return Config.GetRebirthCost(stats.RebirthCount)

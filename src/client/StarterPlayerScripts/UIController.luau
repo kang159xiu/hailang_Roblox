@@ -9,6 +9,7 @@ local StarterGui = game:GetService("StarterGui")
 local SocialService = game:GetService("SocialService") 
 -- [新增内容] 引入市场服务用于处理通行证购买
 local MarketplaceService = game:GetService("MarketplaceService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))
@@ -26,6 +27,10 @@ local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") ::
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
 local requestDropCarriedMonsters = remotes:WaitForChild("RequestDropCarriedMonsters") :: RemoteEvent
 local requestRebirth = remotes:WaitForChild("RequestRebirth") :: RemoteEvent
+local requestStealPlacedGold = remotes:WaitForChild("RequestStealPlacedGold") :: RemoteEvent
+local stealGoldAvailability = remotes:WaitForChild("StealGoldAvailability") :: RemoteEvent
+local stealGoldOwnerWarning = remotes:WaitForChild("StealGoldOwnerWarning") :: RemoteEvent
+local stealGoldResult = remotes:WaitForChild("StealGoldResult") :: RemoteEvent
 
 -- =====================
 -- 基础 UI 变量
@@ -84,6 +89,15 @@ local vipButton = mainGui:FindFirstChild("ImageButton_VIP", true) :: ImageButton
 local backpackButton = mainGui:FindFirstChild("BackpackButton", true)
 -- [终极修复] 先声明攻击按钮变量，但不立刻查找，避免由于 UI 加载延迟导致永远为 nil
 local attackButton: ImageButton? = nil
+local stealButton: GuiButton? = nil
+local stealTotalLabel: TextLabel? = nil
+local stealActualTotal = 0
+local stealDisplayedTotal = 0
+local stealCountTweenToken = 0
+local pendingStealGoldFlySuppressUntil = 0
+local stealWarningFrame: GuiObject? = nil
+local stealWarningLabel: TextLabel? = nil
+local stealWarningBlinkToken = 0
 local dropCarriedFrame: GuiObject? = nil
 local dropCarriedButton: GuiButton? = nil
 local carriedFolderChildAddedConnection: RBXScriptConnection? = nil
@@ -99,6 +113,131 @@ local speedToggleText = speedToggleButton and speedToggleButton:FindFirstChild("
 local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升级后的加速状态）
 
 local AUTO_ATTACK_ENABLED_ATTRIBUTE = "AutoAttackEnabled"
+local formatNumberShort: (number) -> string
+
+local function setStealTotalLabelText(amount: number)
+	if stealTotalLabel then
+		stealTotalLabel.Text = "+" .. formatNumberShort(math.max(0, math.floor(amount))) .. "金币"
+	end
+end
+
+local function resetStealTotal()
+	stealCountTweenToken += 1
+	stealActualTotal = 0
+	stealDisplayedTotal = 0
+	setStealTotalLabelText(0)
+end
+
+local function setStealButtonVisible(visible: boolean)
+	if stealButton and stealButton.Visible ~= visible then
+		stealButton.Visible = visible
+	end
+end
+
+local function bindButtonPressScaleAnimation(button: GuiButton)
+	local existingScale = button:FindFirstChild("PressScale")
+	local pressScale: UIScale
+	if existingScale and existingScale:IsA("UIScale") then
+		pressScale = existingScale :: UIScale
+	else
+		local newScale = Instance.new("UIScale")
+		newScale.Name = "PressScale"
+		newScale.Scale = 1
+		newScale.Parent = button
+		pressScale = newScale
+	end
+
+	local currentTween: Tween? = nil
+	local pressToken = 0
+	local pressedAt = 0
+	local minPressVisibleSeconds = 0.08
+	local pressedScale = 0.85
+
+	local function tweenTo(targetScale: number)
+		if currentTween then
+			currentTween:Cancel()
+			currentTween = nil
+		end
+
+		currentTween = TweenService:Create(pressScale, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Scale = targetScale,
+		})
+		currentTween:Play()
+	end
+
+	local function pressDown()
+		pressToken += 1
+		pressedAt = os.clock()
+		tweenTo(pressedScale)
+	end
+
+	local function releaseUp()
+		pressToken += 1
+		local token = pressToken
+		local elapsed = os.clock() - pressedAt
+		local waitTime = math.max(0, minPressVisibleSeconds - elapsed)
+
+		task.delay(waitTime, function()
+			if token == pressToken then
+				tweenTo(1)
+			end
+		end)
+	end
+
+	button.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			pressDown()
+		end
+	end)
+	button.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			releaseUp()
+		end
+	end)
+	button.MouseLeave:Connect(releaseUp)
+end
+
+local function stopStealWarning()
+	stealWarningBlinkToken += 1
+	if stealWarningFrame then
+		stealWarningFrame.Visible = false
+	end
+	if stealWarningLabel then
+		stealWarningLabel.TextTransparency = 0
+	end
+end
+
+local function showStealWarning(thiefName: string?)
+	stealWarningBlinkToken += 1
+	local token = stealWarningBlinkToken
+	local safeName = if type(thiefName) == "string" and thiefName ~= "" then thiefName else "有"
+
+	if stealWarningLabel then
+		stealWarningLabel.Text = string.format("%s玩家在偷取你的钱币", safeName)
+	end
+	if stealWarningFrame then
+		stealWarningFrame.Visible = true
+	end
+
+	task.spawn(function()
+		while stealWarningBlinkToken == token do
+			if stealWarningLabel then
+				stealWarningLabel.TextTransparency = 0
+			end
+			task.wait(0.35)
+			if stealWarningBlinkToken ~= token then
+				break
+			end
+			if stealWarningLabel then
+				stealWarningLabel.TextTransparency = 0.65
+			end
+			task.wait(0.35)
+		end
+		if stealWarningLabel then
+			stealWarningLabel.TextTransparency = 0
+		end
+	end)
+end
 
 local rebirthButton = mainGui:FindFirstChild("ImageButton_重生", true) :: GuiButton?
 local rebirthWindow = mainGui:FindFirstChild("重生界面", true) :: GuiObject?
@@ -252,7 +391,7 @@ end
 -- =====================
 -- 辅助函数
 -- =====================
-local function formatNumberShort(n: number): string
+function formatNumberShort(n: number): string
     if type(n) ~= "number" then return "0" end
     local abs = math.abs(n)
     if abs < 1000 then return tostring(math.floor(n)) end
@@ -472,6 +611,116 @@ local function showToast(text: string)
 		end
 	end)
 end
+local function appendUniqueInstance(list: {Instance}, inst: Instance?)
+	if not inst then
+		return
+	end
+	for _, existing in ipairs(list) do
+		if existing == inst then
+			return
+		end
+	end
+	table.insert(list, inst)
+end
+
+local function getMonsterAppearanceFolders(): {Instance}
+	local folders = {}
+	appendUniqueInstance(folders, ReplicatedStorage:FindFirstChild("Monster image"))
+	appendUniqueInstance(folders, ReplicatedStorage:FindFirstChild("MonsterAppearances"))
+	appendUniqueInstance(folders, workspace:FindFirstChild("Monster image"))
+	return folders
+end
+
+local function findMonsterInventoryTemplate(level: number): Instance?
+	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
+	local strNormal = tostring(safeLevel)
+	local strZero = string.format("%02d", safeLevel)
+	local names = {
+		"怪物形象" .. strNormal, "怪物形象" .. strZero,
+		"怪物形象 " .. strNormal, "怪物形象 " .. strZero,
+		"Lv" .. strNormal, "Lv" .. strZero,
+		"Lv " .. strNormal, "Lv " .. strZero,
+		strNormal, strZero,
+	}
+
+	local nameSet = {}
+	for _, name in ipairs(names) do
+		nameSet[name] = true
+	end
+
+	local function isRenderableTemplate(inst: Instance): boolean
+		return inst:IsA("BasePart")
+			or ((inst:IsA("Model") or inst:IsA("Folder")) and inst:FindFirstChildWhichIsA("BasePart", true) ~= nil)
+	end
+
+	local function scoreTemplate(inst: Instance): number
+		if not isRenderableTemplate(inst) then
+			return -1
+		end
+
+		local score = #inst:GetDescendants()
+		if inst:IsA("Model") then
+			score += 1000000
+		elseif inst:IsA("Folder") then
+			score += 200000
+		elseif inst:IsA("BasePart") then
+			score += 100000
+		end
+		return score
+	end
+
+	local function findInRoot(root: Instance): Instance?
+		local best: Instance? = nil
+		local bestScore = -1
+
+		local function consider(candidate: Instance?)
+			if not candidate then
+				return
+			end
+			local score = scoreTemplate(candidate)
+			if score > bestScore then
+				best = candidate
+				bestScore = score
+			end
+		end
+
+		for _, name in ipairs(names) do
+			consider(root:FindFirstChild(name))
+		end
+
+		if best then
+			return best
+		end
+
+		for _, inst in ipairs(root:GetDescendants()) do
+			if nameSet[inst.Name] then
+				consider(inst)
+
+				local cur = inst.Parent
+				while cur and cur ~= root do
+					if cur:IsA("Model") then
+						consider(cur)
+						break
+					end
+					cur = cur.Parent
+				end
+			end
+		end
+
+		return best
+	end
+
+	for _, root in ipairs(getMonsterAppearanceFolders()) do
+		local found = findInRoot(root)
+		if found then
+			return found
+		end
+	end
+
+	warn(string.format("[UIController] 未找到怪物背包形象模板：Lv.%d，已尝试名称：%s", safeLevel, table.concat(names, ", ")))
+	return nil
+end
+
 
 
 
@@ -493,12 +742,6 @@ local function loadViewportFromScene(targetContainer: GuiObject, modelSource: In
 
 	-- 3. 克隆场景里的模型并放入 Viewport
 	local clone = modelSource:Clone()
-	if clone:IsA("Model") then
-		-- 将模型移动到虚拟空间的原点
-		clone:PivotTo(CFrame.new(0, 0, 0))
-	elseif clone:IsA("BasePart") then
-		clone.CFrame = CFrame.new(0, 0, 0)
-	end
 	clone.Parent = viewport
 
 	-- 4. 自动创建摄像机
@@ -506,25 +749,134 @@ local function loadViewportFromScene(targetContainer: GuiObject, modelSource: In
 	viewport.CurrentCamera = camera
 	camera.Parent = viewport
 
-	-- 5. 核心算法：计算模型大小，自动将摄像机拉到完美距离
-	local cf, size
-	if clone:IsA("Model") then
-		cf, size = clone:GetBoundingBox()
-	else
-		cf = clone.CFrame
-		size = clone.Size
+	-- Folder 模板先包成 Model，方便统一计算和移动。
+	if clone:IsA("Folder") then
+		local wrapper = Instance.new("Model")
+		wrapper.Name = clone.Name .. "_ViewportModel"
+		wrapper.Parent = viewport
+		for _, child in ipairs(clone:GetChildren()) do
+			child.Parent = wrapper
+		end
+		clone:Destroy()
+		clone = wrapper
 	end
 
-	-- 找出模型最长的一边
-	local maxDim = math.max(size.X, size.Y, size.Z)
-	if maxDim == 0 then maxDim = 2 end -- 兜底防错
+	-- 怪物模板常见结构：外层模板 > 内部 Model > RootPart/真实外观。
+	-- 优先显示内部 Model，避免外层定位件或透明 RootPart 把镜头中心撑偏。
+	local visualModel = clone:FindFirstChild("Model", true)
+	if visualModel and visualModel:IsA("Model") and visualModel:FindFirstChildWhichIsA("BasePart", true) then
+		visualModel.Parent = viewport
+		clone:Destroy()
+		clone = visualModel
+	end
 
-	-- 根据视场角(FOV)计算刚好能看全模型的距离，乘 1.2 是为了留一点边缘空白
-	local distance = (maxDim / 2) / math.tan(math.rad(camera.FieldOfView) / 2) * 0.8
-	
-	-- 将摄像机放在模型的斜右前方，并让它看向模型的中心点
-	local camPos = cf.Position + Vector3.new(distance * 0.6, distance * 0.4, distance * 0.8)
-	camera.CFrame = CFrame.lookAt(camPos, cf.Position)
+	local function isLikelyVisualPart(part: BasePart): boolean
+		if part.Name == "RootPart" then
+			return false
+		end
+		if part.Transparency >= 1 then
+			return false
+		end
+		return true
+	end
+
+	local function getVisualBounds(root: Instance): (CFrame?, Vector3?)
+		local parts = {}
+		for _, inst in ipairs(root:GetDescendants()) do
+			if inst:IsA("BasePart") and isLikelyVisualPart(inst) then
+				table.insert(parts, inst)
+			end
+		end
+
+		if root:IsA("BasePart") and isLikelyVisualPart(root) then
+			table.insert(parts, root)
+		end
+
+		-- 如果排除 RootPart/透明件后没有可见零件，则回退到全部 BasePart，至少保证有可显示对象。
+		if #parts == 0 then
+			for _, inst in ipairs(root:GetDescendants()) do
+				if inst:IsA("BasePart") then
+					table.insert(parts, inst)
+				end
+			end
+			if root:IsA("BasePart") then
+				table.insert(parts, root)
+			end
+		end
+
+		if #parts == 0 then
+			return nil, nil
+		end
+
+		local minX, minY, minZ = math.huge, math.huge, math.huge
+		local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+		for _, part in ipairs(parts) do
+			local cf = part.CFrame
+			local half = part.Size * 0.5
+			for x = -1, 1, 2 do
+				for y = -1, 1, 2 do
+					for z = -1, 1, 2 do
+						local p = (cf * CFrame.new(half.X * x, half.Y * y, half.Z * z)).Position
+						minX = math.min(minX, p.X)
+						minY = math.min(minY, p.Y)
+						minZ = math.min(minZ, p.Z)
+						maxX = math.max(maxX, p.X)
+						maxY = math.max(maxY, p.Y)
+						maxZ = math.max(maxZ, p.Z)
+					end
+				end
+			end
+		end
+
+		local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+		local size = Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
+		return CFrame.new(center), size
+	end
+
+	local function getModelBounds(root: Instance): (CFrame?, Vector3?)
+		if root:IsA("Model") then
+			local cf, size = root:GetBoundingBox()
+			return cf, size
+		elseif root:IsA("BasePart") then
+			return root.CFrame, root.Size
+		end
+		return nil, nil
+	end
+
+	-- 5. 按可见外观计算镜头，并把模型挪到 Viewport 原点附近。
+	local boundsCF, boundsSize = getVisualBounds(clone)
+	if not boundsCF or not boundsSize then
+		warn("[UIController] Viewport 渲染失败：模板中没有可显示 BasePart - " .. modelSource:GetFullName())
+		return
+	end
+
+	if clone:IsA("Model") then
+		local modelCF, modelSize = getModelBounds(clone)
+		if modelCF and modelSize then
+			clone:PivotTo(CFrame.new(0, modelSize.Y * 0.5, 0) * modelCF:Inverse() * clone:GetPivot())
+		else
+			clone:PivotTo(CFrame.new(0, boundsSize.Y * 0.5, 0) * boundsCF:Inverse() * clone:GetPivot())
+		end
+		boundsCF, boundsSize = getVisualBounds(clone)
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = CFrame.new(0, boundsSize.Y * 0.5, 0)
+		boundsCF, boundsSize = getVisualBounds(clone)
+	end
+
+	if not boundsCF or not boundsSize then
+		warn("[UIController] Viewport 渲染失败：移动模型后无法计算包围盒 - " .. modelSource:GetFullName())
+		return
+	end
+
+	local maxDim = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z)
+	if maxDim < 0.1 then maxDim = 5 end
+
+	local modelCF = getModelBounds(clone)
+	local center = if modelCF then modelCF.Position else boundsCF.Position
+	local distance = maxDim
+	local height = math.max(boundsSize.Y * 0.02, maxDim * 0.15)
+	camera.FieldOfView = 35
+	camera.CFrame = CFrame.new(center + Vector3.new(-distance, height, -distance), center)
 end
 
 
@@ -657,28 +1009,25 @@ local function refreshMonsterInventoryUI(payload)
 		if ch:IsA("GuiObject") and ch ~= rowTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
-	local monsterFolder = ReplicatedStorage:FindFirstChild("Monster image")
-		or ReplicatedStorage:FindFirstChild("MonsterAppearances")
-		or workspace:FindFirstChild("Monster image")
-
 	for i, it in ipairs(payload or {}) do
 		local row = rowTemplate:Clone()
 		row.Visible = true
 		row.Parent = monsterInventoryList
 		
-		local label = row:FindFirstChild("Label")
+		local label = row:FindFirstChild("Label", true)
 		if label and label:IsA("TextLabel") then
 			label.Text = string.format("Monster Lv.%d  Value:%s  +%s/s", it.MonsterLevel, formatNumberShort(it.Value), formatNumberShort(it.GoldPerSec))
 		end 
 		
-		local imageContainer = row:FindFirstChild("ImageLabel")
-		if imageContainer and monsterFolder then
-			local iconName = string.format("怪物形象%02d", it.MonsterLevel)
-			local model = monsterFolder:FindFirstChild(iconName)
+		local imageContainer = row:FindFirstChild("ImageLabel", true)
+		if imageContainer and imageContainer:IsA("GuiObject") then
+			local model = findMonsterInventoryTemplate(it.MonsterLevel)
 			loadViewportFromScene(imageContainer, model)
+		else
+			warn("[UIController] 怪物背包 RowTemplate 中未找到 ImageLabel 容器")
 		end
 
-		local takeOutBtn = row:FindFirstChild("拿出按钮")
+		local takeOutBtn = row:FindFirstChild("拿出按钮", true)
 		if takeOutBtn and takeOutBtn:IsA("GuiButton") then
 			takeOutBtn.Activated:Connect(function() requestTakeOutMonsterItem:FireServer(it.ItemId) end)
 		end
@@ -755,10 +1104,19 @@ end
 -- =====================
 -- [最终版] 金币爆点飞行动效逻辑
 -- =====================
-local TweenService = game:GetService("TweenService")
 local rng = Random.new()
 
-local function playGoldFlyingAnimation(increaseAmount: number)
+local function getGuiCenter(guiObject: GuiObject): Vector2
+	return guiObject.AbsolutePosition + (guiObject.AbsoluteSize / 2)
+end
+
+local function getScreenCenter(): Vector2
+	local camera = workspace.CurrentCamera
+	local viewportSize = if camera then camera.ViewportSize else mainGui.AbsoluteSize
+	return Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+end
+
+local function playGoldFlyingAnimation(increaseAmount: number, originAbsPos: Vector2?)
 	local playerGui = player:WaitForChild("PlayerGui")
 	local sucaiGui = playerGui:FindFirstChild("sucai")
 	if not sucaiGui then return end
@@ -779,20 +1137,21 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 
 	-- 动态计算生成数量: 基础10个，每多100金币多生成1个，上限20个
 	local count = math.clamp(10 + math.floor(increaseAmount / 100), 10, 20)
+	local originPos = originAbsPos or getScreenCenter()
 
 	for i = 1, count do
 		task.spawn(function()
 			local coin = moneyImageSource:Clone()
 			coin.Visible = true -- 强制显示！
-			coin.Size = UDim2.fromOffset(50, 50) 
+			coin.Size = UDim2.fromOffset(50, 50)
 			coin.AnchorPoint = Vector2.new(0.5, 0.5)
-			coin.Position = UDim2.fromScale(0.5, 0.5) 
+			coin.Position = UDim2.fromOffset(originPos.X, originPos.Y)
 			coin.Parent = fxContainer
 
 			-- 散开动画
 			local angle = rng:NextNumber(0, math.pi * 2)
-			local radius = rng:NextNumber(50, 400)
-			local scatterPos = UDim2.new(0.5, math.cos(angle) * radius, 0.5, math.sin(angle) * radius)
+			local radius = rng:NextNumber(50, 220)
+			local scatterPos = UDim2.fromOffset(originPos.X + math.cos(angle) * radius, originPos.Y + math.sin(angle) * radius)
 			
 			local scatterTween = TweenService:Create(coin, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
 				Position = scatterPos
@@ -813,6 +1172,100 @@ local function playGoldFlyingAnimation(increaseAmount: number)
 		-- 极短延迟，让金币有先有后
 		task.wait(rng:NextNumber(0, 0.02))
 	end
+end
+
+local function playStealGoldTextSettleAnimation(amount: number)
+	local value = math.floor(tonumber(amount) or 0)
+	if value <= 0 then
+		return
+	end
+
+	local origin = if stealTotalLabel then getGuiCenter(stealTotalLabel) elseif stealButton then getGuiCenter(stealButton) else getGuiCenter(goldLabel)
+	local target = getGuiCenter(goldLabel)
+
+	local label = Instance.new("TextLabel")
+	label.Name = "StealGoldSettleFlyText"
+	label.AnchorPoint = Vector2.new(0.5, 0.5)
+	label.Position = UDim2.fromOffset(origin.X, origin.Y)
+	label.Size = UDim2.fromOffset(180, 46)
+	label.BackgroundTransparency = 1
+	label.Text = "+" .. formatNumberShort(value) .. "金币"
+	label.TextColor3 = Color3.fromRGB(255, 221, 64)
+	label.TextStrokeTransparency = 0.25
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.ZIndex = 200
+	label.Parent = mainGui
+
+	local tween = TweenService:Create(label, TweenInfo.new(0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
+		Position = UDim2.fromOffset(target.X, target.Y),
+		TextTransparency = 0.15,
+		TextStrokeTransparency = 1,
+	})
+	tween:Play()
+	tween.Completed:Connect(function()
+		if label.Parent then
+			label:Destroy()
+		end
+	end)
+end
+
+local function animateStealTotalTo(targetTotal: number)
+	stealCountTweenToken += 1
+	local token = stealCountTweenToken
+	local fromValue = stealDisplayedTotal
+	local toValue = math.max(0, math.floor(targetTotal))
+	local duration = 0.45
+	local startedAt = os.clock()
+
+	task.spawn(function()
+		while stealCountTweenToken == token do
+			local alpha = math.clamp((os.clock() - startedAt) / duration, 0, 1)
+			local eased = 1 - ((1 - alpha) * (1 - alpha))
+			stealDisplayedTotal = math.floor(fromValue + ((toValue - fromValue) * eased))
+			setStealTotalLabelText(stealDisplayedTotal)
+			if alpha >= 1 then
+				break
+			end
+			task.wait()
+		end
+
+		if stealCountTweenToken == token then
+			stealDisplayedTotal = toValue
+			setStealTotalLabelText(toValue)
+		end
+	end)
+end
+
+local function handleStealGoldResult(amount: number, mode: string?)
+	local value = math.floor(tonumber(amount) or 0)
+	local resultMode = mode or "progress"
+
+	if resultMode == "cancelled" then
+		resetStealTotal()
+		return
+	end
+
+	if resultMode == "settled" then
+		local settled = if value > 0 then value else stealActualTotal
+		if settled > 0 then
+			stealActualTotal = settled
+			stealDisplayedTotal = settled
+			setStealTotalLabelText(settled)
+			pendingStealGoldFlySuppressUntil = math.max(pendingStealGoldFlySuppressUntil, os.clock() + 1.0)
+			playGoldFlyingAnimation(settled, if stealButton then getGuiCenter(stealButton) else nil)
+			playStealGoldTextSettleAnimation(settled)
+		end
+		resetStealTotal()
+		return
+	end
+
+	if value <= 0 then
+		return
+	end
+
+	stealActualTotal += value
+	animateStealTotalTo(stealActualTotal)
 end
 
 -- 添加金币增减文字动画逻辑
@@ -1028,7 +1481,11 @@ function UIController.Init()
 			playGoldTextAnimation(difference)
 		end
 		if currentGold > lastGold then
-			playGoldFlyingAnimation(difference)
+			if os.clock() <= pendingStealGoldFlySuppressUntil then
+				pendingStealGoldFlySuppressUntil = 0
+			else
+				playGoldFlyingAnimation(difference)
+			end
 		end
 		lastGold = currentGold
 	end
@@ -1273,6 +1730,108 @@ function UIController.Init()
 		end)
 	end
 
+	stealGoldAvailability.OnClientEvent:Connect(function(canSteal: boolean)
+		setStealButtonVisible(canSteal == true)
+	end)
+
+	stealGoldOwnerWarning.OnClientEvent:Connect(function(active: boolean, thiefName: string?)
+		if active == true then
+			showStealWarning(thiefName)
+		else
+			stopStealWarning()
+		end
+	end)
+
+	stealGoldResult.OnClientEvent:Connect(function(amount: number, mode: string?)
+		handleStealGoldResult(amount, mode)
+	end)
+
+	task.spawn(function()
+		local playerGui = player:WaitForChild("PlayerGui")
+
+		local function findStealButton(): GuiButton?
+			local direct = mainGui:FindFirstChild("ImageButton_偷取", true)
+			if direct and direct:IsA("GuiButton") then
+				return direct :: GuiButton
+			end
+
+			local playerGuiButton = playerGui:FindFirstChild("ImageButton_偷取", true)
+			if playerGuiButton and playerGuiButton:IsA("GuiButton") then
+				return playerGuiButton :: GuiButton
+			end
+
+			local starterMainUi = StarterGui:FindFirstChild("MainUI")
+			local starterButton = starterMainUi and starterMainUi:FindFirstChild("ImageButton_偷取", true)
+			if starterButton and starterButton:IsA("GuiButton") then
+				warn("[UIController] 只在 StarterGui 模板中找到 ImageButton_偷取；运行时仍会继续等待 PlayerGui 副本。")
+			end
+
+			return nil
+		end
+
+		local waited = mainGui:WaitForChild("ImageButton_偷取", 5)
+		local btn = if waited and waited:IsA("GuiButton") then waited :: GuiButton else findStealButton()
+		if not btn then
+			warn("[UIController] 5秒内未找到 ImageButton_偷取，正在后台持续扫描...")
+			while not btn do
+				task.wait(1)
+				btn = findStealButton()
+			end
+		end
+
+		stealButton = btn
+		local totalLabel = stealButton:FindFirstChild("+xx金币", true)
+		if totalLabel and totalLabel:IsA("TextLabel") then
+			stealTotalLabel = totalLabel :: TextLabel
+			setStealTotalLabelText(0)
+		else
+			warn("[UIController] ImageButton_偷取 下未找到 TextLabel: +xx金币")
+		end
+		stealButton.Visible = false
+		bindButtonPressScaleAnimation(stealButton)
+		stealButton.Activated:Connect(function()
+			pendingStealGoldFlySuppressUntil = os.clock() + 1.5
+			requestStealPlacedGold:FireServer()
+		end)
+	end)
+
+	task.spawn(function()
+		local playerGui = player:WaitForChild("PlayerGui")
+
+		local function findWarningFrame(): GuiObject?
+			local direct = mainGui:FindFirstChild("偷取提示消息", true) or playerGui:FindFirstChild("偷取提示消息", true)
+			if direct and direct:IsA("GuiObject") then
+				return direct :: GuiObject
+			end
+
+			local starterMainUi = StarterGui:FindFirstChild("MainUI")
+			local starterFrame = starterMainUi and starterMainUi:FindFirstChild("偷取提示消息", true)
+			if starterFrame and starterFrame:IsA("GuiObject") then
+				warn("[UIController] 只在 StarterGui 模板中找到 偷取提示消息；运行时仍会继续等待 PlayerGui 副本。")
+			end
+
+			return nil
+		end
+
+		local frame = findWarningFrame()
+		if not frame then
+			warn("[UIController] 未找到 偷取提示消息，正在后台持续扫描...")
+			while not frame do
+				task.wait(1)
+				frame = findWarningFrame()
+			end
+		end
+
+		stealWarningFrame = frame
+		local label = frame:FindFirstChild("massage", true)
+		if label and label:IsA("TextLabel") then
+			stealWarningLabel = label :: TextLabel
+		else
+			warn("[UIController] 偷取提示消息 下未找到 TextLabel: massage")
+		end
+		stealWarningFrame.Visible = false
+	end)
+
 	-- [终极修复] 攻击按钮逻辑（加入强力异步等待机制，100% 确保找到加载缓慢的按钮）
 	task.spawn(function()
 		local function findAttackButton(): ImageButton?
@@ -1312,6 +1871,7 @@ function UIController.Init()
 		
 		attackButton = btn
 		attackButton.Visible = false -- 初始状态强制隐藏
+		bindButtonPressScaleAnimation(attackButton)
 		
 		attackButton.Activated:Connect(function()
 			local char = player.Character

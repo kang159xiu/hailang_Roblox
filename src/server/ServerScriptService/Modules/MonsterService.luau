@@ -9,6 +9,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 -- TweenService，用于后续实现怪物受击时的平滑跳跃动画
 local TweenService = game:GetService("TweenService")
 
@@ -26,6 +27,7 @@ local ZoneService = require(script.Parent:WaitForChild("ZoneService"))
 local CombatService = require(script.Parent:WaitForChild("CombatService"))
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local PlacementService = require(script.Parent:WaitForChild("PlacementService"))
 
 
 -- require(...)：加载 ModuleScript 并拿到它导出的 table/函数。
@@ -41,10 +43,13 @@ local MonsterService = {}
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local playWeaponHitVFXRemote = remotes:WaitForChild("PlayWeaponHitVFX") :: RemoteEvent
+local playPlayerKnockbackRemote = remotes:WaitForChild("PlayPlayerKnockback") :: RemoteEvent
 local showDamageNumberRemote = remotes:WaitForChild("ShowDamageNumber") :: RemoteEvent
 
 local monstersFolder: Folder
 local aliveMonsters: {[BasePart]: true} = {}
+local PLAYER_HIT_KNOCKBACK_COOLDOWN = 0.6
+local playerKnockbackUntilByUserId: {[number]: number} = {}
 
 local monsterAppearances: Instance? = nil
 
@@ -957,6 +962,93 @@ local function playMonsterDamageColorEffect(monsterPart: BasePart, monsterModel:
 	end)
 end
 
+local function getCharacterHumanoidRootPart(player: Player): BasePart?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp :: BasePart
+	end
+	return nil
+end
+
+local function knockbackPlayer(attacker: Player, target: Player, targetHRP: BasePart)
+	local now = os.clock()
+	if (playerKnockbackUntilByUserId[target.UserId] or 0) > now then
+		return
+	end
+	playerKnockbackUntilByUserId[target.UserId] = now + PLAYER_HIT_KNOCKBACK_COOLDOWN
+
+	local targetCharacter = target.Character
+	local humanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if humanoid then
+		humanoid.AutoRotate = false
+		humanoid.PlatformStand = true
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	end
+
+	local attackerRoot = getCharacterHumanoidRootPart(attacker)
+	local fallbackOrigin = targetHRP.Position - Vector3.new(0, 0, 1)
+	local diff = targetHRP.Position - (attackerRoot and attackerRoot.Position or fallbackOrigin)
+	local horizontalDir = Vector3.new(diff.X, 0, diff.Z)
+	horizontalDir = if horizontalDir.Magnitude > 0.1 then horizontalDir.Unit else Vector3.new(0, 0, 1)
+	local pushPower = 10 --水平击飞玩家力度
+	local upwardPower = 20 --向上弹飞力度
+	local knockbackDuration = 0.35 --玩家失控/翻滚持续时间
+	local angularVelocity = Vector3.new(math.random(-25, 25), math.random(-25, 25), math.random(-25, 25))
+
+	-- 服务端确认命中后，通知所有客户端立即播放击飞表现。
+	-- 目标玩家本机负责更及时的真实物理响应；攻击者和旁观者本机也做短时视觉预测，减少等待服务端复制导致的卡顿。
+	-- 服务端下方仍会同步权威物理状态，避免纯客户端表现导致位置被拉回或被作弊触发。
+	playPlayerKnockbackRemote:FireAllClients(target.UserId, horizontalDir, pushPower, upwardPower, angularVelocity, knockbackDuration)
+
+	targetHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 2, 0)
+	targetHRP.CFrame = CFrame.lookAt(targetHRP.Position, targetHRP.Position + horizontalDir)
+		* CFrame.Angles(math.rad(90), 0, math.rad(math.random(0, 360)))
+
+	targetHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, upwardPower, 0)
+	targetHRP.AssemblyAngularVelocity = angularVelocity
+
+	task.delay(knockbackDuration, function()
+		if target.Character == targetCharacter and humanoid and humanoid.Parent ~= nil and targetHRP.Parent ~= nil then
+			targetHRP.AssemblyAngularVelocity = Vector3.zero
+			humanoid.PlatformStand = false
+			humanoid.AutoRotate = true
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end)
+end
+
+local function tryDamagePlayerTarget(attacker: Player, hit: Instance): boolean
+	local targetCharacter = hit:FindFirstAncestorOfClass("Model")
+	local targetPlayer = targetCharacter and Players:GetPlayerFromCharacter(targetCharacter)
+	if not targetPlayer or targetPlayer == attacker then
+		return false
+	end
+
+	local attackerHRP = getCharacterHumanoidRootPart(attacker)
+	local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
+	if not attackerHRP or not (targetHRP and targetHRP:IsA("BasePart")) then
+		return true
+	end
+
+	if (attackerHRP.Position - (targetHRP :: BasePart).Position).Magnitude > 16 then
+		return true
+	end
+
+	-- 玩家互相攻击只击飞，不扣血，也不显示伤害数字。
+	knockbackPlayer(attacker, targetPlayer, targetHRP :: BasePart)
+	PlacementService.CancelPendingStealIfOwnerHit(targetPlayer, attacker)
+
+	local hitPart = if hit:IsA("BasePart") then hit else (targetHRP :: BasePart)
+	local stats = PlayerData.Get(attacker)
+	local weaponLevel = stats.EquippedWeaponLevel or stats.WeaponLevel or 1
+	playWeaponHitVFXRemote:FireAllClients(hitPart, weaponLevel)
+	return true
+end
+
 function MonsterService.DamageMonster(player: Player, hit: Instance)
 	-- 处理玩家对怪物造成伤害。
 	--
@@ -974,6 +1066,10 @@ function MonsterService.DamageMonster(player: Player, hit: Instance)
 	-- 注意这里体现了非常重要的服务端安全思想：
 	-- 即使客户端传来了一个“命中的怪物”，服务端仍然要自己重新验证距离、对象合法性、血量状态。
 	-- 允许点到子元件：向上找到真正带 IsMonster 的根 Part。
+	if tryDamagePlayerTarget(player, hit) then
+		return
+	end
+
 	local monsterPart: BasePart?
 	local cur: Instance? = hit
 	while cur do

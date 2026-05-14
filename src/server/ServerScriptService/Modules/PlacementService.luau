@@ -27,6 +27,11 @@ local PlacementService = {}
 
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local playPlacedMonsterJumpRemote = remotesFolder:WaitForChild("PlayPlacedMonsterJump") :: RemoteEvent
+local requestStealPlacedGoldRemote = remotesFolder:WaitForChild("RequestStealPlacedGold") :: RemoteEvent
+local requestUpgradePlacedMonsterRemote = remotesFolder:WaitForChild("RequestUpgradePlacedMonster") :: RemoteEvent
+local stealGoldAvailabilityRemote = remotesFolder:WaitForChild("StealGoldAvailability") :: RemoteEvent
+local stealGoldOwnerWarningRemote = remotesFolder:WaitForChild("StealGoldOwnerWarning") :: RemoteEvent
+local stealGoldResultRemote = remotesFolder:WaitForChild("StealGoldResult") :: RemoteEvent
 
 ------------------------
 -- 终极类型安全属性提取器 (彻底消灭 unknown 报错)
@@ -89,9 +94,38 @@ type SlotState = {
   PlacedData: PersistedPlacedMonster?,
 }
 
+type StealableTarget = {
+	Owner: Player,
+	HomeRoot: Instance,
+}
+
+type StealableGoldSource = {
+	SlotIndex: number,
+	SlotPart: BasePart,
+	CollectorPart: BasePart?,
+	PlacedPart: BasePart,
+	State: SlotState,
+}
+
 local slotStatesByUserId: {[number]: {[number]: SlotState}} = {}
 local lastTouchAt: {[string]: number} = {}
 local placementInitStartedByUserId: {[number]: boolean} = {}
+
+local STEAL_AMOUNT = 50
+local STEAL_REQUEST_COOLDOWN_SECONDS = 0.2
+local STEAL_SETTLE_IDLE_SECONDS = 0.8
+local lastStealRequestAtByUserId: {[number]: number} = {}
+local lastStealAvailabilityByUserId: {[number]: boolean} = {}
+local activeStealWarningByOwnerUserId: {[number]: string?} = {}
+
+type PendingStealSession = {
+	Amount: number,
+	OwnerUserId: number,
+	SlotIndex: number,
+	LastStealClock: number,
+}
+
+local pendingStealByThiefUserId: {[number]: PendingStealSession} = {}
 
 -- While placed monsters are producing, UnclaimedGold changes every second.
 local lastDirtyPulseUnixByUserId: {[number]: number} = {}
@@ -173,6 +207,122 @@ local function isPlayerStandingOnSlot(player: Player, slotPart: BasePart): boole
 	local planarDistance = Vector2.new(hrpPos.X - slotPos.X, hrpPos.Z - slotPos.Z).Magnitude
 	local maxPlanarDistance = math.max(slotPart.Size.X, slotPart.Size.Z)
 	return planarDistance <= maxPlanarDistance
+end
+
+local function isPlayerStandingOnStealablePosition(thief: Player, slotPart: BasePart, collectorPart: BasePart?): boolean
+	if isPlayerStandingOnSlot(thief, slotPart) then
+		return true
+	end
+	if collectorPart and isPlayerStandingOnSlot(thief, collectorPart) then
+		return true
+	end
+	return false
+end
+
+local function getHomeBounds(homeRoot: Instance): (Vector3?, Vector3?)
+	if homeRoot:IsA("BasePart") then
+		local part = homeRoot :: BasePart
+		return part.Position, part.Size
+	elseif homeRoot:IsA("Model") then
+		local model = homeRoot :: Model
+		local cf, size = model:GetBoundingBox()
+		return cf.Position, size
+	end
+
+	local minX = math.huge
+	local minY = math.huge
+	local minZ = math.huge
+	local maxX = -math.huge
+	local maxY = -math.huge
+	local maxZ = -math.huge
+	local foundPart = false
+
+	for _, descendant in ipairs(homeRoot:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local part = descendant :: BasePart
+			local halfSize = part.Size * 0.5
+			local pos = part.Position
+			minX = math.min(minX, pos.X - halfSize.X)
+			minY = math.min(minY, pos.Y - halfSize.Y)
+			minZ = math.min(minZ, pos.Z - halfSize.Z)
+			maxX = math.max(maxX, pos.X + halfSize.X)
+			maxY = math.max(maxY, pos.Y + halfSize.Y)
+			maxZ = math.max(maxZ, pos.Z + halfSize.Z)
+			foundPart = true
+		end
+	end
+
+	if not foundPart then
+		return nil, nil
+	end
+
+	local minV = Vector3.new(minX, minY, minZ)
+	local maxV = Vector3.new(maxX, maxY, maxZ)
+	return (minV + maxV) * 0.5, maxV - minV
+end
+
+local function isPlayerStandingInHomeBounds(player: Player, homeRoot: Instance): boolean
+	local hrp = getHRP(player)
+	if not hrp then
+		return false
+	end
+
+	local center, size = getHomeBounds(homeRoot)
+	if not center or not size then
+		return false
+	end
+
+	local pos = hrp.Position
+	local margin = 3
+	local halfX = (size :: Vector3).X * 0.5 + margin
+	local halfZ = (size :: Vector3).Z * 0.5 + margin
+	local minY = (center :: Vector3).Y - (size :: Vector3).Y * 0.5 - 2
+	local maxY = (center :: Vector3).Y + (size :: Vector3).Y * 0.5 + 20
+
+	return math.abs(pos.X - (center :: Vector3).X) <= halfX
+		and math.abs(pos.Z - (center :: Vector3).Z) <= halfZ
+		and pos.Y >= minY
+		and pos.Y <= maxY
+end
+
+local function setStealAvailability(player: Player, canSteal: boolean)
+	if lastStealAvailabilityByUserId[player.UserId] == canSteal then
+		return
+	end
+	lastStealAvailabilityByUserId[player.UserId] = canSteal
+	stealGoldAvailabilityRemote:FireClient(player, canSteal)
+end
+
+local function fireStealResult(player: Player, amount: number, mode: string)
+	stealGoldResultRemote:FireClient(player, math.max(0, math.floor(amount)), mode)
+end
+
+local function settlePendingSteal(thief: Player, _reason: string)
+	local pending = pendingStealByThiefUserId[thief.UserId]
+	if not pending then
+		return
+	end
+
+	local amount = math.max(0, math.floor(pending.Amount))
+	pendingStealByThiefUserId[thief.UserId] = nil
+
+	if amount > 0 and thief.Parent ~= nil and thief:GetAttribute("__DataLoaded") == true then
+		PlayerData.AddRawGold(thief, amount)
+		PlayerData.Sync(thief)
+		DataDirtyService.MarkDirty(thief)
+		fireStealResult(thief, amount, "settled")
+	else
+		fireStealResult(thief, 0, "cancelled")
+	end
+end
+
+local function cancelPendingSteal(thief: Player, _reason: string)
+	local pending = pendingStealByThiefUserId[thief.UserId]
+	if not pending then
+		return
+	end
+	pendingStealByThiefUserId[thief.UserId] = nil
+	fireStealResult(thief, 0, "cancelled")
 end
 
 -- =====================
@@ -904,6 +1054,186 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart): number
 	return added
 end
 
+local function findStealableTargetForPlayer(thief: Player): StealableTarget?
+	if thief:GetAttribute("__DataLoaded") ~= true then
+		return nil
+	end
+
+	for _, owner in ipairs(Players:GetPlayers()) do
+		if owner ~= thief and owner:GetAttribute("__DataLoaded") == true then
+			local home = HomeService.GetHome(owner)
+			if home and isPlayerStandingInHomeBounds(thief, home.HomeRoot) then
+				return {
+					Owner = owner,
+					HomeRoot = home.HomeRoot,
+				}
+			end
+		end
+	end
+
+	return nil
+end
+
+local function findStealableGoldSourceForOwner(owner: Player): StealableGoldSource?
+	local home = HomeService.GetHome(owner)
+	local states = slotStatesByUserId[owner.UserId]
+	if not home or type(states) ~= "table" then
+		return nil
+	end
+
+	local safeStates = states :: {[number]: SlotState}
+	for _, slot in ipairs(home.Slots) do
+		local state = safeStates[slot.Index]
+		local placed = state and state.PlacedMonster
+		if placed and placed.Parent and placed:GetAttribute("IsPlacedMonster") == true then
+			local activePlaced = placed :: BasePart
+			if getNumAttr(activePlaced, "OwnerUserId", -1) == owner.UserId and getNumAttr(activePlaced, "UnclaimedGold", 0) > 0 then
+				return {
+					SlotIndex = slot.Index,
+					SlotPart = slot.Part,
+					CollectorPart = slot.Collector,
+					PlacedPart = activePlaced,
+					State = state,
+				}
+			end
+		end
+	end
+
+	return nil
+end
+
+local function refreshStealAvailabilityAndWarnings()
+	local ownerToThiefName: {[number]: string} = {}
+
+	for _, thief in ipairs(Players:GetPlayers()) do
+		local target = findStealableTargetForPlayer(thief)
+		setStealAvailability(thief, target ~= nil)
+		if target then
+			ownerToThiefName[target.Owner.UserId] = thief.Name
+		end
+	end
+
+	for _, owner in ipairs(Players:GetPlayers()) do
+		local thiefName = ownerToThiefName[owner.UserId]
+		local previousName = activeStealWarningByOwnerUserId[owner.UserId]
+		if thiefName and previousName ~= thiefName then
+			activeStealWarningByOwnerUserId[owner.UserId] = thiefName
+			stealGoldOwnerWarningRemote:FireClient(owner, true, thiefName)
+		elseif not thiefName and previousName ~= nil then
+			activeStealWarningByOwnerUserId[owner.UserId] = nil
+			stealGoldOwnerWarningRemote:FireClient(owner, false)
+		end
+	end
+end
+
+local function processPendingStealSettlements()
+	local now = os.clock()
+	for _, thief in ipairs(Players:GetPlayers()) do
+		local pending = pendingStealByThiefUserId[thief.UserId]
+		if pending then
+			local target = findStealableTargetForPlayer(thief)
+			if not target then
+				settlePendingSteal(thief, "left_home")
+			elseif target.Owner.UserId ~= pending.OwnerUserId then
+				settlePendingSteal(thief, "target_changed")
+			elseif now - pending.LastStealClock >= STEAL_SETTLE_IDLE_SECONDS then
+				settlePendingSteal(thief, "idle")
+			end
+		end
+	end
+end
+
+function PlacementService.CancelPendingStealIfOwnerHit(thief: Player, owner: Player): boolean
+	local pending = pendingStealByThiefUserId[thief.UserId]
+	if pending and pending.OwnerUserId == owner.UserId then
+		cancelPendingSteal(thief, "owner_hit")
+		return true
+	end
+	return false
+end
+
+function PlacementService.TryStealGold(thief: Player): number
+	if thief:GetAttribute("__DataLoaded") ~= true then
+		return 0
+	end
+
+	local now = os.clock()
+	local last = lastStealRequestAtByUserId[thief.UserId] or 0
+	if now - last < STEAL_REQUEST_COOLDOWN_SECONDS then
+		return 0
+	end
+	lastStealRequestAtByUserId[thief.UserId] = now
+
+	local target = findStealableTargetForPlayer(thief)
+	if not target then
+		settlePendingSteal(thief, "no_target")
+		setStealAvailability(thief, false)
+		return 0
+	end
+
+	local pending = pendingStealByThiefUserId[thief.UserId]
+	if pending and pending.OwnerUserId ~= target.Owner.UserId then
+		settlePendingSteal(thief, "target_changed")
+		pending = nil
+	end
+
+	local source = findStealableGoldSourceForOwner(target.Owner)
+	if not source then
+		toast(thief, "当前没钱币")
+		setStealAvailability(thief, true)
+		return 0
+	end
+
+	local un = math.floor(getNumAttr(source.PlacedPart, "UnclaimedGold", 0))
+	if un <= 0 then
+		toast(thief, "当前没钱币")
+		setStealAvailability(thief, true)
+		return 0
+	end
+
+	local stolen = math.min(STEAL_AMOUNT, un)
+	local remaining = un - stolen
+	local nowUnix = os.time()
+
+	source.PlacedPart:SetAttribute("UnclaimedGold", remaining)
+	source.PlacedPart:SetAttribute("LastTickUnix", nowUnix)
+
+	if source.State.PlacedData then
+		source.State.PlacedData.UnclaimedGold = remaining
+		source.State.PlacedData.LastTickUnix = nowUnix
+	end
+
+	if not pending then
+		pending = {
+			Amount = 0,
+			OwnerUserId = target.Owner.UserId,
+			SlotIndex = source.SlotIndex,
+			LastStealClock = now,
+		}
+		pendingStealByThiefUserId[thief.UserId] = pending
+	end
+	pending.Amount += stolen
+	pending.LastStealClock = now
+	fireStealResult(thief, stolen, "progress")
+
+	refreshIncomeDisplayForSlot(target.Owner, source.SlotPart, source.CollectorPart, source.PlacedPart)
+	DataDirtyService.MarkDirty(target.Owner)
+
+	if remaining > 0 then
+		stealGoldOwnerWarningRemote:FireClient(target.Owner, true, thief.Name)
+		activeStealWarningByOwnerUserId[target.Owner.UserId] = thief.Name
+	else
+		stealGoldOwnerWarningRemote:FireClient(target.Owner, false)
+		activeStealWarningByOwnerUserId[target.Owner.UserId] = nil
+	end
+	-- 只要玩家仍在可偷目标家中，就保持偷取按钮显示。
+	-- 如果本次刚好把当前未领取金币偷到 0，立刻发 false 会让客户端按钮短暂消失；
+	-- 后台范围刷新随后又会发 true，造成“点着点着消失 0.x 秒又出现”的闪烁。
+	-- 真正离开目标/不可偷时，前面的 no_target 分支和定时刷新仍会负责隐藏按钮。
+	setStealAvailability(thief, true)
+	return stolen
+end
+
 local function isPlayerWithinInteractionDistance(player: Player, targetPart: BasePart, maxDistance: number?): boolean
 	local hrp = getHRP(player)
 	if not hrp then
@@ -1575,6 +1905,90 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 	end)
 end
 
+local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boolean
+	if player:GetAttribute("__DataLoaded") ~= true then
+		return false
+	end
+
+	local idx = math.floor(slotIndex)
+	if idx < 1 then
+		return false
+	end
+
+	local home = HomeService.GetHome(player)
+	if not home then
+		return false
+	end
+
+	local slot = HomeService.GetSlot(player, idx)
+	if not slot then
+		return false
+	end
+
+	local interactionPart = slot.Collector or slot.Part
+	if not isPlayerWithinInteractionDistance(player, interactionPart, 32) then
+		return false
+	end
+
+	local stateMap = slotStatesByUserId[player.UserId]
+	if type(stateMap) ~= "table" then
+		return false
+	end
+
+	local safeMap = stateMap :: {[number]: SlotState}
+	local state = safeMap[idx]
+	if not state then
+		return false
+	end
+
+	local pm = state.PlacedMonster
+	if not pm or not pm.Parent then
+		toast(player, "Place a monster before upgrading!")
+		return false
+	end
+
+	local activePm = pm :: BasePart
+	if activePm:GetAttribute("IsPlacedMonster") ~= true then
+		return false
+	end
+	if getNumAttr(activePm, "OwnerUserId", -1) ~= player.UserId then
+		return false
+	end
+
+	local upLevel = getNumAttr(activePm, "UpgradeLevel", 1)
+	local baseGps = getNumAttr(activePm, "BaseGoldPerSec", getNumAttr(activePm, "GoldPerSec", 0))
+	local upgradeCost = upLevel * 100 * baseGps
+
+	if not PlayerData.TrySpendGold(player, upgradeCost) then
+		toast(player, "Not enough gold!")
+		return false
+	end
+
+	local newLevel = upLevel + 1
+	local newGps = newLevel * baseGps
+	local baseValue = getNumAttr(activePm, "BaseValue", getNumAttr(activePm, "Value", 0))
+	local newValue = baseValue * newLevel
+	activePm:SetAttribute("UpgradeLevel", newLevel)
+	activePm:SetAttribute("GoldPerSec", newGps)
+	activePm:SetAttribute("Value", newValue)
+
+	if state.PlacedData then
+		local appearanceLevel = getNumAttr(activePm, "AppearanceLevel", getNumAttr(activePm, "MonsterLevel", 1))
+		state.PlacedData.MonsterLevel = appearanceLevel
+		state.PlacedData.AppearanceLevel = appearanceLevel
+		state.PlacedData.UpgradeLevel = newLevel
+		state.PlacedData.GoldPerSec = newGps
+		state.PlacedData.Value = newValue
+		state.PlacedData.LastTickUnix = os.time()
+	end
+
+	setPlacedMonsterHeadBillboardText(activePm)
+	refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
+	toast(player, "Upgrade successful!")
+	DataDirtyService.MarkDirty(player)
+	return true
+end
+
 local function revealPlacedMonsterPromptsFromPlatform(player: Player, slotIndex: number, now: number)
 	local m = slotStatesByUserId[player.UserId]
 	if type(m) ~= "table" then return end
@@ -1698,6 +2112,19 @@ updateUnlockPromptEnabled = function(player: Player, slotPart: BasePart)
 end
 
 function PlacementService.Init()
+	requestStealPlacedGoldRemote.OnServerEvent:Connect(function(player: Player)
+		PlacementService.TryStealGold(player)
+	end)
+
+	requestUpgradePlacedMonsterRemote.OnServerEvent:Connect(function(player: Player, slotIndex: any)
+		if type(slotIndex) ~= "number" then
+			warn(string.format("[UpgradeButtonDebug][Server] rejected non-number slotIndex player=%s value=%s", player.Name, tostring(slotIndex)))
+			return
+		end
+		warn(string.format("[UpgradeButtonDebug][Server] received player=%s slot=%d", player.Name, math.floor(slotIndex :: number)))
+		tryUpgradePlacedMonster(player, slotIndex :: number)
+	end)
+
 	local function setupPlayer(player: Player)
 		if placementInitStartedByUserId[player.UserId] then return end
 		placementInitStartedByUserId[player.UserId] = true
@@ -1755,74 +2182,44 @@ function PlacementService.Init()
 
 					if displayModel then
 						local dm = displayModel :: Model
+						dm:SetAttribute("OwnerUserId", player.UserId)
+						dm:SetAttribute("SlotIndex", slot.Index)
 						local clickPart = (dm:FindFirstChild("点击升级", true) :: BasePart?) or dm.PrimaryPart
 						if clickPart then
-							local surfaceGui = dm:FindFirstChildWhichIsA("SurfaceGui", true) :: SurfaceGui?
+							clickPart:SetAttribute("OwnerUserId", player.UserId)
+							clickPart:SetAttribute("SlotIndex", slot.Index)
+
+							local surfaceGui = clickPart:FindFirstChild("SurfaceGui") :: SurfaceGui?
+							if not (surfaceGui and surfaceGui:IsA("SurfaceGui")) then
+								surfaceGui = clickPart:FindFirstChildWhichIsA("SurfaceGui", true) :: SurfaceGui?
+							end
+							if not (surfaceGui and surfaceGui:IsA("SurfaceGui")) then
+								surfaceGui = dm:FindFirstChildWhichIsA("SurfaceGui", true) :: SurfaceGui?
+							end
 							if surfaceGui then
 								local badBtn = surfaceGui:FindFirstChild("AutoUpgradeButton")
 								if badBtn then badBtn:Destroy() end
-								surfaceGui.Active = false
+								surfaceGui.Active = true
+								surfaceGui:SetAttribute("OwnerUserId", player.UserId)
+								surfaceGui:SetAttribute("SlotIndex", slot.Index)
+
+								local upgradeButton = surfaceGui:FindFirstChild("ImageButton_升级按钮", true)
+								if upgradeButton and upgradeButton:IsA("GuiButton") then
+									local btn = upgradeButton :: GuiButton
+									btn.Active = true
+									btn.Visible = true
+									btn.Selectable = true
+									btn:SetAttribute("OwnerUserId", player.UserId)
+									btn:SetAttribute("SlotIndex", slot.Index)
+								else
+									warn(string.format("[UpgradeButtonDebug][Server] ImageButton_升级按钮 not found for player=%s slot=%d display=%s surface=%s", player.Name, slot.Index, dm:GetFullName(), surfaceGui:GetFullName()))
+								end
+							else
+								warn(string.format("[UpgradeButtonDebug][Server] SurfaceGui not found for player=%s slot=%d display=%s clickPart=%s", player.Name, slot.Index, dm:GetFullName(), clickPart:GetFullName()))
 							end
 
 							local oldCD = clickPart:FindFirstChildWhichIsA("ClickDetector") :: ClickDetector?
 							if oldCD then oldCD:Destroy() end
-
-							local clickDetector = Instance.new("ClickDetector") :: ClickDetector
-							clickDetector.MaxActivationDistance = 32
-							clickDetector.Parent = clickPart
-
-							local bindKey = "BoundForUser_" .. tostring(player.UserId)
-							if not clickDetector:GetAttribute(bindKey) then
-								clickDetector:SetAttribute(bindKey, true)
-								
-								clickDetector.MouseClick:Connect(function(playerWhoClicked)
-									if playerWhoClicked ~= player then return end
-									
-									local stateMap = slotStatesByUserId[player.UserId]
-									if type(stateMap) ~= "table" then return end
-									local safeMap = stateMap :: {[number]: SlotState}
-									local state = safeMap[slot.Index]
-									
-									if not state then return end
-									local pm = state.PlacedMonster
-									if not pm or not pm.Parent then 
-										toast(player, "Place a monster before upgrading!")
-										return 
-									end
-									
-									local activePm = pm :: BasePart
-									local upLevel = getNumAttr(activePm, "UpgradeLevel", 1)
-									local baseGps = getNumAttr(activePm, "BaseGoldPerSec", getNumAttr(activePm, "GoldPerSec", 0))
-									local upgradeCost = upLevel * 100 * baseGps
-									
-									if PlayerData.TrySpendGold(player, upgradeCost) then
-										local newLevel = upLevel + 1
-										local newGps = newLevel * baseGps
-										local baseValue = getNumAttr(activePm, "BaseValue", getNumAttr(activePm, "Value", 0))
-										local newValue = baseValue * newLevel
-										activePm:SetAttribute("UpgradeLevel", newLevel)
-										activePm:SetAttribute("GoldPerSec", newGps)
-										activePm:SetAttribute("Value", newValue)
-
-										if state.PlacedData then
-											local appearanceLevel = getNumAttr(activePm, "AppearanceLevel", getNumAttr(activePm, "MonsterLevel", 1))
-											state.PlacedData.MonsterLevel = appearanceLevel
-											state.PlacedData.AppearanceLevel = appearanceLevel
-											state.PlacedData.UpgradeLevel = newLevel
-											state.PlacedData.GoldPerSec = newGps
-											state.PlacedData.Value = newValue
-											state.PlacedData.LastTickUnix = os.time()
-										end
-										
-										setPlacedMonsterHeadBillboardText(activePm)
-										refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
-										toast(player, "Upgrade successful!")
-										DataDirtyService.MarkDirty(player)
-									else
-										toast(player, "Not enough gold!")
-									end
-								end)
-							end
 						end
 					end
 				end
@@ -1879,12 +2276,21 @@ function PlacementService.Init()
 		setupPlayer(player)
 	end)
 
-	Players.PlayerRemoving:Connect(function(_player)
+	Players.PlayerRemoving:Connect(function(player)
+		settlePendingSteal(player, "player_removing")
+		lastStealRequestAtByUserId[player.UserId] = nil
+		lastStealAvailabilityByUserId[player.UserId] = nil
+		activeStealWarningByOwnerUserId[player.UserId] = nil
 	end)
 
 	local acc = 0
 	local unlockAcc = 0
 	RunService.Heartbeat:Connect(function(dt)
+		-- 偷取按钮/警告需要跟随玩家进入、离开其他玩家 Home 立即刷新，
+		-- 不要被下面每秒一次的金币产出循环卡住。
+		refreshStealAvailabilityAndWarnings()
+		processPendingStealSettlements()
+
 		acc += dt
 		unlockAcc += dt
 
@@ -2085,8 +2491,12 @@ function PlacementService.ApplyLoaded(player: Player, loadedSlots: {PersistedSlo
 end
 
 function PlacementService.Cleanup(player: Player)
+	settlePendingSteal(player, "cleanup")
 	slotStatesByUserId[player.UserId] = nil
 	placementInitStartedByUserId[player.UserId] = nil
+	lastStealRequestAtByUserId[player.UserId] = nil
+	lastStealAvailabilityByUserId[player.UserId] = nil
+	activeStealWarningByOwnerUserId[player.UserId] = nil
 end
 
 function PlacementService.TryHandlePromptInteraction(player: Player, promptInstance: Instance): boolean
@@ -2123,6 +2533,7 @@ function PlacementService.Clear(player: Player)
 	local m = slotStatesByUserId[player.UserId]
 	if type(m) ~= "table" then return end
 	local safeM = m :: {[number]: SlotState}
+	activeStealWarningByOwnerUserId[player.UserId] = nil
 	
 	for i = 1, 30 do
 		local st = safeM[i]

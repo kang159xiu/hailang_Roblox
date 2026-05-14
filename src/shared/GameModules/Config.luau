@@ -67,12 +67,12 @@ Config.WALK_SPEED_PER_UPGRADE = 1
 
 -- 速度升级花费：level * (level * 50)
 function Config.GetSpeedUpgradeCost(level: number): number
-	return level * (level * 400)
+	return level * (level * 500)
 end
 
 -- 攻击力升级花费：level * (level * 100)
 function Config.GetAttackUpgradeCost(level: number): number
-	return level * (level * 2000)
+	return level * (level * 500)
 end
 
 -- 攻击力每次升级增加多少（你确认：+10/级）

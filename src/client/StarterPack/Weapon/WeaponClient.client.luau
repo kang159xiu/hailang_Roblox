@@ -326,6 +326,55 @@ local function collectAliveMonstersInRange(): {AttackTarget}
 	return targets
 end
 
+local function collectAlivePlayersInRange(): {AttackTarget}
+	local targets: {AttackTarget} = {}
+	local hrp = getCharacterRootPart()
+	if not hrp then
+		return targets
+	end
+
+	local maxDist = getAttackRangeStuds()
+	local maxDist2 = maxDist * maxDist
+
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player then
+			local character = otherPlayer.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local targetRoot = character and character:FindFirstChild("HumanoidRootPart")
+
+			if humanoid and humanoid.Health > 0 and targetRoot and targetRoot:IsA("BasePart") then
+				local offset = targetRoot.Position - hrp.Position
+				local dist2 = offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z
+				if dist2 <= maxDist2 then
+					table.insert(targets, {
+						Instance = targetRoot,
+						DistanceSquared = dist2,
+					})
+				end
+			end
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		return a.DistanceSquared < b.DistanceSquared
+	end)
+
+	return targets
+end
+
+local function collectAttackTargetsInRange(): {AttackTarget}
+	local targets = collectAliveMonstersInRange()
+	for _, playerTarget in ipairs(collectAlivePlayersInRange()) do
+		table.insert(targets, playerTarget)
+	end
+
+	table.sort(targets, function(a, b)
+		return a.DistanceSquared < b.DistanceSquared
+	end)
+
+	return targets
+end
+
 local function getTargetFromScreenCenter(): Instance?
 	local camera = workspace.CurrentCamera
 	if not camera then
@@ -420,9 +469,9 @@ local function tryAttack(useFallbackTargeting: boolean?)
 	task.delay(0.2, function()
 		if not isEquipped() then return end
 		
-		local nearbyTargets = collectAliveMonstersInRange()
+		local nearbyTargets = collectAttackTargetsInRange()
 		if #nearbyTargets > 0 then
-			-- 自动攻击命中最近的怪物。服务端仍会再次做距离和目标合法性校验。
+			-- 自动攻击命中最近的有效目标（怪物或其他玩家）。服务端仍会再次做距离和目标合法性校验。
 			damageRemote:FireServer(nearbyTargets[1].Instance)
 		elseif useFallbackTargeting == true then
 			-- 兜底检测（以防找不到怪物文件夹）
@@ -468,8 +517,8 @@ local function startAutoAttackLoop()
 					break
 				end
 
-				-- 只有附近确实有活怪时才挥刀，避免玩家空挥和无意义 Remote 请求。
-				if not isAttacking and #collectAliveMonstersInRange() > 0 then
+				-- 只有附近确实有活怪或其他玩家时才挥刀，避免玩家空挥和无意义 Remote 请求。
+				if not isAttacking and #collectAttackTargetsInRange() > 0 then
 					tryAttack(false)
 				end
 			end

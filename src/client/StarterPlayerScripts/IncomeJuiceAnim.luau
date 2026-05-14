@@ -1,27 +1,66 @@
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local requestUpgradePlacedMonster = remotes:WaitForChild("RequestUpgradePlacedMonster") :: RemoteEvent
 
 -- 动画参数
 local shrinkInfo = TweenInfo.new(0.1, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 local bounceInfo = TweenInfo.new(0.3, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
 
 -- 1. 负责 UI 点击缩放动画
+local boundButtons: {[Instance]: boolean} = {}
+
+local function getSlotIndexFrom(instance: Instance): number?
+	local current: Instance? = instance
+	while current do
+		local slotIndex = current:GetAttribute("SlotIndex")
+		if type(slotIndex) == "number" then
+			return slotIndex :: number
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function bindUpgradeButton(button: GuiButton)
+	if boundButtons[button] then
+		return
+	end
+	boundButtons[button] = true
+
+	local ancestorGui = button:FindFirstAncestorWhichIsA("SurfaceGui")
+	local surfaceGui = if ancestorGui and ancestorGui:IsA("SurfaceGui") then ancestorGui :: SurfaceGui else nil
+	local bg: GuiObject = button
+	if surfaceGui then
+		local bgCandidate = surfaceGui:FindFirstChild("升级背景", true)
+		if bgCandidate and bgCandidate:IsA("GuiObject") then
+			bg = bgCandidate :: GuiObject
+		end
+	end
+	local originalSize = bg.Size
+	local targetSize = UDim2.new(originalSize.X.Scale * 0.8, originalSize.X.Offset * 0.8, originalSize.Y.Scale * 0.8, originalSize.Y.Offset * 0.8)
+
+	button.Activated:Connect(function()
+		local slotIndex = getSlotIndexFrom(button)
+		if not slotIndex then
+			return
+		end
+
+		TweenService:Create(bg, shrinkInfo, {Size = targetSize}):Play()
+		task.wait(0.1)
+		TweenService:Create(bg, bounceInfo, {Size = originalSize}):Play()
+
+		requestUpgradePlacedMonster:FireServer(slotIndex)
+	end)
+end
+
 local function bindClicker(part: BasePart)
-	local clickDetector = part:WaitForChild("ClickDetector", 5) :: ClickDetector
-	local surfaceGui = part:WaitForChild("SurfaceGui", 5) :: SurfaceGui
-	local bg = surfaceGui and surfaceGui:WaitForChild("升级背景", 5) :: GuiObject
-
-	if clickDetector and bg then
-		local originalSize = bg.Size
-		local targetSize = UDim2.new(originalSize.X.Scale * 0.8, 0, originalSize.Y.Scale * 0.8, 0)
-
-		clickDetector.MouseClick:Connect(function()
-			-- 缩小
-			TweenService:Create(bg, shrinkInfo, {Size = targetSize}):Play()
-			task.wait(0.1)
-			-- 弹回原大小
-			TweenService:Create(bg, bounceInfo, {Size = originalSize}):Play()
-		end)
+	local surfaceGui = part:WaitForChild("SurfaceGui", 5) :: SurfaceGui?
+	local button = surfaceGui and surfaceGui:FindFirstChild("ImageButton_升级按钮", true)
+	if button and button:IsA("GuiButton") then
+		bindUpgradeButton(button :: GuiButton)
 	end
 end
 
@@ -63,6 +102,18 @@ end
 -- 绑定现有的和未来动态生成的组件
 for _, part in ipairs(CollectionService:GetTagged("Anim_UpgradeClicker")) do bindClicker(part) end
 CollectionService:GetInstanceAddedSignal("Anim_UpgradeClicker"):Connect(bindClicker)
+
+for _, descendant in ipairs(workspace:GetDescendants()) do
+	if descendant.Name == "ImageButton_升级按钮" and descendant:IsA("GuiButton") then
+		bindUpgradeButton(descendant :: GuiButton)
+	end
+end
+
+workspace.DescendantAdded:Connect(function(descendant)
+	if descendant.Name == "ImageButton_升级按钮" and descendant:IsA("GuiButton") then
+		bindUpgradeButton(descendant :: GuiButton)
+	end
+end)
 
 for _, model in ipairs(CollectionService:GetTagged("Anim_IncomeDisplay")) do bindDisplay(model) end
 CollectionService:GetInstanceAddedSignal("Anim_IncomeDisplay"):Connect(bindDisplay)

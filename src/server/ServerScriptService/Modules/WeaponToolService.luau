@@ -389,13 +389,13 @@ function WeaponToolService.Init()
 		hookPlayer(p)
 	end
 
-	-- [修改内容] 监听玩家碰触 "home" 标签的 Part -> 收起武器
+	-- [修改内容] 监听玩家碰触 "home" 标签的 Part。
+	-- 新规则：进入 home 不再强制收起武器，只保留 home 高亮状态。
 	local function onHomePartAdded(part)
 		part.Touched:Connect(function(hit)
 			local player = Players:GetPlayerFromCharacter(hit.Parent)
 			if player then
 				HomeService.SetPlayerHomeGlowColor(player, true)
-				WeaponToolService.UnequipWeapon(player)
 			end
 		end)
 	end
