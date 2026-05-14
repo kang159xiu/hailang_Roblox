@@ -1907,51 +1907,55 @@ end
 
 local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boolean
 	if player:GetAttribute("__DataLoaded") ~= true then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: data not loaded player=%s", player.Name))
 		return false
 	end
 
 	local idx = math.floor(slotIndex)
 	if idx < 1 then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: invalid slot player=%s slot=%s", player.Name, tostring(slotIndex)))
 		return false
 	end
 
 	local home = HomeService.GetHome(player)
 	if not home then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: home not found player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local slot = HomeService.GetSlot(player, idx)
 	if not slot then
-		return false
-	end
-
-	local interactionPart = slot.Collector or slot.Part
-	if not isPlayerWithinInteractionDistance(player, interactionPart, 32) then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: slot not found player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local stateMap = slotStatesByUserId[player.UserId]
 	if type(stateMap) ~= "table" then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: state map missing player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local safeMap = stateMap :: {[number]: SlotState}
 	local state = safeMap[idx]
 	if not state then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: slot state missing player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local pm = state.PlacedMonster
 	if not pm or not pm.Parent then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: placed monster missing player=%s slot=%d", player.Name, idx))
 		toast(player, "Place a monster before upgrading!")
 		return false
 	end
 
 	local activePm = pm :: BasePart
 	if activePm:GetAttribute("IsPlacedMonster") ~= true then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: target is not placed monster player=%s slot=%d monster=%s", player.Name, idx, activePm:GetFullName()))
 		return false
 	end
 	if getNumAttr(activePm, "OwnerUserId", -1) ~= player.UserId then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: owner mismatch player=%s slot=%d owner=%d monster=%s", player.Name, idx, getNumAttr(activePm, "OwnerUserId", -1), activePm:GetFullName()))
 		return false
 	end
 
@@ -1960,6 +1964,7 @@ local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boole
 	local upgradeCost = upLevel * 100 * baseGps
 
 	if not PlayerData.TrySpendGold(player, upgradeCost) then
+		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: not enough gold player=%s slot=%d cost=%d level=%d baseGps=%d", player.Name, idx, upgradeCost, upLevel, baseGps))
 		toast(player, "Not enough gold!")
 		return false
 	end
@@ -1986,6 +1991,7 @@ local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boole
 	refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
 	toast(player, "Upgrade successful!")
 	DataDirtyService.MarkDirty(player)
+	warn(string.format("[UpgradeButtonDebug][Server] upgrade success player=%s slot=%d level=%d cost=%d newGps=%d", player.Name, idx, newLevel, upgradeCost, newGps))
 	return true
 end
 
@@ -2188,6 +2194,7 @@ function PlacementService.Init()
 						if clickPart then
 							clickPart:SetAttribute("OwnerUserId", player.UserId)
 							clickPart:SetAttribute("SlotIndex", slot.Index)
+							clickPart.CanQuery = true
 
 							local surfaceGui = clickPart:FindFirstChild("SurfaceGui") :: SurfaceGui?
 							if not (surfaceGui and surfaceGui:IsA("SurfaceGui")) then
