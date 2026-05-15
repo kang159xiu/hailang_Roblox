@@ -127,6 +127,15 @@ type PendingStealSession = {
 
 local pendingStealByThiefUserId: {[number]: PendingStealSession} = {}
 
+local function getStealAmountForPlayer(player: Player): number
+	local stats = PlayerData.Get(player)
+	local stealLevel = math.max(0, math.floor(tonumber((stats :: any).StealLevel) or 0))
+	if Config.GetStealAmountForLevel then
+		return math.max(0, math.floor(tonumber(Config.GetStealAmountForLevel(stealLevel)) or STEAL_AMOUNT))
+	end
+	return math.max(0, math.floor((Config.STEAL_AMOUNT_BASE or STEAL_AMOUNT) + stealLevel * (Config.STEAL_AMOUNT_PER_UPGRADE or 10)))
+end
+
 -- While placed monsters are producing, UnclaimedGold changes every second.
 local lastDirtyPulseUnixByUserId: {[number]: number} = {}
 
@@ -1191,7 +1200,12 @@ function PlacementService.TryStealGold(thief: Player): number
 		return 0
 	end
 
-	local stolen = math.min(STEAL_AMOUNT, un)
+	local stealAmount = getStealAmountForPlayer(thief)
+	if stealAmount <= 0 then
+		return 0
+	end
+
+	local stolen = math.min(stealAmount, un)
 	local remaining = un - stolen
 	local nowUnix = os.time()
 
@@ -1905,6 +1919,104 @@ local function payoutIfAny(player: Player, slotPart: BasePart)
 	end)
 end
 
+local function isPlacedMonsterForSlot(candidate: Instance, player: Player, slotIndex: number): boolean
+	if not candidate:IsA("BasePart") then
+		return false
+	end
+	local part = candidate :: BasePart
+	return part.Parent ~= nil
+		and part:GetAttribute("IsPlacedMonster") == true
+		and getNumAttr(part, "OwnerUserId", -1) == player.UserId
+		and math.floor(getNumAttr(part, "SlotIndex", -1)) == slotIndex
+end
+
+local function findExistingPlacedMonsterForSlot(player: Player, slotIndex: number, slotPart: BasePart, homeRoot: Instance): BasePart?
+	local searchRoots: {Instance} = {}
+	if slotPart.Parent then
+		table.insert(searchRoots, slotPart.Parent :: Instance)
+	end
+	if homeRoot ~= slotPart.Parent then
+		table.insert(searchRoots, homeRoot)
+	end
+
+	local searched: {[Instance]: boolean} = {}
+	for _, root in ipairs(searchRoots) do
+		if searched[root] then
+			continue
+		end
+		searched[root] = true
+
+		if isPlacedMonsterForSlot(root, player, slotIndex) then
+			return root :: BasePart
+		end
+
+		for _, descendant in ipairs(root:GetDescendants()) do
+			if isPlacedMonsterForSlot(descendant, player, slotIndex) then
+				return descendant :: BasePart
+			end
+		end
+	end
+
+	return nil
+end
+
+local function rebuildPlacedMonsterForSlot(player: Player, slotPart: BasePart, state: SlotState): BasePart?
+	local pData = state.PlacedData
+	if not pData then
+		return nil
+	end
+
+	local nowUnix = os.time()
+	local appearanceLevel = getAppearanceLevelFromPlacedData(pData)
+	pData.MonsterLevel = appearanceLevel
+	pData.AppearanceLevel = appearanceLevel
+	pData.LastTickUnix = nowUnix
+
+	local placed = createPlacedMonsterPart(
+		player,
+		slotPart,
+		appearanceLevel,
+		math.floor(pData.Value),
+		math.floor(pData.GoldPerSec),
+		math.floor(pData.UnclaimedGold),
+		nowUnix
+	)
+
+	local activePm = placed :: BasePart
+	activePm:SetAttribute("MonsterLevel", appearanceLevel)
+	activePm:SetAttribute("AppearanceLevel", appearanceLevel)
+	activePm:SetAttribute("UpgradeLevel", pData.UpgradeLevel or 1)
+	activePm:SetAttribute("BaseValue", pData.BaseValue or getNumAttr(activePm, "Value", 0))
+	activePm:SetAttribute("BaseGoldPerSec", pData.BaseGoldPerSec or getNumAttr(activePm, "GoldPerSec", 0))
+	setPlacedMonsterHeadBillboardText(activePm)
+
+	state.PlacedMonster = activePm
+	DataDirtyService.MarkDirty(player, 5)
+	return activePm
+end
+
+local function resolvePlacedMonsterForUpgrade(player: Player, slotIndex: number, slotPart: BasePart, homeRoot: Instance, state: SlotState): BasePart?
+	local pm = state.PlacedMonster
+	if pm and pm.Parent and isPlacedMonsterForSlot(pm, player, slotIndex) then
+		return pm :: BasePart
+	end
+
+	local existing = findExistingPlacedMonsterForSlot(player, slotIndex, slotPart, homeRoot)
+	if existing then
+		state.PlacedMonster = existing
+		warn(string.format("[UpgradeButtonDebug][Server] recovered placed monster reference player=%s slot=%d monster=%s", player.Name, slotIndex, existing:GetFullName()))
+		return existing
+	end
+
+	local rebuilt = rebuildPlacedMonsterForSlot(player, slotPart, state)
+	if rebuilt then
+		warn(string.format("[UpgradeButtonDebug][Server] rebuilt placed monster for upgrade player=%s slot=%d monster=%s", player.Name, slotIndex, rebuilt:GetFullName()))
+		return rebuilt
+	end
+
+	return nil
+end
+
 local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boolean
 	if player:GetAttribute("__DataLoaded") ~= true then
 		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: data not loaded player=%s", player.Name))
@@ -1942,7 +2054,7 @@ local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boole
 		return false
 	end
 
-	local pm = state.PlacedMonster
+	local pm = resolvePlacedMonsterForUpgrade(player, idx, slot.Part, home.HomeRoot, state)
 	if not pm or not pm.Parent then
 		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: placed monster missing player=%s slot=%d", player.Name, idx))
 		toast(player, "Place a monster before upgrading!")
@@ -2122,12 +2234,15 @@ function PlacementService.Init()
 		PlacementService.TryStealGold(player)
 	end)
 
-	requestUpgradePlacedMonsterRemote.OnServerEvent:Connect(function(player: Player, slotIndex: any)
+	requestUpgradePlacedMonsterRemote.OnServerEvent:Connect(function(player: Player, slotIndex: any, clickedOwnerUserId: any)
 		if type(slotIndex) ~= "number" then
 			warn(string.format("[UpgradeButtonDebug][Server] rejected non-number slotIndex player=%s value=%s", player.Name, tostring(slotIndex)))
 			return
 		end
-		warn(string.format("[UpgradeButtonDebug][Server] received player=%s slot=%d", player.Name, math.floor(slotIndex :: number)))
+		if type(clickedOwnerUserId) ~= "number" or math.floor(clickedOwnerUserId :: number) ~= player.UserId then
+			return
+		end
+		warn(string.format("[UpgradeButtonDebug][Server] received player=%s slot=%d owner=%d", player.Name, math.floor(slotIndex :: number), math.floor(clickedOwnerUserId :: number)))
 		tryUpgradePlacedMonster(player, slotIndex :: number)
 	end)
 

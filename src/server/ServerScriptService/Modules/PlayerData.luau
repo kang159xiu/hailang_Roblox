@@ -18,6 +18,9 @@ export type PlayerStats = {
 	-- 携带怪升级：每级 +1 最大携带数量（默认 1，最多 5）
 	CarryLevel: number,
 
+	-- 偷取金币数量升级：每级提升每次点击偷取数量
+	StealLevel: number,
+
 	-- 家园等级：1~3（对应 1级房屋 / 2级房屋 / 3级房屋）
 	HomeLevel: number,
 
@@ -36,6 +39,7 @@ export type PersistedPlayerData = {
 	AttackLevel: number,
 	HealthLevel: number,
 	CarryLevel: number,
+	StealLevel: number,
 	HomeLevel: number,
 	WeaponLevel: number,
 	EquippedWeaponLevel: number,
@@ -67,6 +71,7 @@ local function getOrCreate(player: Player): PlayerStats
 		AttackLevel = 0,
 		HealthLevel = 0,
 		CarryLevel = 0,
+		StealLevel = 0,
 
 		HomeLevel = 1,
 
@@ -323,6 +328,16 @@ function PlayerData.AddCarryLevel(player: Player, amount: number)
 	DataDirtyService.MarkDirty(player)
 end
 
+function PlayerData.AddStealLevel(player: Player, amount: number)
+	local stats = getOrCreate(player)
+	stats.StealLevel += amount
+	if stats.StealLevel < 0 then
+		stats.StealLevel = 0
+	end
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player)
+end
+
 -- leaderstats（左上角金币显示我们会用 UI；leaderstats 也保留，方便调试）
 local function setupLeaderstats(player: Player)
 	local folder = Instance.new("Folder")
@@ -354,9 +369,11 @@ local function syncLeaderstatsAndAttributes(player: Player)
 	player:SetAttribute("AttackLevel", stats.AttackLevel)
 	player:SetAttribute("HealthLevel", stats.HealthLevel)
 	player:SetAttribute("CarryLevel", stats.CarryLevel)
+	player:SetAttribute("StealLevel", stats.StealLevel)
 	player:SetAttribute("HomeLevel", stats.HomeLevel)
 	player:SetAttribute("WeaponLevel", stats.WeaponLevel)
 	player:SetAttribute("EquippedWeaponLevel", stats.EquippedWeaponLevel)
+	player:SetAttribute("OwnedWeaponLevels", table.concat(stats.OwnedWeaponLevels, ","))
 end
 
 Players.PlayerAdded:Connect(function(player)
@@ -385,6 +402,7 @@ function PlayerData.Export(player: Player): PersistedPlayerData
 		AttackLevel = math.floor(stats.AttackLevel),
 		HealthLevel = math.floor(stats.HealthLevel),
 		CarryLevel = math.floor(stats.CarryLevel),
+		StealLevel = math.floor(stats.StealLevel),
 		HomeLevel = math.floor(stats.HomeLevel),
 		WeaponLevel = math.floor(stats.WeaponLevel),
 		EquippedWeaponLevel = math.floor(stats.EquippedWeaponLevel),
@@ -421,6 +439,7 @@ function PlayerData.ApplyLoaded(player: Player, loaded: PersistedPlayerData)
 	stats.AttackLevel = math.max(0, math.floor(tonumber(loaded.AttackLevel) or stats.AttackLevel))
 	stats.HealthLevel = math.max(0, math.floor(tonumber(loaded.HealthLevel) or stats.HealthLevel))
 	stats.CarryLevel = math.max(0, math.floor(tonumber((loaded :: any).CarryLevel) or stats.CarryLevel))
+	stats.StealLevel = math.max(0, math.floor(tonumber((loaded :: any).StealLevel) or stats.StealLevel))
 
 	local hl = math.floor(tonumber(loaded.HomeLevel) or stats.HomeLevel)
 	stats.HomeLevel = math.clamp(hl, 1, 3)
@@ -451,6 +470,7 @@ function PlayerData.ResetData(player: Player)
 	stats.AttackLevel = 0
 	stats.HealthLevel = 0
 	stats.CarryLevel = 0
+	stats.StealLevel = 0
 	stats.HomeLevel = 1
 	stats.WeaponLevel = 1
 	stats.EquippedWeaponLevel = 1

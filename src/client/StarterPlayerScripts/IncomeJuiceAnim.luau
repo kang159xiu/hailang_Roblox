@@ -50,6 +50,36 @@ local function getSlotIndexFrom(instance: Instance): number?
 	return nil
 end
 
+local function getOwnerUserIdOnAncestry(instance: Instance?): number?
+	local current: Instance? = instance
+	while current do
+		local ownerUserId = current:GetAttribute("OwnerUserId")
+		if type(ownerUserId) == "number" then
+			return ownerUserId :: number
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function getOwnerUserIdFrom(instance: Instance): number?
+	local ownerUserId = getOwnerUserIdOnAncestry(instance)
+	if ownerUserId then
+		return ownerUserId
+	end
+
+	local ancestorGui = instance:FindFirstAncestorWhichIsA("SurfaceGui")
+	if ancestorGui and ancestorGui:IsA("SurfaceGui") then
+		local surfaceGui = ancestorGui :: SurfaceGui
+		local adorneeOwnerUserId = getOwnerUserIdOnAncestry(surfaceGui.Adornee)
+		if adorneeOwnerUserId then
+			return adorneeOwnerUserId
+		end
+	end
+
+	return nil
+end
+
 local function playUpgradeButtonAnim(bg: GuiObject, originalSize: UDim2, targetSize: UDim2)
 	TweenService:Create(bg, shrinkInfo, {Size = targetSize}):Play()
 	task.wait(0.1)
@@ -69,12 +99,17 @@ local function fireUpgradeRequest(button: GuiButton, bg: GuiObject, originalSize
 		return
 	end
 
+	local ownerUserId = getOwnerUserIdFrom(button)
+	if type(ownerUserId) ~= "number" or math.floor(ownerUserId) ~= localPlayer.UserId then
+		return
+	end
+
 	task.spawn(function()
 		playUpgradeButtonAnim(bg, originalSize, targetSize)
 	end)
 
-	warn(string.format("[UpgradeButtonDebug][Client] fire source=%s slot=%d button=%s", source, math.floor(slotIndex), button:GetFullName()))
-	requestUpgradePlacedMonster:FireServer(slotIndex)
+	warn(string.format("[UpgradeButtonDebug][Client] fire source=%s slot=%d owner=%d button=%s", source, math.floor(slotIndex), math.floor(ownerUserId), button:GetFullName()))
+	requestUpgradePlacedMonster:FireServer(slotIndex, ownerUserId)
 end
 
 local function bindUpgradeButton(button: GuiButton)
@@ -113,13 +148,52 @@ local function bindUpgradeButton(button: GuiButton)
 	end)
 end
 
+local function isUpgradeSearchBoundary(instance: Instance): boolean
+	-- 不能爬到 Workspace 后全局递归 FindFirstChild，否则点到“安全区/地面”时也会拿到第一个升级按钮，导致槽位错乱。
+	return instance == workspace
+		or instance:IsA("WorldRoot")
+		or instance.Name == "HOME"
+		or instance.Name:match("^HOME%d+") ~= nil
+end
+
+local function isValidUpgradeButtonForHit(button: GuiButton, hitInstance: Instance?): boolean
+	if not (button.Visible and button.Active) then
+		return false
+	end
+
+	local buttonSlotIndex = getSlotIndexFrom(button)
+	if not buttonSlotIndex then
+		return false
+	end
+
+	local hitSlotIndex = getSlotIndexOnAncestry(hitInstance)
+	if hitSlotIndex and math.floor(hitSlotIndex) ~= math.floor(buttonSlotIndex) then
+		return false
+	end
+
+	return true
+end
+
 local function findUpgradeButtonNearHit(hitInstance: Instance?): GuiButton?
 	local current: Instance? = hitInstance
 	while current do
-		local button = current:FindFirstChild("ImageButton_升级按钮", true)
-		if button and button:IsA("GuiButton") and button.Visible and button.Active then
-			return button :: GuiButton
+		if isUpgradeSearchBoundary(current) then
+			break
 		end
+
+		local directButton = current:FindFirstChild("ImageButton_升级按钮")
+		if directButton and directButton:IsA("GuiButton") and isValidUpgradeButtonForHit(directButton :: GuiButton, hitInstance) then
+			return directButton :: GuiButton
+		end
+
+		-- 只在带 SlotIndex 的局部槽位/收益显示节点里递归查找，避免跨槽或跨 Home 全局误匹配。
+		if current:GetAttribute("SlotIndex") ~= nil or current.Name == "收益显示" or current.Name == "点击升级" then
+			local nestedButton = current:FindFirstChild("ImageButton_升级按钮", true)
+			if nestedButton and nestedButton:IsA("GuiButton") and isValidUpgradeButtonForHit(nestedButton :: GuiButton, hitInstance) then
+				return nestedButton :: GuiButton
+			end
+		end
+
 		current = current.Parent
 	end
 	return nil

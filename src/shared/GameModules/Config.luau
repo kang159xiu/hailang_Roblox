@@ -156,6 +156,32 @@ function Config.GetCarryMax(carryLevel: number): number
 	return math.clamp(v, Config.CARRY_MAX_BASE, Config.CARRY_MAX_CAP)
 end
 
+-- =====================
+-- 偷取金币数量升级（无限升级）
+-- =====================
+
+-- 默认每次点击偷取 50 金币；每升 1 级，每次偷取数量 +10。
+Config.STEAL_AMOUNT_BASE = 50
+Config.STEAL_AMOUNT_PER_UPGRADE = 10
+
+-- 第一次升级费用 2000；之后每次 = 上一次 * 1.5，并向下取整。
+Config.STEAL_UPGRADE_BASE_COST = 2000
+Config.STEAL_UPGRADE_COST_MULTIPLIER = 1.5
+
+function Config.GetStealUpgradeCost(level: number): number
+	level = math.max(1, math.floor(tonumber(level) or 1))
+	local baseCost = tonumber(Config.STEAL_UPGRADE_BASE_COST) or 2000
+	local multiplier = tonumber(Config.STEAL_UPGRADE_COST_MULTIPLIER) or 1.5
+	return math.floor(baseCost * (multiplier ^ (level - 1)))
+end
+
+function Config.GetStealAmountForLevel(level: number): number
+	level = math.max(0, math.floor(tonumber(level) or 0))
+	local baseAmount = tonumber(Config.STEAL_AMOUNT_BASE) or 50
+	local perUpgrade = tonumber(Config.STEAL_AMOUNT_PER_UPGRADE) or 10
+	return math.max(0, math.floor(baseAmount + level * perUpgrade))
+end
+
 -- 升级商店每项升级的展示图标。
 -- 位置：StarterGui.ShopsUI.升级商店Window.RowTemplate.ImageLabel
 -- 填写方式：把对应升级类型右侧的 rbxassetid://0 改成你的图片 ID，例如 "rbxassetid://1234567890"。
@@ -164,6 +190,7 @@ Config.UPGRADE_SHOP_ICON_BY_TYPE = {
 	Speed = "rbxassetid://104534762878172", -- 速度升级图标
 	Health = "rbxassetid://104862583990197", -- 跳跃升级图标（兼容旧 Health 类型）
 	Carry = "rbxassetid://81401681168713", -- 背包容量升级图标
+	Steal = "rbxassetid://0", -- 偷取金币数量升级图标
 }
 
 -- 怪头顶信息显示距离（studs）：距离远只显示“倒计时”
@@ -203,7 +230,7 @@ Config.WEAPON_IMAGE_ID_BY_LEVEL = {
 	}
 
 	-- =====================
-	-- 怪（1~30级）
+	-- 怪（1~30级）血量
 	-- =====================
 
 Config.MONSTER_HP_BY_LEVEL = {
@@ -237,8 +264,8 @@ Config.ZONE_MONSTER_WEIGHTS = {
 	[6]  = {0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0},
 	[7]  = {0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0},
 	[8]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0},
-	[9]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0},
-	[10] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,90,80,60,50,10},
+	[9]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,10,5,5,0},
+	[10] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,90,80,20,10,5},
 }
 
 -- =====================
@@ -292,10 +319,10 @@ Config.WEAPON_PRICE_BY_LEVEL = {
 	100 * 10^8,     -- 15亿
 	300 * 10^8,     -- 30亿
 	600 * 10^8,     -- 60亿
-	1000 * 10^8,     -- 100亿
-	2000 * 10^8,     -- 200亿
-	4000 * 10^8,     -- 400亿
-	8000 * 10^8,    -- 800亿
+	1000 * 10^10,     -- 100亿
+	2000 * 10^10,     -- 200亿
+	4000 * 10^15,     -- 400亿
+	800 * 10^21,    -- 800亿
 }
 
 -- 技能（18/19/20）固定伤害 & 冷却

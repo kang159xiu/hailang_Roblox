@@ -343,6 +343,7 @@ local UPGRADE_TEMPLATE_NAME_BY_TYPE = {
 	Speed = "速度升级",
 	Health = "HP升级",
 	Carry = "拿取个数升级",
+	Steal = "偷取升级",
 }
 
 local UPGRADE_TEMPLATE_NAME_SET: {[string]: boolean} = {}
@@ -386,6 +387,67 @@ local function clearUpgradeRows()
 		if child:IsA("GuiObject") and not UPGRADE_TEMPLATE_NAME_SET[child.Name] and child.Name ~= "RowTemplate" and not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
+	end
+end
+
+local function updateUpgradeListCanvasSize()
+	if upgradeList and upgradeList:IsA("ScrollingFrame") then
+		local layout = upgradeList:FindFirstChildWhichIsA("UIListLayout")
+		if layout then
+			upgradeList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+		end
+	end
+end
+
+local function findUpgradePurchaseButton(row: GuiObject): GuiButton?
+	-- Studio 模板当前叫“升级按钮”，但这里保留多个常见命名兜底，避免 UI 改名后点击链路静默失效。
+	local candidateNames = { "升级按钮", "ImageButton_升级按钮", "UpgradeButton", "BuyButton", "PurchaseButton" }
+	for _, buttonName in ipairs(candidateNames) do
+		local found = row:FindFirstChild(buttonName, true)
+		if found and found:IsA("GuiButton") then
+			return found :: GuiButton
+		end
+	end
+
+	for _, descendant in ipairs(row:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			local lowerName = string.lower(descendant.Name)
+			if string.find(descendant.Name, "升级") or string.find(lowerName, "upgrade") or string.find(lowerName, "buy") or string.find(lowerName, "purchase") then
+				return descendant :: GuiButton
+			end
+		end
+	end
+
+	return nil
+end
+
+local function bindUpgradePurchaseButton(upBtn: GuiButton, upgradeType: string)
+	local fireLocked = false
+	local function fireUpgradePurchase(source: string)
+		if fireLocked then
+			return
+		end
+		fireLocked = true
+		warn(string.format("[UpgradeShopDebug][Client] fire type=%s source=%s button=%s", upgradeType, source, upBtn:GetFullName()))
+		requestPurchaseUpgrade:FireServer(upgradeType)
+		task.delay(0.25, function()
+			fireLocked = false
+		end)
+	end
+
+	upBtn.Activated:Connect(function()
+		fireUpgradePurchase("Activated")
+	end)
+
+	-- 兜底：部分 ImageButton 在复杂层级/覆盖关系下可能没有触发 Activated，MouseButton1Click 可以补上鼠标点击。
+	if upBtn:IsA("TextButton") then
+		(upBtn :: TextButton).MouseButton1Click:Connect(function()
+			fireUpgradePurchase("MouseButton1Click")
+		end)
+	elseif upBtn:IsA("ImageButton") then
+		(upBtn :: ImageButton).MouseButton1Click:Connect(function()
+			fireUpgradePurchase("MouseButton1Click")
+		end)
 	end
 end
 -- =====================
@@ -894,6 +956,7 @@ local function refreshUpgradeShopUI()
 		{ name = "Upgrade Speed", type = "Speed", getLv = "SpeedLevel" },--升级速度
 		{ name = "Upgrade Jump", type = "Health", getLv = "HealthLevel" },--升级跳跃（复用 HealthLevel 存档键）
 		{ name = "Upgrade Carry Capacity", type = "Carry", getLv = "CarryLevel" },--升级背包容量
+		{ name = "Upgrade Steal Amount", type = "Steal", getLv = "StealLevel" },--升级每次偷取金币数量
 	}
 
 	for _, info in ipairs(upgradeTypes) do
@@ -936,6 +999,12 @@ local function refreshUpgradeShopUI()
 				local nextCarry = Config.GetCarryMax and Config.GetCarryMax(nextLv) or (nextLv + 1)
 				incrementText = string.format("Carry: %d → %d", currentCarry, nextCarry)
 			end
+		elseif info.type == "Steal" then
+			cost = if Config.GetStealUpgradeCost then Config.GetStealUpgradeCost(nextLv) else 0
+			local currentSteal = if Config.GetStealAmountForLevel then Config.GetStealAmountForLevel(currentLv) else ((Config.STEAL_AMOUNT_BASE or 50) + currentLv * (Config.STEAL_AMOUNT_PER_UPGRADE or 10))
+			local nextSteal = if Config.GetStealAmountForLevel then Config.GetStealAmountForLevel(nextLv) else ((Config.STEAL_AMOUNT_BASE or 50) + nextLv * (Config.STEAL_AMOUNT_PER_UPGRADE or 10))
+			currentValueText = string.format("Steal: %s", formatNumberShort(currentSteal))
+			incrementText = string.format("Steal: %d → %d", currentSteal, nextSteal)
 		end
 
 		-- 3. 按升级类型克隆你放在 List 下的独立模板
@@ -947,7 +1016,7 @@ local function refreshUpgradeShopUI()
 
 		local row = template:Clone()
 		row.Name = info.type .. "Row"
-		row.LayoutOrder = table.find({"Health", "Attack", "Speed", "Carry"}, info.type) or 0
+		row.LayoutOrder = table.find({"Health", "Attack", "Speed", "Carry", "Steal"}, info.type) or 0
 		row.Visible = true
 		row.Parent = upgradeList
 
@@ -980,7 +1049,7 @@ local function refreshUpgradeShopUI()
 		end
 
 		-- C. 绑定：升级按钮
-		local upBtn = row:FindFirstChild("升级按钮", true)
+		local upBtn = findUpgradePurchaseButton(row)
 		if upBtn and upBtn:IsA("GuiButton") then
 			if isMaxed then
 				if upBtn:IsA("ImageButton") then
@@ -993,13 +1062,15 @@ local function refreshUpgradeShopUI()
 					upBtn.ImageTransparency = 0
 				end
 				upBtn.Interactable = true
-				upBtn.Activated:Connect(function()
-					-- 注意：确保你的 requestPurchaseUpgrade 变量在文件顶部有定义
-					requestPurchaseUpgrade:FireServer(info.type)
-				end)
+				upBtn.Active = true
+				warn(string.format("[UpgradeShopDebug][Client] bound type=%s button=%s", info.type, upBtn:GetFullName()))
+				bindUpgradePurchaseButton(upBtn, info.type)
 			end
+		else
+			warn(string.format("[UpgradeShopDebug][Client] upgrade button not found type=%s row=%s", info.type, row:GetFullName()))
 		end
 	end
+	task.defer(updateUpgradeListCanvasSize)
 end
 -- =====================
 -- 怪物背包逻辑
@@ -1044,13 +1115,26 @@ local function refreshWeaponInventoryUI()
 		if ch:IsA("GuiObject") and ch ~= weaponTemplate and not ch:IsA("UILayout") then ch:Destroy() end
 	end
 
-	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
+	local ownedWeaponLevels = {}
+	local ownedWeaponLevelsAttr = player:GetAttribute("OwnedWeaponLevels")
+	if type(ownedWeaponLevelsAttr) == "string" then
+		for token in string.gmatch(ownedWeaponLevelsAttr, "[^,]+") do
+			local level = tonumber(token)
+			if level then
+				table.insert(ownedWeaponLevels, math.max(1, math.floor(level)))
+			end
+		end
+	end
+	if #ownedWeaponLevels == 0 then
+		table.insert(ownedWeaponLevels, math.max(1, math.floor(tonumber(player:GetAttribute("WeaponLevel")) or 1)))
+	end
+	table.sort(ownedWeaponLevels)
 	
 	-- 精确定位到 Workspace 下的 "weapon" 文件夹
 	local weaponFolder = workspace:FindFirstChild("weapon")
 
-	for i = 1, maxWeaponLevel do
+	for _, i in ipairs(ownedWeaponLevels) do
 		local row = weaponTemplate:Clone()
 		row.Visible = true
 		row.Parent = weaponList
@@ -1309,6 +1393,52 @@ local function playGoldTextAnimation(difference: number)
 	end)
 end
 
+local function bindWeaponShopButton(button: GuiButton, action: "purchase" | "equip", weaponLevel: number)
+	local fireLocked = false
+	local function fireWeaponShopRequest(source: string)
+		if fireLocked then
+			return
+		end
+		fireLocked = true
+
+		warn(string.format(
+			"[WeaponShopDebug][Client] fire action=%s level=%d source=%s button=%s attrs WeaponLevel=%s EquippedWeaponLevel=%s Gold=%s",
+			action,
+			weaponLevel,
+			source,
+			button:GetFullName(),
+			tostring(player:GetAttribute("WeaponLevel")),
+			tostring(player:GetAttribute("EquippedWeaponLevel")),
+			tostring(player:GetAttribute("Gold"))
+		))
+
+		if action == "purchase" then
+			requestPurchaseWeapon:FireServer(weaponLevel)
+		else
+			requestEquipWeapon:FireServer(weaponLevel)
+		end
+
+		task.delay(0.25, function()
+			fireLocked = false
+		end)
+	end
+
+	button.Activated:Connect(function()
+		fireWeaponShopRequest("Activated")
+	end)
+
+	-- 兜底：某些复杂 UI 层级里 Activated 可能不稳定；MouseButton1Click 能保证鼠标点击也触发。
+	if button:IsA("TextButton") then
+		(button :: TextButton).MouseButton1Click:Connect(function()
+			fireWeaponShopRequest("MouseButton1Click")
+		end)
+	elseif button:IsA("ImageButton") then
+		(button :: ImageButton).MouseButton1Click:Connect(function()
+			fireWeaponShopRequest("MouseButton1Click")
+		end)
+	end
+end
+
 -- =====================
 -- 武器商店渲染逻辑 
 -- =====================
@@ -1326,19 +1456,46 @@ local function refreshWeaponShopUI()
 	end
 
 
+	local weaponShopLayout = if weaponShopList:IsA("ScrollingFrame") then weaponShopList:FindFirstChildWhichIsA("UIListLayout") else nil
 	if weaponShopList:IsA("ScrollingFrame") then
+		weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.None
+		weaponShopList.CanvasSize = UDim2.new(0, 0, 0, 0)
 		weaponShopList.CanvasPosition = Vector2.new(0, 0)
 	end
+	if weaponShopLayout then
+		weaponShopLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		weaponShopLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+		pcall(function()
+			weaponShopLayout.VerticalFlex = Enum.UIFlexAlignment.None
+			weaponShopLayout.HorizontalFlex = Enum.UIFlexAlignment.None
+		end)
+	end
 
-	-- 只清理代码克隆出来的武器条目，保留你在 Studio 中配置好的 UIListLayout / UIPadding。
+	-- 清理 List 中所有旧的武器条目。模板在 Window 根节点下，不在 List 内；
+	-- 如果保留 List 内同名“单个武器背景”，会叠加旧静态条目，导致首项错位和底部留白。
 	for _, ch in ipairs(weaponShopList:GetChildren()) do
-		if ch:IsA("GuiObject") and ch.Name ~= "单个武器背景" then
+		if ch:IsA("GuiObject") then
 			ch:Destroy()
 		end
 	end
 
-	local maxWeaponLevel = player:GetAttribute("WeaponLevel") or 1
 	local equippedWeapon = player:GetAttribute("EquippedWeaponLevel") or 1
+	local ownedWeaponLevelSet: {[number]: boolean} = {}
+	local ownedWeaponLevelsAttr = player:GetAttribute("OwnedWeaponLevels")
+	if type(ownedWeaponLevelsAttr) == "string" then
+		for token in string.gmatch(ownedWeaponLevelsAttr, "[^,]+") do
+			local level = tonumber(token)
+			if level then
+				ownedWeaponLevelSet[math.max(1, math.floor(level))] = true
+			end
+		end
+	end
+	if next(ownedWeaponLevelSet) == nil then
+		local maxWeaponLevel = math.max(1, math.floor(tonumber(player:GetAttribute("WeaponLevel")) or 1))
+		for level = 1, maxWeaponLevel do
+			ownedWeaponLevelSet[level] = true
+		end
+	end
 	local weaponFolder = workspace:FindFirstChild("weapon")
 	local createdCount = 0
 
@@ -1383,18 +1540,15 @@ local function refreshWeaponShopUI()
 		local btn = actionFrame and actionFrame:FindFirstChild("未购买/购买/装备")
 		
 		if btn and btn:IsA("GuiButton") then
-			if i > maxWeaponLevel + 1 then
-				btn.Text = "Locked"--未解锁
-				btn.Interactable = false  
-				btn.Active = false
-			elseif i == maxWeaponLevel + 1 then
+			btn.Active = false
+			btn.Interactable = false
+			if not ownedWeaponLevelSet[i] then
 				btn.Text = "Buy"
 				btn.Interactable = true
 				btn.Active = true
-				btn.Activated:Connect(function()
-					requestPurchaseWeapon:FireServer(i)
-				end)
-			elseif i <= maxWeaponLevel then
+				warn(string.format("[WeaponShopDebug][Client] bound action=purchase level=%d button=%s", i, btn:GetFullName()))
+				bindWeaponShopButton(btn, "purchase", i)
+			else
 				if i == equippedWeapon then
 					btn.Text = "Equipped"--已装备
 					btn.Interactable = false
@@ -1403,9 +1557,8 @@ local function refreshWeaponShopUI()
 					btn.Text = "Equip"--装备
 					btn.Interactable = true
 					btn.Active = true
-					btn.Activated:Connect(function()
-						requestEquipWeapon:FireServer(i)
-					end)
+					warn(string.format("[WeaponShopDebug][Client] bound action=equip level=%d button=%s", i, btn:GetFullName()))
+					bindWeaponShopButton(btn, "equip", i)
 				end
 			end
 		else
@@ -1413,23 +1566,18 @@ local function refreshWeaponShopUI()
 		end
 	end
 
-	-- [修改原因] 使用延时确保 UI 渲染树已更新，彻底解决“前几项不见”和“底部留白”的问题
+	-- 等 UIListLayout 完成位置计算后，手动设置滚动画布高度并复位到顶部。
+	-- 避免 AutomaticCanvasSize + Center/SpaceEvenly 在内容超出时产生顶部裁切和底部异常留白。
 	task.defer(function()
+		task.wait()
 		if weaponShopList:IsA("ScrollingFrame") then
-			-- 1. 暂时关闭自动尺寸，手动重置一次画布
+			local contentHeight = 0
+			if weaponShopLayout then
+				contentHeight = weaponShopLayout.AbsoluteContentSize.Y
+			end
 			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.None
-			weaponShopList.CanvasSize = UDim2.new(0, 0, 0, 0)
+			weaponShopList.CanvasSize = UDim2.new(0, 0, 0, math.max(contentHeight + 16, weaponShopList.AbsoluteSize.Y))
 			weaponShopList.CanvasPosition = Vector2.new(0, 0)
-			
-			-- 2. 强制 UI 刷新一次位置计算
-			task.wait() 
-			
-			-- 3. 重新启用自动尺寸，让它根据 Studio 中保留的 UIListLayout 重新计算
-			weaponShopList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-			
-			-- 4. 最终复位滚动条到最上方
-			weaponShopList.CanvasPosition = Vector2.new(0, 0)
-			
 		end
 	end)
 end
@@ -1465,9 +1613,8 @@ function UIController.Init()
 		upgradeList.AutomaticCanvasSize = Enum.AutomaticSize.None
 		local layout = upgradeList:FindFirstChildWhichIsA("UIListLayout")
 		if layout then
-			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-				upgradeList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-			end)
+			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateUpgradeListCanvasSize)
+			task.defer(updateUpgradeListCanvasSize)
 		end
 	end
 
@@ -1685,6 +1832,10 @@ function UIController.Init()
 	player:GetAttributeChangedSignal("WeaponLevel"):Connect(function()
 		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
 	end)
+	player:GetAttributeChangedSignal("OwnedWeaponLevels"):Connect(function()
+		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
+		if monsterInventoryWindow.Visible and weaponList.Visible then refreshWeaponInventoryUI() end
+	end)
 	player:GetAttributeChangedSignal("EquippedWeaponLevel"):Connect(function()
 		if weaponWindow and weaponWindow.Visible then refreshWeaponShopUI() end
 	end)
@@ -1705,7 +1856,7 @@ function UIController.Init()
 		upgradeCloseBtn.Activated:Connect(function() upgradeWindow.Visible = false end)
 	end
 
-	local attributes = {"AttackLevel", "SpeedLevel", "HealthLevel", "CarryLevel"}
+	local attributes = {"AttackLevel", "SpeedLevel", "HealthLevel", "CarryLevel", "StealLevel"}
 	for _, attr in ipairs(attributes) do
 		player:GetAttributeChangedSignal(attr):Connect(function()
 			if upgradeWindow.Visible then refreshUpgradeShopUI() end

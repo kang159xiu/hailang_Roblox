@@ -4,12 +4,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local playPlayerKnockbackRemote = remotes:WaitForChild("PlayPlayerKnockback") :: RemoteEvent
 
 local knockbackTokenByUserId: {[number]: number} = {}
+local visualCloneByUserId: {[number]: Model} = {}
 
 local function getCharacterParts(targetPlayer: Player): (Model?, Humanoid?, BasePart?)
 	local character = targetPlayer.Character
@@ -39,7 +41,95 @@ local function getNextKnockbackToken(userId: number): number
 	return token
 end
 
-local function playLocalKnockback(targetPlayer: Player, direction: Vector3, pushPower: any, upwardPower: any, angularVelocity: Vector3, duration: any)
+local function setCharacterLocalTransparency(character: Model, transparency: number)
+	for _, descendant in character:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.LocalTransparencyModifier = transparency
+		end
+	end
+end
+
+local function clearVisualClone(userId: number)
+	local oldClone = visualCloneByUserId[userId]
+	if oldClone then
+		oldClone:Destroy()
+		visualCloneByUserId[userId] = nil
+	end
+end
+
+local function createVisualClone(character: Model, userId: number): Model?
+	clearVisualClone(userId)
+
+	local oldArchivable = character.Archivable
+	character.Archivable = true
+	local ok, clonedCharacter = pcall(function()
+		return character:Clone()
+	end)
+	character.Archivable = oldArchivable
+
+	if not ok or not clonedCharacter or not clonedCharacter:IsA("Model") then
+		return nil
+	end
+
+	clonedCharacter.Name = character.Name .. "_KnockbackVisual"
+	for _, descendant in clonedCharacter:GetDescendants() do
+		if descendant:IsA("BaseScript") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		elseif descendant:IsA("Humanoid") then
+			descendant.AutoRotate = false
+			descendant.PlatformStand = true
+			descendant.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		end
+	end
+
+	clonedCharacter.Parent = workspace
+	visualCloneByUserId[userId] = clonedCharacter
+	return clonedCharacter
+end
+
+local function playAttackerVisualKnockback(targetPlayer: Player, character: Model, root: BasePart, horizontalDir: Vector3, safePushPower: number, safeUpwardPower: number, angularVelocity: Vector3, safeDuration: number, token: number)
+	local clone = createVisualClone(character, targetPlayer.UserId)
+	if not clone then
+		return
+	end
+
+	setCharacterLocalTransparency(character, 1)
+
+	local startTime = os.clock()
+	local startPosition = root.Position + Vector3.new(0, 1.5, 0)
+	local baseCFrame = CFrame.lookAt(startPosition, startPosition + horizontalDir)
+		* CFrame.Angles(math.rad(90), 0, 0)
+	clone:PivotTo(baseCFrame)
+
+	task.spawn(function()
+		while clone.Parent ~= nil and token == knockbackTokenByUserId[targetPlayer.UserId] do
+			local elapsed = os.clock() - startTime
+			if elapsed >= safeDuration then
+				break
+			end
+
+			local position = startPosition
+				+ ((horizontalDir * safePushPower) + Vector3.new(0, safeUpwardPower, 0)) * elapsed
+				+ Vector3.new(0, -workspace.Gravity * 0.125 * elapsed * elapsed, 0)
+			local spin = CFrame.Angles(angularVelocity.X * elapsed, angularVelocity.Y * elapsed, angularVelocity.Z * elapsed)
+			clone:PivotTo(CFrame.lookAt(position, position + horizontalDir) * CFrame.Angles(math.rad(90), 0, 0) * spin)
+
+			RunService.RenderStepped:Wait()
+		end
+
+		if token == knockbackTokenByUserId[targetPlayer.UserId] and targetPlayer.Character == character then
+			setCharacterLocalTransparency(character, 0)
+		end
+		clearVisualClone(targetPlayer.UserId)
+	end)
+end
+
+local function playLocalKnockback(targetPlayer: Player, direction: Vector3, pushPower: any, upwardPower: any, angularVelocity: Vector3, duration: any, attackerUserId: any)
 	local character, humanoid, root = getCharacterParts(targetPlayer)
 	if not character or not humanoid or not root then
 		return
@@ -55,13 +145,20 @@ local function playLocalKnockback(targetPlayer: Player, direction: Vector3, push
 	local token = getNextKnockbackToken(targetPlayer.UserId)
 	local isLocalTarget = targetPlayer == player
 
+	-- 只有被击飞玩家本机直接驱动自己的真实角色物理。
+	-- 攻击者/旁观者不再本地改远端玩家 RootPart，避免和服务端/目标玩家复制状态打架，导致“横着卡顿”。
+	if not isLocalTarget then
+		if type(attackerUserId) == "number" and attackerUserId == player.UserId then
+			playAttackerVisualKnockback(targetPlayer, character, root, horizontalDir, safePushPower, safeUpwardPower, angularVelocity, safeDuration, token)
+		end
+		return
+	end
+
 	humanoid.AutoRotate = false
 	humanoid.PlatformStand = true
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 
-	-- 对所有客户端都立即做一次短时视觉预测：
-	-- 1. 被击飞玩家本机能立刻感受到击飞；
-	-- 2. 攻击者/旁观者也不用等服务端物理复制，能更快看到目标被弹开。
+	-- 被击飞玩家本机立即驱动真实角色，减少网络复制等待带来的卡顿感。
 	root.CFrame = root.CFrame + Vector3.new(0, 1.5, 0)
 	root.CFrame = CFrame.lookAt(root.Position, root.Position + horizontalDir)
 		* CFrame.Angles(math.rad(90), 0, 0)
@@ -85,7 +182,7 @@ local function playLocalKnockback(targetPlayer: Player, direction: Vector3, push
 	end)
 end
 
-playPlayerKnockbackRemote.OnClientEvent:Connect(function(targetUserId: any, direction: any, pushPower: any, upwardPower: any, angularVelocity: any, duration: any)
+playPlayerKnockbackRemote.OnClientEvent:Connect(function(targetUserId: any, direction: any, pushPower: any, upwardPower: any, angularVelocity: any, duration: any, attackerUserId: any)
 	if type(targetUserId) ~= "number" then
 		return
 	end
@@ -98,5 +195,5 @@ playPlayerKnockbackRemote.OnClientEvent:Connect(function(targetUserId: any, dire
 		return
 	end
 
-	playLocalKnockback(targetPlayer, direction, pushPower, upwardPower, angularVelocity, duration)
+	playLocalKnockback(targetPlayer, direction, pushPower, upwardPower, angularVelocity, duration, attackerUserId)
 end)

@@ -999,10 +999,10 @@ local function knockbackPlayer(attacker: Player, target: Player, targetHRP: Base
 	local knockbackDuration = 0.35 --玩家失控/翻滚持续时间
 	local angularVelocity = Vector3.new(math.random(-25, 25), math.random(-25, 25), math.random(-25, 25))
 
-	-- 服务端确认命中后，通知所有客户端立即播放击飞表现。
-	-- 目标玩家本机负责更及时的真实物理响应；攻击者和旁观者本机也做短时视觉预测，减少等待服务端复制导致的卡顿。
+	-- 服务端确认命中后，通知客户端立即播放击飞表现。
+	-- 目标玩家本机负责更及时的真实物理响应；攻击者本机只播放纯视觉预测，避免改远端角色真实物理导致复制卡顿。
 	-- 服务端下方仍会同步权威物理状态，避免纯客户端表现导致位置被拉回或被作弊触发。
-	playPlayerKnockbackRemote:FireAllClients(target.UserId, horizontalDir, pushPower, upwardPower, angularVelocity, knockbackDuration)
+	playPlayerKnockbackRemote:FireAllClients(target.UserId, horizontalDir, pushPower, upwardPower, angularVelocity, knockbackDuration, attacker.UserId)
 
 	targetHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 2, 0)
 	targetHRP.CFrame = CFrame.lookAt(targetHRP.Position, targetHRP.Position + horizontalDir)

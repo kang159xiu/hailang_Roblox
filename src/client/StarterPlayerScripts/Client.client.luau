@@ -917,10 +917,19 @@ end)
 local currentCamera = workspace.CurrentCamera
 local shakeIntensity = 0
 local chaseCameraHeightOffset = 0
+local chaseLookBlend = 0
+local chaseLookStartedAt = 0
+local wasChasedLastFrame = false
 local activeChaseGlowGuardians: {[Instance]: Highlight} = {}
 
 local CHASE_CAMERA_HEIGHT = 1
 local CHASE_CAMERA_LERP_SPEED = 5
+local CHASE_LOOK_MAX_DISTANCE = 90
+local CHASE_LOOK_STRENGTH = 0.18
+local CHASE_LOOK_LERP_SPEED = 10 --镜头追踪守护者旋转速度
+local CHASE_LOOK_DURATION = 2  -- x 秒后解除追踪守护者
+local CHASE_LOOK_PLAYER_HEIGHT = 2
+local CHASE_LOOK_GUARDIAN_HEIGHT = 2
 local CHASE_GLOW_FLASH_SPEED = 7
 
 local hookedGuardians: {[Instance]: boolean} = {}
@@ -1127,8 +1136,10 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 
 	local isChased = false
 	local minDistance = 100
+	local closestChasingGuardianPart: BasePart? = nil
 	local chasingGuardians: {[Instance]: boolean} = {}
 	local nowClock = os.clock()
+	local hrp = getHRP()
 	
 	local guardiansFolder = workspace:FindFirstChild("Guardians")
 	if guardiansFolder then
@@ -1142,17 +1153,26 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 				isChased = true
 				chasingGuardians[guardian] = true
 				setGuardianChaseGlow(guardian, true, nowClock)
-				local hrp = getHRP()
 				if hrp and guardian.PrimaryPart then
 					local dist = (hrp.Position - guardian.PrimaryPart.Position).Magnitude
 					if dist < minDistance then
 						minDistance = dist
+						closestChasingGuardianPart = guardian.PrimaryPart
 					end
 				end
 			end
 		end
 	end
 	clearStaleGuardianChaseGlows(chasingGuardians)
+
+	-- 每次“刚开始被追”时，只给 2 秒自动转向提示；之后停止锁定守护者，交还镜头自由控制。
+	if isChased and not wasChasedLastFrame then
+		chaseLookStartedAt = nowClock
+	elseif not isChased then
+		chaseLookStartedAt = 0
+	end
+	wasChasedLastFrame = isChased
+	local isInChaseLookWindow = isChased and chaseLookStartedAt > 0 and (nowClock - chaseLookStartedAt) <= CHASE_LOOK_DURATION
 
 	-- 计算目标抖动强度（距离越近抖动越强烈，距离 60 开始有感）
 	local targetIntensity = 0
@@ -1169,6 +1189,21 @@ RunService:BindToRenderStep("GuardianCameraShake", Enum.RenderPriority.Camera.Va
 	chaseCameraHeightOffset = chaseCameraHeightOffset + (targetCameraHeightOffset - chaseCameraHeightOffset) * math.clamp(CHASE_CAMERA_LERP_SPEED * dt, 0, 1)
 	if math.abs(chaseCameraHeightOffset) > 0.02 then
 		currentCamera.CFrame = currentCamera.CFrame * CFrame.new(0, chaseCameraHeightOffset, 0)
+	end
+
+	-- 被守护者追逐时，让镜头轻微偏向最近的追逐守护者。
+	-- 注意：这里不切换 CameraSubject，也不把焦点完全放到守护者身上，
+	-- 只把默认相机的看向点从玩家附近少量偏向守护者，用于提示危险方向；2 秒后自动停止。
+	local targetLookBlend = (isInChaseLookWindow and hrp ~= nil and closestChasingGuardianPart ~= nil) and 1 or 0
+	chaseLookBlend = chaseLookBlend + (targetLookBlend - chaseLookBlend) * math.clamp(CHASE_LOOK_LERP_SPEED * dt, 0, 1)
+	if chaseLookBlend > 0.02 and hrp and closestChasingGuardianPart and closestChasingGuardianPart.Parent then
+		local cameraPos = currentCamera.CFrame.Position
+		local playerFocus = hrp.Position + Vector3.new(0, CHASE_LOOK_PLAYER_HEIGHT, 0)
+		local guardianFocus = closestChasingGuardianPart.Position + Vector3.new(0, CHASE_LOOK_GUARDIAN_HEIGHT, 0)
+		local distanceAlpha = math.clamp(1 - (minDistance / CHASE_LOOK_MAX_DISTANCE), 0, 1)
+		local biasedFocus = playerFocus:Lerp(guardianFocus, CHASE_LOOK_STRENGTH * distanceAlpha)
+		local targetLookCFrame = CFrame.lookAt(cameraPos, biasedFocus)
+		currentCamera.CFrame = currentCamera.CFrame:Lerp(targetLookCFrame, chaseLookBlend * math.clamp(CHASE_LOOK_LERP_SPEED * dt, 0, 1))
 	end
 
 	-- 如果强度足够大，则计算相机抖动

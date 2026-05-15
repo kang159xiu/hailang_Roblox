@@ -81,6 +81,24 @@ local function isNear(player: Player, part: BasePart, maxDist: number): boolean
 	return (hrp.Position - nearestWorld).Magnitude <= maxDist
 end
 
+local function getDistanceToPartBounds(player: Player, part: BasePart): number?
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return nil
+	end
+
+	local localPos = part.CFrame:PointToObjectSpace(hrp.Position)
+	local half = part.Size * 0.5
+	local nearestLocal = Vector3.new(
+		math.clamp(localPos.X, -half.X, half.X),
+		math.clamp(localPos.Y, -half.Y, half.Y),
+		math.clamp(localPos.Z, -half.Z, half.Z)
+	)
+	local nearestWorld = part.CFrame:PointToWorldSpace(nearestLocal)
+	return (hrp.Position - nearestWorld).Magnitude
+end
+
 function MerchantService.Init()
 	-- 1. [修改内容] 初始化升级商人交互
 	local merchant = ZoneService.GetMerchantPart()
@@ -107,27 +125,61 @@ function MerchantService.Init()
 	-- 2. [修改内容] 处理武器购买请求
 	requestPurchaseWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
 		local wm = ZoneService.GetWeaponMerchantPart()
-		if not wm or not isNear(player, wm, 12) then return end
-
-		local stats = PlayerData.Get(player)
-		local desired = tonumber(desiredWeaponLevel)
-		if not desired then return end
-
-		local nextLevel = stats.WeaponLevel + 1
-		if desired ~= nextLevel then
-			pushToast(player, "You can only buy the next weapon")
+		if not wm then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
+			pushToast(player, "Weapon shop is not available")
+			return
+		end
+		if not isNear(player, wm, 12) then
+			warn(string.format(
+				"[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=too_far distance=%s",
+				player.Name,
+				tostring(desiredWeaponLevel),
+				tostring(getDistanceToPartBounds(player, wm))
+			))
+			pushToast(player, "Move closer to the weapon shop")
 			return
 		end
 
-		local price = Config.WEAPON_PRICE_BY_LEVEL[nextLevel]
+		local stats = PlayerData.Get(player)
+		local desired = tonumber(desiredWeaponLevel)
+		if not desired then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
+			pushToast(player, "Invalid weapon level")
+			return
+		end
+		desired = math.floor(desired)
+
+		warn(string.format(
+			"[WeaponShopDebug][Server] received action=purchase player=%s desired=%d current=%d gold=%s",
+			player.Name,
+			desired,
+			stats.WeaponLevel,
+			tostring(stats.Gold)
+		))
+		if desired < 1 then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=invalid_level", player.Name, desired))
+			pushToast(player, "Invalid weapon level")
+			return
+		end
+
+		local price = Config.WEAPON_PRICE_BY_LEVEL[desired]
 		if price == nil then
-			pushToast(player, "Already at max weapon")
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=missing_price", player.Name, desired))
+			pushToast(player, "Invalid weapon level")
+			return
+		end
+
+		if table.find(stats.OwnedWeaponLevels, desired) ~= nil then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=already_owned", player.Name, desired))
+			pushToast(player, string.format("Already owned: Weapon Lv.%d", desired))
 			return
 		end
 		
 		
 
 		if not PlayerData.TrySpendGold(player, price) then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=not_enough_gold need=%s gold=%s", player.Name, desired, tostring(price), tostring(stats.Gold)))
 			pushToast(player, string.format("Not enough gold. Need %s", Util.FormatMoney(price)))
 			return
 		end
@@ -141,34 +193,66 @@ function MerchantService.Init()
 			price,
 			PlayerData.Get(player).Gold, 
 			"Shop",
-			"Weapon_Purchase_Lv" .. tostring(nextLevel)
+			"Weapon_Purchase_Lv" .. tostring(desired)
 		)
 
-		WeaponToolService.GrantWeapon(player, nextLevel, true)
+		WeaponToolService.GrantWeapon(player, desired, true)
 		DataDirtyService.MarkDirty(player, 5)
-		pushToast(player, string.format("Purchase successful: Weapon Lv.%d (Cost %s)", nextLevel, Util.FormatMoney(price)))
+		warn(string.format("[WeaponShopDebug][Server] success action=purchase player=%s level=%d cost=%s", player.Name, desired, tostring(price)))
+		pushToast(player, string.format("Purchase successful: Weapon Lv.%d (Cost %s)", desired, Util.FormatMoney(price)))
 	end)
 
 	-- 3. [修改内容] 处理装备已拥有武器的请求
 	requestEquipWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
 		local wm = ZoneService.GetWeaponMerchantPart()
-		if not wm or not isNear(player, wm, 12) then return end
+		if not wm then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
+			pushToast(player, "Weapon shop is not available")
+			return
+		end
+		if not isNear(player, wm, 12) then
+			warn(string.format(
+				"[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=too_far distance=%s",
+				player.Name,
+				tostring(desiredWeaponLevel),
+				tostring(getDistanceToPartBounds(player, wm))
+			))
+			pushToast(player, "Move closer to the weapon shop")
+			return
+		end
 
 		local desired = tonumber(desiredWeaponLevel)
-		if not desired then return end
+		if not desired then
+			warn(string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
+			pushToast(player, "Invalid weapon level")
+			return
+		end
+		desired = math.floor(desired)
+		warn(string.format("[WeaponShopDebug][Server] received action=equip player=%s desired=%d", player.Name, desired))
 
 		PlayerData.SetEquippedWeaponLevel(player, desired)
 		WeaponToolService.Sync(player, true)
 		DataDirtyService.MarkDirty(player, 5)
+		warn(string.format("[WeaponShopDebug][Server] success action=equip player=%s level=%d", player.Name, desired))
 		pushToast(player, string.format("Equipped: Weapon Lv.%d", desired))
 	end)
 
-	-- 4. [修改内容] 处理升级请求（攻击/速度/跳跃/携带数量）
+	-- 4. [修改内容] 处理升级请求（攻击/速度/跳跃/携带数量/偷取数量）
 	requestPurchaseUpgrade.OnServerEvent:Connect(function(player: Player, upgradeType: any)
 		local m = ZoneService.GetMerchantPart()
-		if not m or not isNear(player, m, 12) then return end
+		if not m then
+			warn(string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=merchant_missing", player.Name, tostring(upgradeType)))
+			pushToast(player, "Upgrade shop is not available")
+			return
+		end
+		if not isNear(player, m, 12) then
+			warn(string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=too_far", player.Name, tostring(upgradeType)))
+			pushToast(player, "Move closer to the upgrade shop")
+			return
+		end
 
 		local t = tostring(upgradeType)
+		warn(string.format("[UpgradeShopDebug][Server] received player=%s type=%s", player.Name, t))
 		local stats = PlayerData.Get(player)
 		---【【【【
 		if t == "Attack" then
@@ -268,6 +352,28 @@ function MerchantService.Init()
 				PlayerData.AddCarryLevel(player, 1)
 				DataDirtyService.MarkDirty(player, 5)
 				pushToast(player, string.format("Carry capacity upgraded! Cost: %s", Util.FormatMoney(cost)))
+			else
+				pushToast(player, "Not enough gold")
+			end
+		elseif t == "Steal" then
+			local nextLevel = math.max(0, math.floor(tonumber((stats :: any).StealLevel) or 0)) + 1
+			local cost = Config.GetStealUpgradeCost(nextLevel)
+			if PlayerData.TrySpendGold(player, cost) then
+				-- [修改原因] 经济埋点：上报每次偷取金币数量升级造成的金币消耗
+				local AnalyticsService = game:GetService("AnalyticsService")
+				AnalyticsService:LogEconomyEvent(
+					player,
+					Enum.AnalyticsEconomyFlowType.Sink,
+					"Gold",
+					cost,
+					PlayerData.Get(player).Gold,
+					"Gameplay",
+					"Upgrade_Steal"
+				)
+
+				PlayerData.AddStealLevel(player, 1)
+				DataDirtyService.MarkDirty(player, 5)
+				pushToast(player, string.format("Steal amount upgraded! Cost: %s", Util.FormatMoney(cost)))
 			else
 				pushToast(player, "Not enough gold")
 			end
