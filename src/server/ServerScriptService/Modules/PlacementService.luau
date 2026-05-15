@@ -1188,14 +1188,14 @@ function PlacementService.TryStealGold(thief: Player): number
 
 	local source = findStealableGoldSourceForOwner(target.Owner)
 	if not source then
-		toast(thief, "当前没钱币")
+		toast(thief, "Not enough coins") --当前没钱
 		setStealAvailability(thief, true)
 		return 0
 	end
 
 	local un = math.floor(getNumAttr(source.PlacedPart, "UnclaimedGold", 0))
 	if un <= 0 then
-		toast(thief, "当前没钱币")
+		toast(thief, "Not enough coins") --当前没钱
 		setStealAvailability(thief, true)
 		return 0
 	end
@@ -2671,4 +2671,24 @@ function PlacementService.Clear(player: Player)
 	
 	DataDirtyService.MarkDirty(player)
 end
+
+function PlacementService.GetPlayerBaseGoldPerSec(player: Player): number
+	local total = 0
+	local states = slotStatesByUserId[player.UserId]
+	if type(states) ~= "table" then
+		return 0
+	end
+
+	for _, state in pairs(states :: {[number]: SlotState}) do
+		local placedMonster = state.PlacedMonster
+		if placedMonster and placedMonster.Parent then
+			total += math.max(0, math.floor(getNumAttr(placedMonster :: BasePart, "GoldPerSec", 0)))
+		elseif state.PlacedData then
+			total += math.max(0, math.floor(tonumber(state.PlacedData.GoldPerSec) or 0))
+		end
+	end
+
+	return math.floor(total)
+end
+
 return PlacementService

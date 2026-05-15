@@ -21,6 +21,7 @@ local player = Players.LocalPlayer
 -- [修改内容] 引入新创建的 UI 控制器模块
 local UIController = require(script.Parent:WaitForChild("UIController"))
 local TutorialController = require(script.Parent:WaitForChild("TutorialController"))
+local ToolbarController = require(script.Parent:WaitForChild("ToolbarController"))
 
 -- 启动 UI 逻辑
 task.spawn(function()
@@ -31,34 +32,38 @@ task.spawn(function()
 	TutorialController.Init()
 end)
 
+task.spawn(function()
+	ToolbarController.Init()
+end)
+
 -- 提高同时可见 Prompt 上限（默认 16）。
 -- 家园升到 2/3 级后可见的“解锁/交互”Prompt 可能变多，
 -- 如果达到上限会导致“升级按钮”不显示。
 -- 这里提到 64，避免被顶掉。
 ProximityPromptService.MaxPromptsVisible = 64
 
--- 使用官方默认背包/热键栏（武器装备系统）
+-- 使用自定义 ViewportFrame 快捷栏（武器/怪物 3D 形象）。
 -- 注意：SetCoreGuiEnabled 可能在客户端刚启动时调用失败，所以这里做重试。
-local function enableDefaultBackpack()
+local function disableDefaultBackpack()
 	for _ = 1, 40 do
 		local ok = pcall(function()
-			-- 如果某处把 All 关了，只开 Backpack 可能不生效，所以这里先确保 All=true
+			-- 保留其它 CoreGui，只关闭 Roblox 默认 Backpack，避免和自定义快捷栏重叠。
 			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
-			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 		end)
 		if ok then
 			return
 		end
 		task.wait(0.1)
 	end
-	warn("[Client] Failed to enable CoreGui Backpack")
+	warn("[Client] Failed to disable CoreGui Backpack")
 end
 
-task.spawn(enableDefaultBackpack)
+task.spawn(disableDefaultBackpack)
 
 player.CharacterAdded:Connect(function()
 	-- 有些情况下重生后 CoreGui 状态会被重置/脚本竞争，这里再补一次
-	task.delay(0.25, enableDefaultBackpack)
+	task.delay(0.25, disableDefaultBackpack)
 end)
 
 local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChild("Config"))

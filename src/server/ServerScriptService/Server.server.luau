@@ -65,6 +65,9 @@ ensureRemoteEvent(remotesFolder, "Analytics_Remote")
 ensureRemoteEvent(remotesFolder, "SyncMonsterInventory")
 ensureRemoteEvent(remotesFolder, "RequestTakeOutMonsterItem")
 ensureRemoteEvent(remotesFolder, "RequestDropCarriedMonsters")
+ensureRemoteEvent(remotesFolder, "RequestMonsterGift")
+ensureRemoteEvent(remotesFolder, "ShowMonsterGiftOffer")
+ensureRemoteEvent(remotesFolder, "RespondMonsterGiftOffer")
 
 -- 测试：清空玩家数据
 ensureRemoteEvent(remotesFolder, "RequestClearPlayerData")
@@ -103,6 +106,9 @@ ensureWeaponToolHasHandle()
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local takeOutRemote = remotes:WaitForChild("RequestTakeOutMonsterItem") :: RemoteEvent
 local dropCarriedRemote = remotes:WaitForChild("RequestDropCarriedMonsters") :: RemoteEvent
+local requestMonsterGiftRemote = remotes:WaitForChild("RequestMonsterGift") :: RemoteEvent
+local showMonsterGiftOfferRemote = remotes:WaitForChild("ShowMonsterGiftOffer") :: RemoteEvent
+local respondMonsterGiftOfferRemote = remotes:WaitForChild("RespondMonsterGiftOffer") :: RemoteEvent
 -- [修改内容] 自动创建清空数据事件
 local clearDataRemote = remotes:FindFirstChild("RequestClearPlayerData")
 if not clearDataRemote then
@@ -133,6 +139,7 @@ local CharacterService = require(script.Parent:WaitForChild("Modules"):WaitForCh
 local InventoryService = require(script.Parent:WaitForChild("Modules"):WaitForChild("InventoryService"))
 local HomeService = require(script.Parent:WaitForChild("Modules"):WaitForChild("HomeService"))
 local PlacementService = require(script.Parent:WaitForChild("Modules"):WaitForChild("PlacementService"))
+local CashPerSecLeaderboardService = require(script.Parent:WaitForChild("Modules"):WaitForChild("CashPerSecLeaderboardService"))
 local MonsterService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MonsterService"))
 local MerchantService = require(script.Parent:WaitForChild("Modules"):WaitForChild("MerchantService"))
 local ZoneService = require(script.Parent:WaitForChild("Modules"):WaitForChild("ZoneService"))
@@ -154,6 +161,7 @@ CharacterService.Init()
 InventoryService.Init()
 HomeService.Init()
 PlacementService.Init()
+CashPerSecLeaderboardService.Init()
 MonsterService.Init()
 MerchantService.Init()
 TutorialService.Init()
@@ -173,6 +181,80 @@ local function pushToast(player: Player, text: string)
 	if toast and toast:IsA("RemoteEvent") then
 		toast:FireClient(player, text)
 	end
+end
+
+type PendingMonsterGift = {
+	OfferId: string,
+	Donor: Player,
+	Receiver: Player,
+	Monster: any,
+	CreatedAt: number,
+}
+
+local pendingMonsterGiftsByOfferId: {[string]: PendingMonsterGift} = {}
+local pendingMonsterGiftByReceiverUserId: {[number]: string} = {}
+local lastGiftRequestByUserId: {[number]: number} = {}
+
+local MONSTER_GIFT_MAX_DISTANCE = 4
+local MONSTER_GIFT_EXPIRE_SECONDS = 20
+
+local function getHrp(player: Player): BasePart?
+	local character = player.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+	return nil
+end
+
+local function arePlayersCloseEnough(a: Player, b: Player): boolean
+	local aHrp = getHrp(a)
+	local bHrp = getHrp(b)
+	if not aHrp or not bHrp then
+		return false
+	end
+	return (aHrp.Position - bHrp.Position).Magnitude <= MONSTER_GIFT_MAX_DISTANCE
+end
+
+local function sanitizeGiftMonsterPayload(monster: any): any
+	return {
+		MonsterLevel = math.max(1, math.floor(tonumber(monster.MonsterLevel) or 1)),
+		Value = math.floor(tonumber(monster.Value) or 0),
+		GoldPerSec = math.floor(tonumber(monster.GoldPerSec) or 0),
+		UpgradeLevel = math.max(1, math.floor(tonumber(monster.UpgradeLevel) or 1)),
+		BaseValue = math.floor(tonumber(monster.BaseValue) or tonumber(monster.Value) or 0),
+		BaseGoldPerSec = math.floor(tonumber(monster.BaseGoldPerSec) or tonumber(monster.GoldPerSec) or 0),
+		SourceZoneLevel = math.max(1, math.floor(tonumber(monster.SourceZoneLevel) or 1)),
+		ExpireUnix = math.floor(tonumber(monster.ExpireUnix) or 0),
+		StorageKind = tostring(monster.StorageKind or "Tool"),
+	}
+end
+
+local function clearPendingMonsterGift(offerId: string)
+	local offer = pendingMonsterGiftsByOfferId[offerId]
+	if offer then
+		pendingMonsterGiftByReceiverUserId[offer.Receiver.UserId] = nil
+	end
+	pendingMonsterGiftsByOfferId[offerId] = nil
+end
+
+local function pruneExpiredMonsterGifts()
+	local now = os.clock()
+	for offerId, offer in pairs(pendingMonsterGiftsByOfferId) do
+		if now - offer.CreatedAt > MONSTER_GIFT_EXPIRE_SECONDS then
+			clearPendingMonsterGift(offerId)
+		end
+	end
+end
+
+local function clearPendingMonsterGiftsForPlayer(player: Player)
+	for offerId, offer in pairs(pendingMonsterGiftsByOfferId) do
+		if offer.Donor == player or offer.Receiver == player then
+			clearPendingMonsterGift(offerId)
+		end
+	end
+	pendingMonsterGiftByReceiverUserId[player.UserId] = nil
+	lastGiftRequestByUserId[player.UserId] = nil
 end
 
 requestRebirthRemote.OnServerEvent:Connect(function(player: Player)
@@ -235,10 +317,113 @@ dropCarriedRemote.OnServerEvent:Connect(function(player: Player)
 	end
 end)
 
+requestMonsterGiftRemote.OnServerEvent:Connect(function(donor: Player, receiverUserId: any)
+	pruneExpiredMonsterGifts()
+	if type(receiverUserId) ~= "number" then
+		return
+	end
+
+	local now = os.clock()
+	local last = lastGiftRequestByUserId[donor.UserId] or 0
+	if now - last < 0.8 then
+		return
+	end
+	lastGiftRequestByUserId[donor.UserId] = now
+
+	local receiver = Players:GetPlayerByUserId(math.floor(receiverUserId))
+	if not receiver or receiver == donor then
+		return
+	end
+	if not arePlayersCloseEnough(donor, receiver) then
+		pushToast(donor, "Too far away to send a gift.")  --距离太远，无法赠送
+		return
+	end
+
+	local monster = InventoryService.GetGiftableMonster(donor)
+	if not monster then
+		pushToast(donor, "You don't have any monsters to give.") --你当前没有可赠送的怪物
+		return
+	end
+
+	local existingOfferId = pendingMonsterGiftByReceiverUserId[receiver.UserId]
+	if existingOfferId then
+		clearPendingMonsterGift(existingOfferId)
+	end
+
+	local offerId = string.format("%d_%d_%d", donor.UserId, receiver.UserId, math.random(100000, 999999))
+	local payloadMonster = sanitizeGiftMonsterPayload(monster)
+	pendingMonsterGiftsByOfferId[offerId] = {
+		OfferId = offerId,
+		Donor = donor,
+		Receiver = receiver,
+		Monster = payloadMonster,
+		CreatedAt = now,
+	}
+	pendingMonsterGiftByReceiverUserId[receiver.UserId] = offerId
+
+	showMonsterGiftOfferRemote:FireClient(receiver, {
+		OfferId = offerId,
+		DonorUserId = donor.UserId,
+		DonorName = donor.DisplayName ~= "" and donor.DisplayName or donor.Name,
+		Monster = payloadMonster,
+		ExpireSeconds = MONSTER_GIFT_EXPIRE_SECONDS,
+	})
+	pushToast(donor, string.format("Monster gift request sent to %s", receiver.Name))
+end)
+
+respondMonsterGiftOfferRemote.OnServerEvent:Connect(function(receiver: Player, offerId: any, accepted: any)
+	pruneExpiredMonsterGifts()
+	if type(offerId) ~= "string" then
+		return
+	end
+
+	local offer = pendingMonsterGiftsByOfferId[offerId]
+	if not offer or offer.Receiver ~= receiver then
+		return
+	end
+
+	clearPendingMonsterGift(offerId)
+
+	local donor = offer.Donor
+	if not donor or donor.Parent ~= Players then
+		pushToast(receiver, "Gift failed: the donor has left the game.") --赠送玩家已离开
+		return
+	end
+
+	if accepted ~= true then
+		pushToast(donor, string.format("%s rejected the gift.", receiver.Name)) --%s玩家拒绝了你的赠送
+		return
+	end
+
+	if not arePlayersCloseEnough(donor, receiver) then
+		pushToast(receiver, "Too far away to accept the gift.") --距离太远，赠送已取消
+		pushToast(donor, string.format("%s is too far away to accept the gift.", receiver.Name)) --%s 距离太远，赠送已取消
+		return
+	end
+
+	local consumed = InventoryService.ConsumeGiftableMonster(donor, offer.Monster)
+	if not consumed then
+		pushToast(receiver, "Gift failed: the recipient is no longer holding this monster") --赠送失败：对方已经不再拿着这只怪物
+		pushToast(donor, "Gift failed: the monster's status has changed") -- 赠送失败：怪物状态已变化
+		return
+	end
+
+	local ok = InventoryService.GiveGiftedMonsterTool(receiver, consumed, true)
+	if not ok then
+		InventoryService.ReturnGiftableMonster(donor, consumed)
+		pushToast(receiver, "Receive failed: backpack is currently unavailable") --#region 接收失败：背包暂时不可用
+		pushToast(donor, "Gift failed: the recipient's backpack is currently unavailable") --赠送失败：对方背包暂时不可用
+		return
+	end
+
+	pushToast(receiver, string.format("Accepted %s's monster gift", donor.Name)) --已接受 %s 的怪物赠送
+	pushToast(donor, string.format("%s accepted the gift and says thanks!", receiver.Name)) --%s玩家接受了赠送并感谢
+end)
+
 -- 测试：清空玩家数据（仅 Studio）
 -- [修改内容] 处理玩家清空数据的请求（终极防崩溃版）
 clearDataRemote.OnServerEvent:Connect(function(player: Player)
-	warn(string.format("玩家 %s 正在执行删档清空...", player.Name))
+	warn(string.format("Player %s is wiping save data...", player.Name)) --玩家 %s 正在执行删档清空...
 	
 	-- 1. 重置金币和等级（带防错检测）
 	if PlayerData.ResetData then PlayerData.ResetData(player) end
@@ -415,5 +600,6 @@ Players.PlayerAdded:Connect(function(player: Player)
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
+	clearPendingMonsterGiftsForPlayer(player)
 	logPlayerLeave(player)
 end)

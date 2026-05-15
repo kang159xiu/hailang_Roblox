@@ -117,7 +117,7 @@ local formatNumberShort: (number) -> string
 
 local function setStealTotalLabelText(amount: number)
 	if stealTotalLabel then
-		stealTotalLabel.Text = "+" .. formatNumberShort(math.max(0, math.floor(amount))) .. "金币"
+		stealTotalLabel.Text = "+" .. formatNumberShort(math.max(0, math.floor(amount))) .. " Coins" --+500金币
 	end
 end
 
@@ -210,10 +210,10 @@ end
 local function showStealWarning(thiefName: string?)
 	stealWarningBlinkToken += 1
 	local token = stealWarningBlinkToken
-	local safeName = if type(thiefName) == "string" and thiefName ~= "" then thiefName else "有"
+	local safeName = if type(thiefName) == "string" and thiefName ~= "" then thiefName else "Player" --%s玩家在偷取你的钱币 --- IGNORE ---
 
 	if stealWarningLabel then
-		stealWarningLabel.Text = string.format("%s玩家在偷取你的钱币", safeName)
+		stealWarningLabel.Text = string.format("%s is stealing your coins", safeName) --%s玩家在偷取你的钱币
 	end
 	if stealWarningFrame then
 		stealWarningFrame.Visible = true
@@ -1273,7 +1273,7 @@ local function playStealGoldTextSettleAnimation(amount: number)
 	label.Position = UDim2.fromOffset(origin.X, origin.Y)
 	label.Size = UDim2.fromOffset(180, 46)
 	label.BackgroundTransparency = 1
-	label.Text = "+" .. formatNumberShort(value) .. "金币"
+	label.Text = "+" .. formatNumberShort(value) .. " Coins" --+50金币/coins
 	label.TextColor3 = Color3.fromRGB(255, 221, 64)
 	label.TextStrokeTransparency = 0.25
 	label.Font = Enum.Font.GothamBold
@@ -1519,17 +1519,17 @@ local function refreshWeaponShopUI()
 
 		local nameLabel = row:FindFirstChild("武器名称")
 		if nameLabel and nameLabel:IsA("TextLabel") then
-			nameLabel.Text = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[i] or ("武器" .. i)
+			nameLabel.Text = Config.WEAPON_NAME_BY_LEVEL and Config.WEAPON_NAME_BY_LEVEL[i] or ("Weapon" .. i)
 		end
 
 		local infoLabel = row:FindFirstChild("武器价格/武器攻击力")
 		if infoLabel and infoLabel:IsA("TextLabel") then
 			infoLabel.Text = string.format("Price: %s   Attack: +%s", formatNumberShort(price or 0), formatNumberShort(attack or 0))
-		end--价格: %s 攻击力
+		end--Price: %s Attack: +%s
 
 		local imageContainer = row:FindFirstChild("武器形象")
 		if imageContainer and weaponFolder then
-			local iconName = string.format("武器%02d", i)
+			local iconName = string.format("Weapon%02d", i)
 			local model = weaponFolder:FindFirstChild(iconName)
 			if model then
 				loadViewportFromScene(imageContainer, model)

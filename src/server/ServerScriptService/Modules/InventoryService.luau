@@ -41,6 +41,8 @@ type CarriedMonster = {
 	ExpireUnix: number,
 }
 
+export type GiftableMonster = MonsterItem
+
 
 
 local MAX_SLOTS = math.huge -- 不再限制怪物背包容量；仅保留常量占位，避免其他旧代码报错
@@ -116,6 +118,26 @@ end
 
 local function newItemId(): string
 	return string.format("%d_%d", os.time(), math.random(1000, 9999))
+end
+
+local function getMonsterImageId(monsterLevel: number): string?
+	local imageMap = Config.MONSTER_IMAGE_ID_BY_LEVEL
+	if type(imageMap) ~= "table" then
+		return nil
+	end
+
+	local imageId = imageMap[monsterLevel]
+	if type(imageId) == "string" and imageId ~= "" and imageId ~= "rbxassetid://0" then
+		return imageId
+	end
+	return nil
+end
+
+local function applyMonsterToolIcon(tool: Tool, monsterLevel: number)
+	local imageId = getMonsterImageId(monsterLevel)
+	if imageId then
+		tool.TextureId = imageId
+	end
 end
 
 local function sanitizeModel(model: Instance): BasePart?
@@ -372,6 +394,7 @@ local function createMonsterToolFromData(monsterLevel: number, value: number, go
 	tool:SetAttribute("MonsterLevel", monsterLevel)
 	tool:SetAttribute("Value", value)
 	tool:SetAttribute("GoldPerSec", goldPerSec)
+	applyMonsterToolIcon(tool, monsterLevel)
 
 	if not baked then
 		applyMonsterAppearanceToTool(tool, monsterLevel)
@@ -390,6 +413,31 @@ local function applyMonsterDataToTool(tool: Tool, item: MonsterItem)
 	tool:SetAttribute("BaseGoldPerSec", normalized.BaseGoldPerSec or normalized.GoldPerSec)
 	tool:SetAttribute("SourceZoneLevel", normalized.SourceZoneLevel or 1)
 	tool:SetAttribute("FromGacha", true)
+	applyMonsterToolIcon(tool, normalized.MonsterLevel)
+end
+
+local function monsterItemMatches(a: MonsterItem, b: MonsterItem): boolean
+	local left = normalizeMonsterItem(a)
+	local right = normalizeMonsterItem(b)
+	return left.MonsterLevel == right.MonsterLevel
+		and left.Value == right.Value
+		and left.GoldPerSec == right.GoldPerSec
+		and (left.UpgradeLevel or 1) == (right.UpgradeLevel or 1)
+		and (left.SourceZoneLevel or 1) == (right.SourceZoneLevel or 1)
+end
+
+local function monsterItemFromTool(tool: Tool): MonsterItem
+	return normalizeMonsterItem({
+		ItemId = tostring(tool:GetAttribute("ItemId") or ""),
+		MonsterLevel = tool:GetAttribute("MonsterLevel"),
+		Value = tool:GetAttribute("Value"),
+		GoldPerSec = tool:GetAttribute("GoldPerSec"),
+		UpgradeLevel = tool:GetAttribute("UpgradeLevel"),
+		BaseValue = tool:GetAttribute("BaseValue"),
+		BaseGoldPerSec = tool:GetAttribute("BaseGoldPerSec"),
+		SourceZoneLevel = tool:GetAttribute("SourceZoneLevel"),
+		StorageKind = "Tool",
+	})
 end
 
 local function collectMonsterToolsFromContainer(container: Instance?, out: {MonsterItem}, seenTools: {[Tool]: boolean})
@@ -794,6 +842,140 @@ function InventoryService.DropAllCarried(player: Player, toastText: string?): {C
 	end
 	
 	return dropped
+end
+
+-- 赠送系统：获取当前可赠送的怪物。
+-- 优先使用角色手上正在装备的 Monster Tool；如果没有，则使用头顶携带态第一只怪。
+function InventoryService.GetGiftableMonster(player: Player): GiftableMonster?
+	local character = player.Character
+	if character then
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") and child:GetAttribute("IsMonsterItem") == true then
+				return monsterItemFromTool(child)
+			end
+		end
+	end
+
+	local carried = carriedByUserId[player.UserId]
+	if carried and #carried > 0 then
+		local c = carried[1]
+		return normalizeMonsterItem({
+			ItemId = "",
+			MonsterLevel = c.MonsterLevel,
+			Value = c.Value,
+			GoldPerSec = c.GoldPerSec,
+			UpgradeLevel = c.UpgradeLevel,
+			BaseValue = math.floor(c.Value / math.max(c.UpgradeLevel, 1)),
+			BaseGoldPerSec = math.floor(c.GoldPerSec / math.max(c.UpgradeLevel, 1)),
+			SourceZoneLevel = c.SourceZoneLevel,
+			ExpireUnix = c.ExpireUnix,
+			StorageKind = "Carried",
+		})
+	end
+
+	return nil
+end
+
+-- 赠送系统：在接收方点“接受”时，重新校验赠送者仍然拿着同一只怪，再真正移除。
+function InventoryService.ConsumeGiftableMonster(player: Player, expected: GiftableMonster): GiftableMonster?
+	local normalizedExpected = normalizeMonsterItem(expected)
+	local expectedKind = tostring((expected :: any).StorageKind or "")
+
+	if expectedKind == "Tool" then
+		local character = player.Character
+		if character then
+			for _, child in ipairs(character:GetChildren()) do
+				if child:IsA("Tool") and child:GetAttribute("IsMonsterItem") == true then
+					local current = monsterItemFromTool(child)
+					if monsterItemMatches(current, normalizedExpected) then
+						child:Destroy()
+						return current
+					end
+				end
+			end
+		end
+		return nil
+	end
+
+	local carried = carriedByUserId[player.UserId]
+	if carried then
+		for index, c in ipairs(carried) do
+			local current = normalizeMonsterItem({
+				ItemId = "",
+				MonsterLevel = c.MonsterLevel,
+				Value = c.Value,
+				GoldPerSec = c.GoldPerSec,
+				UpgradeLevel = c.UpgradeLevel,
+				BaseValue = math.floor(c.Value / math.max(c.UpgradeLevel, 1)),
+				BaseGoldPerSec = math.floor(c.GoldPerSec / math.max(c.UpgradeLevel, 1)),
+				SourceZoneLevel = c.SourceZoneLevel,
+				ExpireUnix = c.ExpireUnix,
+				StorageKind = "Carried",
+			})
+			if monsterItemMatches(current, normalizedExpected) then
+				table.remove(carried, index)
+				rebuildCarriedVisual(player)
+				return current
+			end
+		end
+	end
+
+	return nil
+end
+
+-- 赠送系统：把赠送成功的怪物发到接收方底部 Tool 栏，并尽量自动装备。
+function InventoryService.GiveGiftedMonsterTool(player: Player, item: GiftableMonster, autoEquip: boolean): boolean
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		backpack = player:WaitForChild("Backpack", 3) :: any
+	end
+	if not backpack or not backpack:IsA("Backpack") then
+		return false
+	end
+
+	local normalized = normalizeMonsterItem(item)
+	local tool = createMonsterToolFromData(normalized.MonsterLevel, normalized.Value, normalized.GoldPerSec, "")
+	applyMonsterDataToTool(tool, normalized)
+	tool.Parent = backpack
+
+	if autoEquip then
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			task.defer(function()
+				if tool and tool.Parent == backpack then
+					humanoid:EquipTool(tool)
+				end
+			end)
+		end
+	end
+
+	return true
+end
+
+-- 赠送系统：当接收方发放失败时，把已经从赠送者身上消费的怪物安全回滚。
+function InventoryService.ReturnGiftableMonster(player: Player, item: GiftableMonster): boolean
+	local normalized = normalizeMonsterItem(item)
+	if normalized.StorageKind == "Carried" then
+		local list = ensureCarriedList(player)
+		local safeExpireUnix = math.floor(tonumber(normalized.ExpireUnix) or 0)
+		if safeExpireUnix <= 0 then
+			safeExpireUnix = os.time() + Config.MONSTER_LIFETIME_SECONDS
+		end
+
+		table.insert(list, {
+			MonsterLevel = normalized.MonsterLevel,
+			Value = normalized.Value,
+			GoldPerSec = normalized.GoldPerSec,
+			UpgradeLevel = normalized.UpgradeLevel or 1,
+			SourceZoneLevel = normalized.SourceZoneLevel or 1,
+			ExpireUnix = safeExpireUnix,
+		})
+		rebuildCarriedVisual(player)
+		return true
+	end
+
+	return InventoryService.GiveGiftedMonsterTool(player, normalized, true)
 end
 
 -- 兼容旧接口：把携带态转换为 Tool（并自动手持一只）

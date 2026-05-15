@@ -199,9 +199,69 @@ Config.MONSTER_INFO_SHOW_DISTANCE = 15
 -- 详细信息显示距离（studs）：距离近时才显示价值/金币产出等
 Config.MONSTER_DETAIL_SHOW_DISTANCE = 6
 
--- 武器图片（占位，后期你可以填 rbxassetid）
+-- =====================
+-- 快捷栏 Tool 图标模板
+-- =====================
+-- 用途：Roblox 默认快捷栏会读取 Tool.TextureId。
+-- 填写方式：把 "rbxassetid://0" 替换成你上传到 Roblox 后得到的图片 ID。
+-- 建议素材：正方形 PNG、透明背景、主体居中；例如 512x512 或 1024x1024。
+
+-- 武器快捷栏图片：1~20级
 Config.WEAPON_IMAGE_ID_BY_LEVEL = {
-	-- [1] = "rbxassetid://0",
+	[1] = "rbxassetid://0",
+	[2] = "rbxassetid://0",
+	[3] = "rbxassetid://0",
+	[4] = "rbxassetid://0",
+	[5] = "rbxassetid://0",
+	[6] = "rbxassetid://0",
+	[7] = "rbxassetid://0",
+	[8] = "rbxassetid://0",
+	[9] = "rbxassetid://0",
+	[10] = "rbxassetid://0",
+	[11] = "rbxassetid://0",
+	[12] = "rbxassetid://0",
+	[13] = "rbxassetid://0",
+	[14] = "rbxassetid://0",
+	[15] = "rbxassetid://0",
+	[16] = "rbxassetid://0",
+	[17] = "rbxassetid://0",
+	[18] = "rbxassetid://0",
+	[19] = "rbxassetid://0",
+	[20] = "rbxassetid://0",
+}
+
+-- 怪物快捷栏图片：1~30级
+Config.MONSTER_IMAGE_ID_BY_LEVEL = {
+	[1] = "rbxassetid://0",
+	[2] = "rbxassetid://0",
+	[3] = "rbxassetid://0",
+	[4] = "rbxassetid://0",
+	[5] = "rbxassetid://0",
+	[6] = "rbxassetid://0",
+	[7] = "rbxassetid://0",
+	[8] = "rbxassetid://0",
+	[9] = "rbxassetid://0",
+	[10] = "rbxassetid://0",
+	[11] = "rbxassetid://0",
+	[12] = "rbxassetid://0",
+	[13] = "rbxassetid://0",
+	[14] = "rbxassetid://0",
+	[15] = "rbxassetid://0",
+	[16] = "rbxassetid://0",
+	[17] = "rbxassetid://0",
+	[18] = "rbxassetid://0",
+	[19] = "rbxassetid://0",
+	[20] = "rbxassetid://0",
+	[21] = "rbxassetid://0",
+	[22] = "rbxassetid://0",
+	[23] = "rbxassetid://0",
+	[24] = "rbxassetid://0",
+	[25] = "rbxassetid://0",
+	[26] = "rbxassetid://0",
+	[27] = "rbxassetid://0",
+	[28] = "rbxassetid://0",
+	[29] = "rbxassetid://0",
+	[30] = "rbxassetid://0",
 }
 
 	-- 武器名称表：1~20级对应显示名称（用于热键栏 Tool 名称/商店显示等）

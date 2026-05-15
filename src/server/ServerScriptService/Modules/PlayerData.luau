@@ -348,6 +348,11 @@ local function setupLeaderstats(player: Player)
 	gold.Name = "Gold"
 	gold.Value = getOrCreate(player).Gold
 	gold.Parent = folder
+
+	local cashPerSec = Instance.new("IntValue")
+	cashPerSec.Name = "Cash/s"
+	cashPerSec.Value = 0
+	cashPerSec.Parent = folder
 end
 
 local function syncLeaderstatsAndAttributes(player: Player)
@@ -359,6 +364,10 @@ local function syncLeaderstatsAndAttributes(player: Player)
 		if gold and gold:IsA("IntValue") then
 			gold.Value = stats.Gold
 		end
+	end
+
+	if player:GetAttribute("CashPerSec") == nil then
+		player:SetAttribute("CashPerSec", 0)
 	end
 
 	player:SetAttribute("Gold", stats.Gold)
@@ -391,6 +400,18 @@ end
 
 function PlayerData.Sync(player: Player)
 	syncLeaderstatsAndAttributes(player)
+end
+
+function PlayerData.SetCashPerSec(player: Player, value: number)
+	local safeValue = math.max(0, math.floor(tonumber(value) or 0))
+	local ls = player:FindFirstChild("leaderstats")
+	if ls then
+		local cashPerSec = ls:FindFirstChild("Cash/s")
+		if cashPerSec and cashPerSec:IsA("IntValue") then
+			cashPerSec.Value = safeValue
+		end
+	end
+	player:SetAttribute("CashPerSec", safeValue)
 end
 
 function PlayerData.Export(player: Player): PersistedPlayerData
