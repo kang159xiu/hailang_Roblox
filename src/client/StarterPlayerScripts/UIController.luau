@@ -115,6 +115,18 @@ local isNormalSpeedActive = false -- 默认状态为 false（即默认使用升�
 local AUTO_ATTACK_ENABLED_ATTRIBUTE = "AutoAttackEnabled"
 local formatNumberShort: (number) -> string
 
+local DEBUG_UPGRADE_SHOP = false
+local DEBUG_WEAPON_SHOP = false
+local DEBUG_REBIRTH_UI = false
+local DEBUG_UI_TOAST = false
+local DEBUG_UI_INIT = false
+
+local function debugPrint(enabled: boolean, message: string)
+	if enabled then
+		print(message)
+	end
+end
+
 local function setStealTotalLabelText(amount: number)
 	if stealTotalLabel then
 		stealTotalLabel.Text = "+" .. formatNumberShort(math.max(0, math.floor(amount))) .. " Coins" --+500金币
@@ -428,7 +440,7 @@ local function bindUpgradePurchaseButton(upBtn: GuiButton, upgradeType: string)
 			return
 		end
 		fireLocked = true
-		warn(string.format("[UpgradeShopDebug][Client] fire type=%s source=%s button=%s", upgradeType, source, upBtn:GetFullName()))
+		debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Client] fire type=%s source=%s button=%s", upgradeType, source, upBtn:GetFullName()))
 		requestPurchaseUpgrade:FireServer(upgradeType)
 		task.delay(0.25, function()
 			fireLocked = false
@@ -505,6 +517,9 @@ local function refreshRebirthUI()
 	end
 
 	local function debugRebirthTextLabels(reason: string)
+		if not DEBUG_REBIRTH_UI then
+			return
+		end
 		if not rebirthWindow then
 			return
 		end
@@ -513,8 +528,8 @@ local function refreshRebirthUI()
 		end
 		rebirthUIDebugPrints += 1
 
-		warn(string.format("[RebirthUIDebug] %s window=%s", reason, rebirthWindow:GetFullName()))
-		warn(string.format(
+		debugPrint(DEBUG_REBIRTH_UI, string.format("[RebirthUIDebug] %s window=%s", reason, rebirthWindow:GetFullName()))
+		debugPrint(DEBUG_REBIRTH_UI, string.format(
 			"[RebirthUIDebug] attrs Gold=%s RebirthCount=%s RebirthMultiplier=%s NextRebirthCost=%s",
 			tostring(player:GetAttribute("Gold")),
 			tostring(player:GetAttribute("RebirthCount")),
@@ -524,7 +539,7 @@ local function refreshRebirthUI()
 
 		for _, desc in ipairs(rebirthWindow:GetDescendants()) do
 			if desc:IsA("TextLabel") then
-				warn(string.format(
+				debugPrint(DEBUG_REBIRTH_UI, string.format(
 					"[RebirthUIDebug] label path=%s name=%s text=%s visible=%s",
 					desc:GetFullName(),
 					desc.Name,
@@ -623,8 +638,9 @@ end
 local toastHideCounter = 0 
 
 local function showToast(text: string)
-	-- 保留原本的控制台打印，方便调试
-	print("[系统提示]:", text) 
+	if DEBUG_UI_TOAST then
+		print("[系统提示]:", text)
+	end
 	
 	-- 获取 UI 控件
 	local toastPanel = mainGui:FindFirstChild("提示消息")
@@ -1044,13 +1060,20 @@ local function refreshUpgradeShopUI()
 				costInfoLabel.Text = if currentValueText ~= "" then string.format("Max Level   %s", currentValueText) else "Max Level" --已满级
 
 			else
-				costInfoLabel.Text = if currentValueText ~= "" then string.format("Cost: %s   %s   %s", formatNumberShort(cost), incrementText, currentValueText) else string.format("Cost: %s   %s", formatNumberShort(cost), incrementText)
+				-- 所需金币现在显示在升级按钮内的“拿出text”上；这里不再重复显示金币数。
+				costInfoLabel.Text = if currentValueText ~= "" then string.format("%s   %s", incrementText, currentValueText) else incrementText
 			end
 		end
 
 		-- C. 绑定：升级按钮
 		local upBtn = findUpgradePurchaseButton(row)
 		if upBtn and upBtn:IsA("GuiButton") then
+			-- 将升级所需金币显示到按钮内部文字上，例如：HP升级.升级按钮.拿出text
+			local buttonCostText = upBtn:FindFirstChild("拿出text", true)
+			if buttonCostText and buttonCostText:IsA("TextLabel") then
+				buttonCostText.Text = if isMaxed then "Max" else formatNumberShort(cost)
+			end
+
 			if isMaxed then
 				if upBtn:IsA("ImageButton") then
 					upBtn.ImageTransparency = 0.5 -- 满级变灰
@@ -1063,11 +1086,11 @@ local function refreshUpgradeShopUI()
 				end
 				upBtn.Interactable = true
 				upBtn.Active = true
-				warn(string.format("[UpgradeShopDebug][Client] bound type=%s button=%s", info.type, upBtn:GetFullName()))
+				debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Client] bound type=%s button=%s", info.type, upBtn:GetFullName()))
 				bindUpgradePurchaseButton(upBtn, info.type)
 			end
 		else
-			warn(string.format("[UpgradeShopDebug][Client] upgrade button not found type=%s row=%s", info.type, row:GetFullName()))
+			debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Client] upgrade button not found type=%s row=%s", info.type, row:GetFullName()))
 		end
 	end
 	task.defer(updateUpgradeListCanvasSize)
@@ -1401,7 +1424,7 @@ local function bindWeaponShopButton(button: GuiButton, action: "purchase" | "equ
 		end
 		fireLocked = true
 
-		warn(string.format(
+		debugPrint(DEBUG_WEAPON_SHOP, string.format(
 			"[WeaponShopDebug][Client] fire action=%s level=%d source=%s button=%s attrs WeaponLevel=%s EquippedWeaponLevel=%s Gold=%s",
 			action,
 			weaponLevel,
@@ -1503,7 +1526,7 @@ local function refreshWeaponShopUI()
 		local price = Config.WEAPON_PRICE_BY_LEVEL and Config.WEAPON_PRICE_BY_LEVEL[i]
 		local attack = Config.WEAPON_ATTACK_BY_LEVEL and Config.WEAPON_ATTACK_BY_LEVEL[i]
 		if not price and i > 1 then
-			warn(string.format("[WeaponShopDebug] 跳过武器 %d：未找到价格配置", i))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug] 跳过武器 %d：未找到价格配置", i))
 			continue
 		end
 
@@ -1546,7 +1569,7 @@ local function refreshWeaponShopUI()
 				btn.Text = "Buy"
 				btn.Interactable = true
 				btn.Active = true
-				warn(string.format("[WeaponShopDebug][Client] bound action=purchase level=%d button=%s", i, btn:GetFullName()))
+				debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Client] bound action=purchase level=%d button=%s", i, btn:GetFullName()))
 				bindWeaponShopButton(btn, "purchase", i)
 			else
 				if i == equippedWeapon then
@@ -1557,7 +1580,7 @@ local function refreshWeaponShopUI()
 					btn.Text = "Equip"--装备
 					btn.Interactable = true
 					btn.Active = true
-					warn(string.format("[WeaponShopDebug][Client] bound action=equip level=%d button=%s", i, btn:GetFullName()))
+					debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Client] bound action=equip level=%d button=%s", i, btn:GetFullName()))
 					bindWeaponShopButton(btn, "equip", i)
 				end
 			end
@@ -2160,7 +2183,7 @@ function UIController.Init()
 		player:GetAttributeChangedSignal("SpeedLevel"):Connect(function() applyCurrentSpeed() end)
 	end
 
-	print("[UIController] 2D UI 逻辑加载完毕！")
+	debugPrint(DEBUG_UI_INIT, "[UIController] 2D UI 逻辑加载完毕！")
 end
 
 -- [新增内容] 暴露设置攻击按钮显示状态的方法给 Client.client.luau 调用

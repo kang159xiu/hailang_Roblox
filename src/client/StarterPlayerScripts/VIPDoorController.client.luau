@@ -10,6 +10,8 @@ local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local VIP_GAMEPASS_ID = 1806675692
 
+local DEBUG_VIP_DOOR = false
+
 local isVIP = false -- [新增] 记录当前玩家是否已拥有 VIP 权限
 local promptDebounce = false -- [新增] 防抖控制，避免连续触碰导致的弹窗轰炸
 
@@ -88,7 +90,9 @@ local function enableVIPDoors()
 		disableCollisionRecursive(obj)
 	end)
 	
-	print("[VIPDoor] 验证通过！已为玩家开启 VIP 专属通道！")
+	if DEBUG_VIP_DOOR then
+		print("[VIPDoor] 验证通过！已为玩家开启 VIP 专属通道！")
+	end
 end
 
 -- ==========================================

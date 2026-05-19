@@ -9,8 +9,39 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 local CharacterService = {}
 
+local FALL_RECOVERY_STATES = {
+	Enum.HumanoidStateType.FallingDown,
+	Enum.HumanoidStateType.Ragdoll,
+	Enum.HumanoidStateType.Physics,
+}
+
+local function hookFallRecovery(humanoid: Humanoid)
+	-- 允许玩家正常被击飞/倒地，只在进入倒地相关状态后延迟 0.1 秒尝试站起。
+	-- 不再 SetStateEnabled(false)，否则会直接吞掉击飞/倒地物理表现。
+	if humanoid:GetAttribute("FallRecoverHooked") == true then
+		return
+	end
+	humanoid:SetAttribute("FallRecoverHooked", true)
+
+	humanoid.StateChanged:Connect(function(_, newState)
+		if table.find(FALL_RECOVERY_STATES, newState) ~= nil then
+			task.delay(0.1, function()
+				if humanoid.Parent == nil or humanoid.Health <= 0 then
+					return
+				end
+
+				humanoid.PlatformStand = false
+				humanoid.Sit = false
+				humanoid.AutoRotate = true
+				humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+			end)
+		end
+	end)
+end
+
 local function applyStats(player: Player, humanoid: Humanoid, fullHeal: boolean?)
 	local stats = PlayerData.Get(player)
+	hookFallRecovery(humanoid)
 
 	-- 设置移动速度: 基础速度 + 速度等级 * 每级增加速度
 	humanoid.WalkSpeed = Config.WALK_SPEED_BASE + stats.SpeedLevel * Config.WALK_SPEED_PER_UPGRADE

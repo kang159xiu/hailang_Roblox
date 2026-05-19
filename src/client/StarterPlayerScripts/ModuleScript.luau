@@ -19,6 +19,9 @@ local requestEquipWeapon = remotes:WaitForChild("RequestEquipWeapon") :: RemoteE
 local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent
 local requestClearPlayerData = remotes:WaitForChild("RequestClearPlayerData") :: RemoteEvent
 
+local DEBUG_UI_TOAST = false
+local DEBUG_UI_INIT = false
+
 -- =====================
 -- 基础 UI 变量
 -- =====================
@@ -64,7 +67,9 @@ local function formatNumberShort(n: number): string
 end
 
 local function showToast(text: string)
-	print("[系统提示]:", text) -- [修改内容] 保持原有的静默输出逻辑
+	if DEBUG_UI_TOAST then
+		print("[系统提示]:", text)
+	end
 end
 
 -- =====================
@@ -125,7 +130,9 @@ function UIController.Init() -- [修改内容] 暴露初始化接口供外部调
 
 	-- 5. 初始化商店 (此处应包含原脚本中 openWeaponShopUI 等监听器)
 	-- [逻辑流]：监听服务端事件 -> 显示对应的 Window -> 调用刷新函数渲染列表
-    print("[UIController] 2D UI 逻辑已初始化")
+    if DEBUG_UI_INIT then
+        print("[UIController] 2D UI 逻辑已初始化")
+    end
 end
 
 return UIController

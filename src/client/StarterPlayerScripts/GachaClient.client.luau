@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
+local DEBUG_GACHA_STARTUP = false
+
 local player = Players.LocalPlayer
 local PlayerGui = player:WaitForChild("PlayerGui")
 local mainUI = PlayerGui:WaitForChild("MainUI")
@@ -15,9 +17,13 @@ local frameGacha = mainUI:WaitForChild("抽奖界面")
 local btnGold = frameGacha:WaitForChild("钱抽奖")
 local btnRbx = frameGacha:WaitForChild("R币抽奖")
 local btnRbx5 = frameGacha:WaitForChild("r币5次")
+local btnCount = frameGacha:WaitForChild("次数抽奖")
+local countDrawsLabel = btnCount:WaitForChild("Draws")
+local onlineRewardsLabel = btnCount:FindFirstChild("Online Rewards")
 local btnFast = frameGacha:WaitForChild("快速转")
 local btnClose = frameGacha:WaitForChild("关闭")
 local frameDisplay = frameGacha:WaitForChild("显示抽奖内容_Fram")
+local frameBorder = frameDisplay:WaitForChild("边框")
 
 -- 获取 5 个展示框
 local vpfList = {
@@ -28,10 +34,61 @@ local vpfList = {
 	frameDisplay:WaitForChild("ViewportFrame05"),
 }
 
+-- 获取 5 个边框；每个边框内有 5 个 UIGradient，对应 5 档稀有度。
+local borderList = {
+	frameBorder:WaitForChild("ImageLabel1"),
+	frameBorder:WaitForChild("ImageLabel2"),
+	frameBorder:WaitForChild("ImageLabel3"),
+	frameBorder:WaitForChild("ImageLabel4"),
+	frameBorder:WaitForChild("ImageLabel5"),
+}
+
+local RARITY_GRADIENT_BY_TIER = {
+	[1] = "01UIGradient_green",
+	[2] = "02UIGradient_blue",
+	[3] = "03UIGradient_violet",
+	[4] = "04UIGradient_yellow",
+	[5] = "05UIGradient_red",
+}
+
 local findMonsterTemplate
 local setupViewport
 local hasGachaPreview
 local refreshGachaPreview
+
+local function getMonsterRarityTier(level: number): number
+	-- 30 个怪，每 6 级为 1 档稀有度：1-6 绿、7-12 蓝、13-18 紫、19-24 黄、25-30 红。
+	local safeLevel = math.clamp(math.floor(tonumber(level) or 1), 1, 30)
+	return math.clamp(math.ceil(safeLevel / 6), 1, 5)
+end
+
+local function setBorderRarity(border: Instance?, level: number)
+	if not border or not border:IsA("GuiObject") then
+		return
+	end
+
+	local activeGradientName = RARITY_GRADIENT_BY_TIER[getMonsterRarityTier(level)]
+	border.Visible = true
+
+	for _, child in ipairs(border:GetChildren()) do
+		if child:IsA("UIGradient") then
+			child.Enabled = child.Name == activeGradientName
+		end
+	end
+end
+
+local function setSlotMonster(slotIndex: number, level: number, monsterFolder: Instance, isDebug: boolean)
+	local vpf = vpfList[slotIndex]
+	if not vpf then
+		return
+	end
+
+	local template = findMonsterTemplate(monsterFolder, level)
+	if template then
+		setupViewport(vpf, template, isDebug)
+		setBorderRarity(borderList[slotIndex], level)
+	end
+end
 
 local function appendUnique(list: {Instance}, inst: Instance?)
 	if not inst then
@@ -94,12 +151,9 @@ refreshGachaPreview = function(isDebug: boolean)
 
 	task.wait(0.5)
 
-	for _, vpf in ipairs(vpfList) do
-		local randomLevel = math.random(1, 5)
-		local template = findMonsterTemplate(monsterFolder, randomLevel)
-		if template then
-			setupViewport(vpf, template, isDebug)
-		end
+	for slotIndex, _ in ipairs(vpfList) do
+		local randomLevel = math.random(1, 30)
+		setSlotMonster(slotIndex, randomLevel, monsterFolder, isDebug)
 	end
 
 	return true
@@ -456,7 +510,9 @@ end
 -- =====================================================================
 
 task.spawn(function()
-	print("🚀 --- 游戏开局初始化开始，2秒后加载初始怪物展示 ---")
+	if DEBUG_GACHA_STARTUP then
+		print("🚀 --- 游戏开局初始化开始，2秒后加载初始怪物展示 ---")
+	end
 	task.wait(3)
 	refreshGachaPreview(true)
 end)
@@ -473,6 +529,44 @@ local isAnimating = false
 local fastOpenIndicator = btnFast:WaitForChild("快速开")
 fastOpenIndicator.Visible = false
 
+local function getCurrentGachaDrawCount(): number
+	local count = player:GetAttribute("GachaDrawCount")
+	return math.max(0, math.floor(tonumber(count) or 0))
+end
+
+local function updateCountDrawsLabel()
+	if countDrawsLabel:IsA("TextLabel") or countDrawsLabel:IsA("TextButton") or countDrawsLabel:IsA("TextBox") then
+		countDrawsLabel.Text = "x" .. tostring(getCurrentGachaDrawCount())
+	end
+end
+
+local function formatOnlineRewardTime(seconds: number): string
+	seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	local minutes = math.floor(seconds / 60)
+	local remainSeconds = seconds % 60
+	return string.format("%dm%02ds", minutes, remainSeconds)
+end
+
+local function updateOnlineRewardsLabel()
+	if not onlineRewardsLabel or not (onlineRewardsLabel:IsA("TextLabel") or onlineRewardsLabel:IsA("TextButton") or onlineRewardsLabel:IsA("TextBox")) then
+		return
+	end
+
+	if player:GetAttribute("OnlineRewardAllClaimed") == true then
+		onlineRewardsLabel.Text = "Done <+1>"
+		return
+	end
+
+	local secondsUntilNext = math.max(0, math.floor(tonumber(player:GetAttribute("OnlineRewardSecondsUntilNext")) or 0))
+	onlineRewardsLabel.Text = formatOnlineRewardTime(secondsUntilNext) .. " <+1>"
+end
+
+updateCountDrawsLabel()
+player:GetAttributeChangedSignal("GachaDrawCount"):Connect(updateCountDrawsLabel)
+updateOnlineRewardsLabel()
+player:GetAttributeChangedSignal("OnlineRewardSecondsUntilNext"):Connect(updateOnlineRewardsLabel)
+player:GetAttributeChangedSignal("OnlineRewardAllClaimed"):Connect(updateOnlineRewardsLabel)
+
 btnFast.MouseButton1Click:Connect(function()
 	isFastMode = not isFastMode
 	fastOpenIndicator.Visible = isFastMode
@@ -483,6 +577,24 @@ btnGold.MouseButton1Click:Connect(function()
 	if isAnimating then return end
 	requestEvent:FireServer("Gold1")
 end)
+
+local function requestCountGacha()
+	if isAnimating then
+		return
+	end
+
+	updateCountDrawsLabel()
+	local currentDrawCount = getCurrentGachaDrawCount()
+	if currentDrawCount <= 0 then
+		warn("[GachaClient] 次数抽奖失败：当前抽奖次数不足")
+		return
+	end
+
+	print("[GachaClient] Count1 request, draws=", currentDrawCount)
+	requestEvent:FireServer("Count1")
+end
+
+btnCount.Activated:Connect(requestCountGacha)
 
 
 btnRbx.MouseButton1Click:Connect(function()
@@ -526,22 +638,16 @@ resultEvent.OnClientEvent:Connect(function(results, serverDuration)
 				finished = true
 
 
-				for _, vpf in ipairs(vpfList) do
-					local template = findMonsterTemplate(monsterFolder, resLevel)
-					if template then
-						setupViewport(vpf, template, true)
-					end
+				for slotIndex, _ in ipairs(vpfList) do
+					setSlotMonster(slotIndex, resLevel, monsterFolder, true)
 				end
 				return
 			end
 
 			if frameCounter % 4 == 0 then
-				for _, vpf in ipairs(vpfList) do
+				for slotIndex, _ in ipairs(vpfList) do
 					local randomLevel = math.random(1, 30)
-					local template = findMonsterTemplate(monsterFolder, randomLevel)
-					if template then
-						setupViewport(vpf, template, false)
-					end
+					setSlotMonster(slotIndex, randomLevel, monsterFolder, false)
 				end
 			end
 		end)

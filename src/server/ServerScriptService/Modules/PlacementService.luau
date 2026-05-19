@@ -127,6 +127,23 @@ type PendingStealSession = {
 
 local pendingStealByThiefUserId: {[number]: PendingStealSession} = {}
 
+local DEBUG_UPGRADE_BUTTON = false
+local DEBUG_PLACEMENT_GOLD = false
+local DEBUG_PLACEMENT_VFX = false
+local DEBUG_PLACEMENT_INIT = false
+
+local function debugPrint(enabled: boolean, message: string)
+	if enabled then
+		print(message)
+	end
+end
+
+local function debugUpgradeButton(message: string)
+	if DEBUG_UPGRADE_BUTTON then
+		print("[UpgradeButtonDebug][Server] " .. message)
+	end
+end
+
 local function getStealAmountForPlayer(player: Player): number
 	local stats = PlayerData.Get(player)
 	local stealLevel = math.max(0, math.floor(tonumber((stats :: any).StealLevel) or 0))
@@ -1043,7 +1060,7 @@ local function addUnclaimedToPlayer(player: Player, placed: BasePart): number
 	local added = PlayerData.AddGold(player, unBase)
 	PlayerData.Sync(player)
 
-	warn(string.format(
+	debugPrint(DEBUG_PLACEMENT_GOLD, string.format(
 		"[PlacementGoldDebug] collect player=%s slot=%d unclaimedBase=%d multiplier=x%d expectedAdded=%d actualAdded=%d",
 		player.Name,
 		idx,
@@ -1764,7 +1781,7 @@ end
 local function emitPlacementVfxAt(targetCFrame: CFrame): boolean
 	local vfxTemplate = findPlacementVfxTemplate()
 	if not vfxTemplate then
-		warn("[VFX Debug] 警告：找不到放置特效模板。支持放置到 Workspace 任意层级：'放置特效01'，或 '放置特效/放置特效01'。")
+		debugPrint(DEBUG_PLACEMENT_VFX, "[VFX Debug] 警告：找不到放置特效模板。支持放置到 Workspace 任意层级：'放置特效01'，或 '放置特效/放置特效01'。")
 		return false
 	end
 
@@ -1791,9 +1808,9 @@ local function emitPlacementVfxAt(targetCFrame: CFrame): boolean
 	end
 
 	if emitted <= 0 then
-		warn("[VFX Debug] 警告：放置特效模板内没有 ParticleEmitter：" .. debugInstancePath(vfxTemplate))
+		debugPrint(DEBUG_PLACEMENT_VFX, "[VFX Debug] 警告：放置特效模板内没有 ParticleEmitter：" .. debugInstancePath(vfxTemplate))
 	else
-		print(string.format("[VFX Debug] 放置特效已播放，模板=%s，发射器数量=%d", debugInstancePath(vfxTemplate), emitted))
+		debugPrint(DEBUG_PLACEMENT_VFX, string.format("[VFX Debug] 放置特效已播放，模板=%s，发射器数量=%d", debugInstancePath(vfxTemplate), emitted))
 	end
 
 	task.delay(2.5, function()
@@ -2004,13 +2021,13 @@ local function resolvePlacedMonsterForUpgrade(player: Player, slotIndex: number,
 	local existing = findExistingPlacedMonsterForSlot(player, slotIndex, slotPart, homeRoot)
 	if existing then
 		state.PlacedMonster = existing
-		warn(string.format("[UpgradeButtonDebug][Server] recovered placed monster reference player=%s slot=%d monster=%s", player.Name, slotIndex, existing:GetFullName()))
+		debugUpgradeButton(string.format("recovered placed monster reference player=%s slot=%d monster=%s", player.Name, slotIndex, existing:GetFullName()))
 		return existing
 	end
 
 	local rebuilt = rebuildPlacedMonsterForSlot(player, slotPart, state)
 	if rebuilt then
-		warn(string.format("[UpgradeButtonDebug][Server] rebuilt placed monster for upgrade player=%s slot=%d monster=%s", player.Name, slotIndex, rebuilt:GetFullName()))
+		debugUpgradeButton(string.format("rebuilt placed monster for upgrade player=%s slot=%d monster=%s", player.Name, slotIndex, rebuilt:GetFullName()))
 		return rebuilt
 	end
 
@@ -2019,55 +2036,55 @@ end
 
 local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boolean
 	if player:GetAttribute("__DataLoaded") ~= true then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: data not loaded player=%s", player.Name))
+		debugUpgradeButton(string.format("upgrade rejected: data not loaded player=%s", player.Name))
 		return false
 	end
 
 	local idx = math.floor(slotIndex)
 	if idx < 1 then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: invalid slot player=%s slot=%s", player.Name, tostring(slotIndex)))
+		debugUpgradeButton(string.format("upgrade rejected: invalid slot player=%s slot=%s", player.Name, tostring(slotIndex)))
 		return false
 	end
 
 	local home = HomeService.GetHome(player)
 	if not home then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: home not found player=%s slot=%d", player.Name, idx))
+		debugUpgradeButton(string.format("upgrade rejected: home not found player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local slot = HomeService.GetSlot(player, idx)
 	if not slot then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: slot not found player=%s slot=%d", player.Name, idx))
+		debugUpgradeButton(string.format("upgrade rejected: slot not found player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local stateMap = slotStatesByUserId[player.UserId]
 	if type(stateMap) ~= "table" then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: state map missing player=%s slot=%d", player.Name, idx))
+		debugUpgradeButton(string.format("upgrade rejected: state map missing player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local safeMap = stateMap :: {[number]: SlotState}
 	local state = safeMap[idx]
 	if not state then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: slot state missing player=%s slot=%d", player.Name, idx))
+		debugUpgradeButton(string.format("upgrade rejected: slot state missing player=%s slot=%d", player.Name, idx))
 		return false
 	end
 
 	local pm = resolvePlacedMonsterForUpgrade(player, idx, slot.Part, home.HomeRoot, state)
 	if not pm or not pm.Parent then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: placed monster missing player=%s slot=%d", player.Name, idx))
+		debugUpgradeButton(string.format("upgrade rejected: placed monster missing player=%s slot=%d", player.Name, idx))
 		toast(player, "Place a monster before upgrading!")
 		return false
 	end
 
 	local activePm = pm :: BasePart
 	if activePm:GetAttribute("IsPlacedMonster") ~= true then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: target is not placed monster player=%s slot=%d monster=%s", player.Name, idx, activePm:GetFullName()))
+		debugUpgradeButton(string.format("upgrade rejected: target is not placed monster player=%s slot=%d monster=%s", player.Name, idx, activePm:GetFullName()))
 		return false
 	end
 	if getNumAttr(activePm, "OwnerUserId", -1) ~= player.UserId then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: owner mismatch player=%s slot=%d owner=%d monster=%s", player.Name, idx, getNumAttr(activePm, "OwnerUserId", -1), activePm:GetFullName()))
+		debugUpgradeButton(string.format("upgrade rejected: owner mismatch player=%s slot=%d owner=%d monster=%s", player.Name, idx, getNumAttr(activePm, "OwnerUserId", -1), activePm:GetFullName()))
 		return false
 	end
 
@@ -2076,7 +2093,7 @@ local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boole
 	local upgradeCost = upLevel * 100 * baseGps
 
 	if not PlayerData.TrySpendGold(player, upgradeCost) then
-		warn(string.format("[UpgradeButtonDebug][Server] upgrade rejected: not enough gold player=%s slot=%d cost=%d level=%d baseGps=%d", player.Name, idx, upgradeCost, upLevel, baseGps))
+		debugUpgradeButton(string.format("upgrade rejected: not enough gold player=%s slot=%d cost=%d level=%d baseGps=%d", player.Name, idx, upgradeCost, upLevel, baseGps))
 		toast(player, "Not enough gold!")
 		return false
 	end
@@ -2103,7 +2120,7 @@ local function tryUpgradePlacedMonster(player: Player, slotIndex: number): boole
 	refreshIncomeDisplayForSlot(player, slot.Part, slot.Collector, activePm)
 	toast(player, "Upgrade successful!")
 	DataDirtyService.MarkDirty(player)
-	warn(string.format("[UpgradeButtonDebug][Server] upgrade success player=%s slot=%d level=%d cost=%d newGps=%d", player.Name, idx, newLevel, upgradeCost, newGps))
+	debugUpgradeButton(string.format("upgrade success player=%s slot=%d level=%d cost=%d newGps=%d", player.Name, idx, newLevel, upgradeCost, newGps))
 	return true
 end
 
@@ -2236,13 +2253,13 @@ function PlacementService.Init()
 
 	requestUpgradePlacedMonsterRemote.OnServerEvent:Connect(function(player: Player, slotIndex: any, clickedOwnerUserId: any)
 		if type(slotIndex) ~= "number" then
-			warn(string.format("[UpgradeButtonDebug][Server] rejected non-number slotIndex player=%s value=%s", player.Name, tostring(slotIndex)))
+			debugUpgradeButton(string.format("rejected non-number slotIndex player=%s value=%s", player.Name, tostring(slotIndex)))
 			return
 		end
 		if type(clickedOwnerUserId) ~= "number" or math.floor(clickedOwnerUserId :: number) ~= player.UserId then
 			return
 		end
-		warn(string.format("[UpgradeButtonDebug][Server] received player=%s slot=%d owner=%d", player.Name, math.floor(slotIndex :: number), math.floor(clickedOwnerUserId :: number)))
+		debugUpgradeButton(string.format("received player=%s slot=%d owner=%d", player.Name, math.floor(slotIndex :: number), math.floor(clickedOwnerUserId :: number)))
 		tryUpgradePlacedMonster(player, slotIndex :: number)
 	end)
 
@@ -2265,7 +2282,7 @@ function PlacementService.Init()
 				return
 			end
 
-			print(string.format("[PlacementDebug] 玩家 %s 的家园已就绪，共有 %d 个槽位", player.Name, #home.Slots))
+			debugPrint(DEBUG_PLACEMENT_INIT, string.format("[PlacementDebug] 玩家 %s 的家园已就绪，共有 %d 个槽位", player.Name, #home.Slots))
 			for _, slot in ipairs(home.Slots) do
 				local displayModel: Model? = nil
 				if slot.Collector then
@@ -2334,10 +2351,10 @@ function PlacementService.Init()
 									btn:SetAttribute("OwnerUserId", player.UserId)
 									btn:SetAttribute("SlotIndex", slot.Index)
 								else
-									warn(string.format("[UpgradeButtonDebug][Server] ImageButton_升级按钮 not found for player=%s slot=%d display=%s surface=%s", player.Name, slot.Index, dm:GetFullName(), surfaceGui:GetFullName()))
+									debugUpgradeButton(string.format("ImageButton_升级按钮 not found for player=%s slot=%d display=%s surface=%s", player.Name, slot.Index, dm:GetFullName(), surfaceGui:GetFullName()))
 								end
 							else
-								warn(string.format("[UpgradeButtonDebug][Server] SurfaceGui not found for player=%s slot=%d display=%s clickPart=%s", player.Name, slot.Index, dm:GetFullName(), clickPart:GetFullName()))
+								debugUpgradeButton(string.format("SurfaceGui not found for player=%s slot=%d display=%s clickPart=%s", player.Name, slot.Index, dm:GetFullName(), clickPart:GetFullName()))
 							end
 
 							local oldCD = clickPart:FindFirstChildWhichIsA("ClickDetector") :: ClickDetector?

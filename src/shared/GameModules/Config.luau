@@ -35,25 +35,21 @@ Config.REPLENISH_BATCH_INTERVAL_SECONDS = 5
 -- 玩家金币与升级
 -- =====================
 
--- 新玩家初始金币（只在 PlayerAdded 初始化时生效）
-Config.PLAYER_START_GOLD = 8000000
-
 -- =====================
 -- 重生系统
 -- =====================
 
--- 第 1 次金币重生所需金币；之后每次 = 上一次 * 5
-Config.REBIRTH_BASE_COST = 10000
-Config.REBIRTH_COST_MULTIPLIER = 5
-
--- R 币重生 Developer Product ID
+-- 金币重生所需金币：5000 * 1.5^(等级 - 1)
+Config.REBIRTH_BASE_COST = 5000
+Config.REBIRTH_COST_MULTIPLIER = 2
 Config.REBIRTH_PRODUCT_ID = 3591432502
 
 function Config.GetRebirthCost(rebirthCount: number): number
 	rebirthCount = math.max(0, math.floor(tonumber(rebirthCount) or 0))
-	local baseCost = tonumber(Config.REBIRTH_BASE_COST) or 10000
-	local multiplier = tonumber(Config.REBIRTH_COST_MULTIPLIER) or 5
-	return math.floor(baseCost * (multiplier ^ rebirthCount))
+	local level = rebirthCount + 1
+	local baseCost = tonumber(Config.REBIRTH_BASE_COST) or 5000
+	local multiplier = tonumber(Config.REBIRTH_COST_MULTIPLIER) or 1.5
+	return math.floor(baseCost * (level ^ (level - 1)))
 end
 
 function Config.GetRebirthCashMultiplier(rebirthCount: number): number
@@ -63,16 +59,29 @@ end
 
 -- 玩家的初始移动速度。Roblox 默认值是 16，你可以把它改大，比如 25 或 30
 Config.WALK_SPEED_BASE = 25
-Config.WALK_SPEED_PER_UPGRADE = 1
+Config.WALK_SPEED_PER_UPGRADE = 2
 
--- 速度升级花费：level * (level * 50)
+-- 速度升级花费：分段式
+-- 1-5级：100 + 50 * 等级
+-- 6-15级：300 + 30 * 等级 + 5 * 等级^2
+-- 16级以后：1000 * 1.2^(等级 - 16)
 function Config.GetSpeedUpgradeCost(level: number): number
-	return level * (level * 500)
+	level = math.max(1, math.floor(tonumber(level) or 1))
+	if level <= 5 then
+		return math.floor(100 + 50 * level)
+	end
+
+	if level <= 15 then
+		return math.floor(300 + 30 * level + 5 * (level ^ 2))
+	end
+
+	return math.floor(1000 * (1.2 ^ (level - 16)))
 end
 
--- 攻击力升级花费：level * (level * 100)
+-- 攻击力升级花费：100 * 等级^1.5
 function Config.GetAttackUpgradeCost(level: number): number
-	return level * (level * 500)
+	level = math.max(1, math.floor(tonumber(level) or 1))
+	return math.floor(300 * (1.25 ^ (level - 1)))
 end
 
 -- 攻击力每次升级增加多少（你确认：+10/级）
@@ -199,99 +208,34 @@ Config.MONSTER_INFO_SHOW_DISTANCE = 15
 -- 详细信息显示距离（studs）：距离近时才显示价值/金币产出等
 Config.MONSTER_DETAIL_SHOW_DISTANCE = 6
 
--- =====================
--- 快捷栏 Tool 图标模板
--- =====================
--- 用途：Roblox 默认快捷栏会读取 Tool.TextureId。
--- 填写方式：把 "rbxassetid://0" 替换成你上传到 Roblox 后得到的图片 ID。
--- 建议素材：正方形 PNG、透明背景、主体居中；例如 512x512 或 1024x1024。
-
--- 武器快捷栏图片：1~20级
-Config.WEAPON_IMAGE_ID_BY_LEVEL = {
-	[1] = "rbxassetid://0",
-	[2] = "rbxassetid://0",
-	[3] = "rbxassetid://0",
-	[4] = "rbxassetid://0",
-	[5] = "rbxassetid://0",
-	[6] = "rbxassetid://0",
-	[7] = "rbxassetid://0",
-	[8] = "rbxassetid://0",
-	[9] = "rbxassetid://0",
-	[10] = "rbxassetid://0",
-	[11] = "rbxassetid://0",
-	[12] = "rbxassetid://0",
-	[13] = "rbxassetid://0",
-	[14] = "rbxassetid://0",
-	[15] = "rbxassetid://0",
-	[16] = "rbxassetid://0",
-	[17] = "rbxassetid://0",
-	[18] = "rbxassetid://0",
-	[19] = "rbxassetid://0",
-	[20] = "rbxassetid://0",
+-- 武器名称表：1~20级对应显示名称（用于热键栏 Tool 名称/商店显示等）
+-- 你后期只需要改这里的文字即可完成“武器改名”。
+Config.WEAPON_NAME_BY_LEVEL = {
+	[1] = "Weapon 1",
+	[2] = "Weapon 2",
+	[3] = "Weapon 3",
+	[4] = "Weapon 4",
+	[5] = "Weapon 5",
+	[6] = "Weapon 6",
+	[7] = "Weapon 7",
+	[8] = "Weapon 8",
+	[9] = "Weapon 9",
+	[10] = "Weapon 10",
+	[11] = "Weapon 11",
+	[12] = "Weapon 12",
+	[13] = "Weapon 13",
+	[14] = "Weapon 14",
+	[15] = "Weapon 15",
+	[16] = "Weapon 16",
+	[17] = "Weapon 17",
+	[18] = "Weapon 18",
+	[19] = "Weapon 19",
+	[20] = "Weapon 20",
 }
 
--- 怪物快捷栏图片：1~30级
-Config.MONSTER_IMAGE_ID_BY_LEVEL = {
-	[1] = "rbxassetid://0",
-	[2] = "rbxassetid://0",
-	[3] = "rbxassetid://0",
-	[4] = "rbxassetid://0",
-	[5] = "rbxassetid://0",
-	[6] = "rbxassetid://0",
-	[7] = "rbxassetid://0",
-	[8] = "rbxassetid://0",
-	[9] = "rbxassetid://0",
-	[10] = "rbxassetid://0",
-	[11] = "rbxassetid://0",
-	[12] = "rbxassetid://0",
-	[13] = "rbxassetid://0",
-	[14] = "rbxassetid://0",
-	[15] = "rbxassetid://0",
-	[16] = "rbxassetid://0",
-	[17] = "rbxassetid://0",
-	[18] = "rbxassetid://0",
-	[19] = "rbxassetid://0",
-	[20] = "rbxassetid://0",
-	[21] = "rbxassetid://0",
-	[22] = "rbxassetid://0",
-	[23] = "rbxassetid://0",
-	[24] = "rbxassetid://0",
-	[25] = "rbxassetid://0",
-	[26] = "rbxassetid://0",
-	[27] = "rbxassetid://0",
-	[28] = "rbxassetid://0",
-	[29] = "rbxassetid://0",
-	[30] = "rbxassetid://0",
-}
-
-	-- 武器名称表：1~20级对应显示名称（用于热键栏 Tool 名称/商店显示等）
-	-- 你后期只需要改这里的文字即可完成“武器改名”。
-	Config.WEAPON_NAME_BY_LEVEL = {
-		[1] = "Weapon 1",
-		[2] = "Weapon 2",
-		[3] = "Weapon 3",
-		[4] = "Weapon 4",
-		[5] = "Weapon 5",
-		[6] = "Weapon 6",
-		[7] = "Weapon 7",
-		[8] = "Weapon 8",
-		[9] = "Weapon 9",
-		[10] = "Weapon 10",
-		[11] = "Weapon 11",
-		[12] = "Weapon 12",
-		[13] = "Weapon 13",
-		[14] = "Weapon 14",
-		[15] = "Weapon 15",
-		[16] = "Weapon 16",
-		[17] = "Weapon 17",
-		[18] = "Weapon 18",
-		[19] = "Weapon 19",
-		[20] = "Weapon 20",
-	}
-
-	-- =====================
-	-- 怪（1~30级）血量
-	-- =====================
+-- =====================
+-- 怪（1~30级）血量
+-- =====================
 
 Config.MONSTER_HP_BY_LEVEL = {
 	50, 100, 150, 200, 250, 300, 400, 500, 600, 700,
@@ -308,19 +252,19 @@ Config.MONSTER_VALUE_BY_LEVEL = {
 
 -- 1~30 级怪的每秒产金币（放置后产生，金币先累积到“未领取”）
 Config.MONSTER_GOLD_PER_SEC_BY_LEVEL = {
-	1, 2, 4, 6, 8, 10, 15, 20, 25, 30,
-	40, 50, 60, 70, 80, 90, 100, 120, 130, 140,
-	200, 250, 300, 350, 400, 450, 500, 550, 600, 700,
+	10, 20, 40, 60, 80, 100, 150, 200, 250, 300,
+	400, 500, 600, 700, 800, 900, 1000, 1200, 1300, 1400,
+	2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 7000,
 }
 
 -- 拿取区域（1~10级）刷怪概率表
 -- 说明：每个数组长度为 30，对应怪等级 1~30 的权重（不是百分比，权重越大越容易刷出）。
 Config.ZONE_MONSTER_WEIGHTS = {
-	[1]  = {100,80,60,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-	[2]  = {10,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-	[3]  = {0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-	[4]  = {0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-	[5]  = {0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0},
+	[1]  = {100,50,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+	[2]  = {0,10,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+	[3]  = {0,0,5,10,20,60,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+	[4]  = {0,0,0,0,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+	[5]  = {0,0,0,0,0,0,0,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0,0,0,0},
 	[6]  = {0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0,0,0},
 	[7]  = {0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0,0,0,0},
 	[8]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,10,20,40,80,100,100,80,40,20,10,5,0,0,0,0},

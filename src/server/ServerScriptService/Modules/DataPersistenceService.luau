@@ -47,6 +47,10 @@ export type PersistedInventoryMonsterItem = {
 
 export type PersistedPlayerData = {
 	Gold: number,
+	GachaDrawCount: number?,
+	OnlineRewardDateKey: string?,
+	OnlineRewardSeconds: number?,
+	OnlineRewardClaimedIndex: number?,
 	RebirthCount: number?,
 	SpeedLevel: number,
 	AttackLevel: number,
@@ -76,6 +80,10 @@ export type PersistedProfileData = {
 local PROFILE_TEMPLATE: PersistedProfileData = {
 	PlayerData = {
 		Gold = 0,
+		GachaDrawCount = 5,
+		OnlineRewardDateKey = "",
+		OnlineRewardSeconds = 0,
+		OnlineRewardClaimedIndex = 0,
 		RebirthCount = 0,
 		SpeedLevel = 0,
 		AttackLevel = 0,

@@ -121,6 +121,16 @@ local requestRebirthRemote = remotes:WaitForChild("RequestRebirth") :: RemoteEve
 -- [修改内容] 引用装备武器事件
 local requestEquipWeaponRemote = remotes:WaitForChild("RequestEquipWeapon") :: RemoteEvent
 
+local DEBUG_PROMPT_INTERACTION = false
+local DEBUG_ANALYTICS = false
+local DEBUG_SERVER_STARTUP = false
+
+local function debugPrint(enabled: boolean, message: string)
+	if enabled then
+		print(message)
+	end
+end
+
 local function debugPromptPath(instance: Instance?): string
 	if not instance then
 		return "nil"
@@ -452,7 +462,7 @@ damageRemote.OnServerEvent:Connect(function(player: Player, monsterPart: Instanc
 end)
 
 requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, promptInstance: Instance)
-	print(string.format(
+	debugPrint(DEBUG_PROMPT_INTERACTION, string.format(
 		"[PromptDebug][Server] OnServerEvent player=%s prompt=%s class=%s parent=%s",
 		player.Name,
 		debugPromptPath(promptInstance),
@@ -461,7 +471,7 @@ requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, pr
 	))
 
 	if PlacementService.TryHandlePromptInteraction(player, promptInstance) then
-		print(string.format(
+		debugPrint(DEBUG_PROMPT_INTERACTION, string.format(
 			"[PromptDebug][Server] handled_by=PlacementService player=%s prompt=%s",
 			player.Name,
 			debugPromptPath(promptInstance)
@@ -470,7 +480,7 @@ requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, pr
 	end
 
 	if MonsterService.TryHandlePromptInteraction(player, promptInstance) then
-		print(string.format(
+		debugPrint(DEBUG_PROMPT_INTERACTION, string.format(
 			"[PromptDebug][Server] handled_by=MonsterService player=%s prompt=%s",
 			player.Name,
 			debugPromptPath(promptInstance)
@@ -478,14 +488,14 @@ requestPromptInteractionRemote.OnServerEvent:Connect(function(player: Player, pr
 		return
 	end
 
-	print(string.format(
+	debugPrint(DEBUG_PROMPT_INTERACTION, string.format(
 		"[PromptDebug][Server] rejected_by_all player=%s prompt=%s",
 		player.Name,
 		debugPromptPath(promptInstance)
 	))
 end)
 
-print("[Game] Server initialized")
+debugPrint(DEBUG_SERVER_STARTUP, "[Game] Server initialized")
 
 -- [修改原因] 规范化引入 AnalyticsService，移除重复定义的 ReplicatedStorage，并直接引用上方已建好的 remotesFolder
 local AnalyticsService = game:GetService("AnalyticsService")
@@ -577,7 +587,7 @@ local function logPlayerLeave(player: Player)
 	local zoneName = getPlayerExitZone(player)
 	local exitTime = getExitTimeText()
 	AnalyticsService:LogCustomEvent(player, string.format("PlayerLeave_%s_%s", zoneName, exitTime))
-	print(string.format("[Analytics] PlayerLeave player=%s userId=%d time=%s zone=%s", player.Name, player.UserId, exitTime, zoneName))
+	debugPrint(DEBUG_ANALYTICS, string.format("[Analytics] PlayerLeave player=%s userId=%d time=%s zone=%s", player.Name, player.UserId, exitTime, zoneName))
 	if rateLimitData[player.UserId] ~= nil then
 		rateLimitData[player.UserId] = nil
 	end

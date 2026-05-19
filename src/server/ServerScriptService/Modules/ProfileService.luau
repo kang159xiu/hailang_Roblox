@@ -380,6 +380,8 @@ end
 
 ----- Service Table -----
 
+local DEBUG_PROFILE_SERVICE_STATUS = false
+
 local ProfileService = {
 
 	ServiceLocked = false, -- Set to true once the server is shutting down
@@ -2304,9 +2306,13 @@ if IsStudio == true then
 
 			UseMockDataStore = true
 			ProfileService._use_mock_data_store = true
-			print("[ProfileService]: Roblox API services unavailable - data will not be saved")
+			if DEBUG_PROFILE_SERVICE_STATUS then
+				print("[ProfileService]: Roblox API services unavailable - data will not be saved")
+			end
 		else
-			print("[ProfileService]: Roblox API services available - data will be saved")
+			if DEBUG_PROFILE_SERVICE_STATUS then
+				print("[ProfileService]: Roblox API services available - data will be saved")
+			end
 		end
 		IsLiveCheckActive = false
 	end)

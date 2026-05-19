@@ -21,6 +21,15 @@ local Util = require(script.Parent:WaitForChild("Util"))
 
 local MerchantService = {}
 
+local DEBUG_WEAPON_SHOP = false
+local DEBUG_UPGRADE_SHOP = false
+
+local function debugPrint(enabled: boolean, message: string)
+	if enabled then
+		print(message)
+	end
+end
+
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestPurchaseUpgrade = remotes:WaitForChild("RequestPurchaseUpgrade") :: RemoteEvent
 local requestPurchaseWeapon = remotes:WaitForChild("RequestPurchaseWeapon") :: RemoteEvent
@@ -126,12 +135,12 @@ function MerchantService.Init()
 	requestPurchaseWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
 		local wm = ZoneService.GetWeaponMerchantPart()
 		if not wm then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
 			pushToast(player, "Weapon shop is not available")
 			return
 		end
 		if not isNear(player, wm, 12) then
-			warn(string.format(
+			debugPrint(DEBUG_WEAPON_SHOP, string.format(
 				"[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=too_far distance=%s",
 				player.Name,
 				tostring(desiredWeaponLevel),
@@ -144,13 +153,13 @@ function MerchantService.Init()
 		local stats = PlayerData.Get(player)
 		local desired = tonumber(desiredWeaponLevel)
 		if not desired then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
 			pushToast(player, "Invalid weapon level")
 			return
 		end
 		desired = math.floor(desired)
 
-		warn(string.format(
+		debugPrint(DEBUG_WEAPON_SHOP, string.format(
 			"[WeaponShopDebug][Server] received action=purchase player=%s desired=%d current=%d gold=%s",
 			player.Name,
 			desired,
@@ -158,20 +167,20 @@ function MerchantService.Init()
 			tostring(stats.Gold)
 		))
 		if desired < 1 then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=invalid_level", player.Name, desired))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=invalid_level", player.Name, desired))
 			pushToast(player, "Invalid weapon level")
 			return
 		end
 
 		local price = Config.WEAPON_PRICE_BY_LEVEL[desired]
 		if price == nil then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=missing_price", player.Name, desired))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=missing_price", player.Name, desired))
 			pushToast(player, "Invalid weapon level")
 			return
 		end
 
 		if table.find(stats.OwnedWeaponLevels, desired) ~= nil then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=already_owned", player.Name, desired))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=already_owned", player.Name, desired))
 			pushToast(player, string.format("Already owned: Weapon Lv.%d", desired))
 			return
 		end
@@ -179,7 +188,7 @@ function MerchantService.Init()
 		
 
 		if not PlayerData.TrySpendGold(player, price) then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=not_enough_gold need=%s gold=%s", player.Name, desired, tostring(price), tostring(stats.Gold)))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=purchase player=%s desired=%d reason=not_enough_gold need=%s gold=%s", player.Name, desired, tostring(price), tostring(stats.Gold)))
 			pushToast(player, string.format("Not enough gold. Need %s", Util.FormatMoney(price)))
 			return
 		end
@@ -198,7 +207,7 @@ function MerchantService.Init()
 
 		WeaponToolService.GrantWeapon(player, desired, true)
 		DataDirtyService.MarkDirty(player, 5)
-		warn(string.format("[WeaponShopDebug][Server] success action=purchase player=%s level=%d cost=%s", player.Name, desired, tostring(price)))
+		debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] success action=purchase player=%s level=%d cost=%s", player.Name, desired, tostring(price)))
 		pushToast(player, string.format("Purchase successful: Weapon Lv.%d (Cost %s)", desired, Util.FormatMoney(price)))
 	end)
 
@@ -206,12 +215,12 @@ function MerchantService.Init()
 	requestEquipWeapon.OnServerEvent:Connect(function(player: Player, desiredWeaponLevel: any)
 		local wm = ZoneService.GetWeaponMerchantPart()
 		if not wm then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=merchant_missing", player.Name, tostring(desiredWeaponLevel)))
 			pushToast(player, "Weapon shop is not available")
 			return
 		end
 		if not isNear(player, wm, 12) then
-			warn(string.format(
+			debugPrint(DEBUG_WEAPON_SHOP, string.format(
 				"[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=too_far distance=%s",
 				player.Name,
 				tostring(desiredWeaponLevel),
@@ -223,17 +232,17 @@ function MerchantService.Init()
 
 		local desired = tonumber(desiredWeaponLevel)
 		if not desired then
-			warn(string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
+			debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] rejected action=equip player=%s desired=%s reason=invalid_desired", player.Name, tostring(desiredWeaponLevel)))
 			pushToast(player, "Invalid weapon level")
 			return
 		end
 		desired = math.floor(desired)
-		warn(string.format("[WeaponShopDebug][Server] received action=equip player=%s desired=%d", player.Name, desired))
+		debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] received action=equip player=%s desired=%d", player.Name, desired))
 
 		PlayerData.SetEquippedWeaponLevel(player, desired)
 		WeaponToolService.Sync(player, true)
 		DataDirtyService.MarkDirty(player, 5)
-		warn(string.format("[WeaponShopDebug][Server] success action=equip player=%s level=%d", player.Name, desired))
+		debugPrint(DEBUG_WEAPON_SHOP, string.format("[WeaponShopDebug][Server] success action=equip player=%s level=%d", player.Name, desired))
 		pushToast(player, string.format("Equipped: Weapon Lv.%d", desired))
 	end)
 
@@ -241,18 +250,18 @@ function MerchantService.Init()
 	requestPurchaseUpgrade.OnServerEvent:Connect(function(player: Player, upgradeType: any)
 		local m = ZoneService.GetMerchantPart()
 		if not m then
-			warn(string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=merchant_missing", player.Name, tostring(upgradeType)))
+			debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=merchant_missing", player.Name, tostring(upgradeType)))
 			pushToast(player, "Upgrade shop is not available")
 			return
 		end
 		if not isNear(player, m, 12) then
-			warn(string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=too_far", player.Name, tostring(upgradeType)))
+			debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Server] rejected player=%s type=%s reason=too_far", player.Name, tostring(upgradeType)))
 			pushToast(player, "Move closer to the upgrade shop")
 			return
 		end
 
 		local t = tostring(upgradeType)
-		warn(string.format("[UpgradeShopDebug][Server] received player=%s type=%s", player.Name, t))
+		debugPrint(DEBUG_UPGRADE_SHOP, string.format("[UpgradeShopDebug][Server] received player=%s type=%s", player.Name, t))
 		local stats = PlayerData.Get(player)
 		---【【【【
 		if t == "Attack" then

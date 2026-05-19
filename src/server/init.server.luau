@@ -64,4 +64,7 @@ damageRemote.OnServerEvent:Connect(function(player: Player, monsterPart: Instanc
 	MonsterService.DamageMonster(player, monsterPart)
 end)
 
-print("[Game] Server initialized")
+local DEBUG_SERVER_STARTUP = false
+if DEBUG_SERVER_STARTUP then
+	print("[Game] Server initialized")
+end

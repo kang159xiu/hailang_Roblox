@@ -983,30 +983,24 @@ local function knockbackPlayer(attacker: Player, target: Player, targetHRP: Base
 
 	local targetCharacter = target.Character
 	local humanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid") :: Humanoid?
-	if humanoid then
-		humanoid.AutoRotate = false
-		humanoid.PlatformStand = true
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	end
 
 	local attackerRoot = getCharacterHumanoidRootPart(attacker)
 	local fallbackOrigin = targetHRP.Position - Vector3.new(0, 0, 1)
 	local diff = targetHRP.Position - (attackerRoot and attackerRoot.Position or fallbackOrigin)
 	local horizontalDir = Vector3.new(diff.X, 0, diff.Z)
 	horizontalDir = if horizontalDir.Magnitude > 0.1 then horizontalDir.Unit else Vector3.new(0, 0, 1)
-	local pushPower = 10 --水平击飞玩家力度
-	local upwardPower = 20 --向上弹飞力度
-	local knockbackDuration = 0.35 --玩家失控/翻滚持续时间
-	local angularVelocity = Vector3.new(math.random(-25, 25), math.random(-25, 25), math.random(-25, 25))
+	local pushPower = 80 --水平击飞玩家力度
+	local upwardPower = 20 --向上力度，保留明显击飞效果
+	local knockbackDuration = 0.35 --击飞持续时间
+	local angularVelocity = Vector3.new(math.random(-18, 18), math.random(-18, 18), math.random(-18, 18))
 
 	-- 服务端确认命中后，通知客户端立即播放击飞表现。
 	-- 目标玩家本机负责更及时的真实物理响应；攻击者本机只播放纯视觉预测，避免改远端角色真实物理导致复制卡顿。
 	-- 服务端下方仍会同步权威物理状态，避免纯客户端表现导致位置被拉回或被作弊触发。
 	playPlayerKnockbackRemote:FireAllClients(target.UserId, horizontalDir, pushPower, upwardPower, angularVelocity, knockbackDuration, attacker.UserId)
 
-	targetHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 2, 0)
+	targetHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 1.5, 0)
 	targetHRP.CFrame = CFrame.lookAt(targetHRP.Position, targetHRP.Position + horizontalDir)
-		* CFrame.Angles(math.rad(90), 0, math.rad(math.random(0, 360)))
 
 	targetHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, upwardPower, 0)
 	targetHRP.AssemblyAngularVelocity = angularVelocity

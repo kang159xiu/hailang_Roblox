@@ -22,7 +22,10 @@ local HomeService = {}
 local hiddenHousesCache: {[Instance]: {[number]: Instance}} = {}
 
 
-print("家庭服务已加载")
+local DEBUG_HOME_STARTUP = false
+if DEBUG_HOME_STARTUP then
+	print("家庭服务已加载")
+end
 
 export type PlacementSlot = {
 	Index: number,

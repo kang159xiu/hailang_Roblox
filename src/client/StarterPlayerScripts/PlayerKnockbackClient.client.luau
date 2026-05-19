@@ -81,8 +81,8 @@ local function createVisualClone(character: Model, userId: number): Model?
 			descendant.CanTouch = false
 			descendant.CanQuery = false
 		elseif descendant:IsA("Humanoid") then
-			descendant.AutoRotate = false
-			descendant.PlatformStand = true
+			descendant.AutoRotate = true
+			descendant.PlatformStand = false
 			descendant.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		end
 	end
@@ -103,7 +103,6 @@ local function playAttackerVisualKnockback(targetPlayer: Player, character: Mode
 	local startTime = os.clock()
 	local startPosition = root.Position + Vector3.new(0, 1.5, 0)
 	local baseCFrame = CFrame.lookAt(startPosition, startPosition + horizontalDir)
-		* CFrame.Angles(math.rad(90), 0, 0)
 	clone:PivotTo(baseCFrame)
 
 	task.spawn(function()
@@ -116,8 +115,7 @@ local function playAttackerVisualKnockback(targetPlayer: Player, character: Mode
 			local position = startPosition
 				+ ((horizontalDir * safePushPower) + Vector3.new(0, safeUpwardPower, 0)) * elapsed
 				+ Vector3.new(0, -workspace.Gravity * 0.125 * elapsed * elapsed, 0)
-			local spin = CFrame.Angles(angularVelocity.X * elapsed, angularVelocity.Y * elapsed, angularVelocity.Z * elapsed)
-			clone:PivotTo(CFrame.lookAt(position, position + horizontalDir) * CFrame.Angles(math.rad(90), 0, 0) * spin)
+			clone:PivotTo(CFrame.lookAt(position, position + horizontalDir))
 
 			RunService.RenderStepped:Wait()
 		end
@@ -154,14 +152,9 @@ local function playLocalKnockback(targetPlayer: Player, direction: Vector3, push
 		return
 	end
 
-	humanoid.AutoRotate = false
-	humanoid.PlatformStand = true
-	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-
 	-- 被击飞玩家本机立即驱动真实角色，减少网络复制等待带来的卡顿感。
 	root.CFrame = root.CFrame + Vector3.new(0, 1.5, 0)
 	root.CFrame = CFrame.lookAt(root.Position, root.Position + horizontalDir)
-		* CFrame.Angles(math.rad(90), 0, 0)
 	root.AssemblyLinearVelocity = (horizontalDir * safePushPower) + Vector3.new(0, safeUpwardPower, 0)
 	root.AssemblyAngularVelocity = angularVelocity
 

@@ -8,7 +8,14 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local requestUpgradePlacedMonster = remotes:WaitForChild("RequestUpgradePlacedMonster") :: RemoteEvent
 local localPlayer = Players.LocalPlayer
 
-warn(string.format("[UpgradeButtonDebug][Client] IncomeJuiceAnim loaded player=%s script=%s", localPlayer.Name, script:GetFullName()))
+local DEBUG_UPGRADE_BUTTON = false
+local function debugUpgradeButton(message: string)
+	if DEBUG_UPGRADE_BUTTON then
+		print("[UpgradeButtonDebug][Client] " .. message)
+	end
+end
+
+debugUpgradeButton(string.format("IncomeJuiceAnim loaded player=%s script=%s", localPlayer.Name, script:GetFullName()))
 
 -- 动画参数
 local shrinkInfo = TweenInfo.new(0.1, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
@@ -95,7 +102,7 @@ local function fireUpgradeRequest(button: GuiButton, bg: GuiObject, originalSize
 
 	local slotIndex = getSlotIndexFrom(button)
 	if not slotIndex then
-		warn(string.format("[UpgradeButtonDebug][Client] missing SlotIndex source=%s button=%s", source, button:GetFullName()))
+		debugUpgradeButton(string.format("missing SlotIndex source=%s button=%s", source, button:GetFullName()))
 		return
 	end
 
@@ -108,7 +115,7 @@ local function fireUpgradeRequest(button: GuiButton, bg: GuiObject, originalSize
 		playUpgradeButtonAnim(bg, originalSize, targetSize)
 	end)
 
-	warn(string.format("[UpgradeButtonDebug][Client] fire source=%s slot=%d owner=%d button=%s", source, math.floor(slotIndex), math.floor(ownerUserId), button:GetFullName()))
+	debugUpgradeButton(string.format("fire source=%s slot=%d owner=%d button=%s", source, math.floor(slotIndex), math.floor(ownerUserId), button:GetFullName()))
 	requestUpgradePlacedMonster:FireServer(slotIndex, ownerUserId)
 end
 
@@ -136,8 +143,8 @@ local function bindUpgradeButton(button: GuiButton)
 	local originalSize = bg.Size
 	local targetSize = UDim2.new(originalSize.X.Scale * 0.8, originalSize.X.Offset * 0.8, originalSize.Y.Scale * 0.8, originalSize.Y.Offset * 0.8)
 
-	warn(string.format(
-		"[UpgradeButtonDebug][Client] bound button=%s slot=%s surface=%s",
+	debugUpgradeButton(string.format(
+		"bound button=%s slot=%s surface=%s",
 		button:GetFullName(),
 		tostring(getSlotIndexFrom(button)),
 		if surfaceGui then surfaceGui:GetFullName() else "nil"
@@ -205,8 +212,8 @@ local function bindFallbackWorldClick()
 			return
 		end
 
-		warn(string.format(
-			"[UpgradeButtonDebug][Client] input source=%s gameProcessed=%s pos=(%.0f,%.0f)",
+		debugUpgradeButton(string.format(
+			"input source=%s gameProcessed=%s pos=(%.0f,%.0f)",
 			tostring(input.UserInputType),
 			tostring(gameProcessed),
 			input.Position.X,
@@ -219,7 +226,7 @@ local function bindFallbackWorldClick()
 
 		local camera = workspace.CurrentCamera
 		if not camera then
-			warn("[UpgradeButtonDebug][Client] no CurrentCamera for fallback raycast")
+			debugUpgradeButton("no CurrentCamera for fallback raycast")
 			return
 		end
 
@@ -232,15 +239,15 @@ local function bindFallbackWorldClick()
 
 		local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
 		if not result then
-			warn("[UpgradeButtonDebug][Client] world raycast hit=nil")
+			debugUpgradeButton("world raycast hit=nil")
 			return
 		end
 
-		warn(string.format("[UpgradeButtonDebug][Client] world raycast hit=%s", result.Instance:GetFullName()))
+		debugUpgradeButton(string.format("world raycast hit=%s", result.Instance:GetFullName()))
 
 		local button = findUpgradeButtonNearHit(result.Instance)
 		if not button then
-			warn(string.format("[UpgradeButtonDebug][Client] no ImageButton_升级按钮 near hit=%s", result.Instance:GetFullName()))
+			debugUpgradeButton(string.format("no ImageButton_升级按钮 near hit=%s", result.Instance:GetFullName()))
 			return
 		end
 
@@ -273,7 +280,7 @@ local function bindClicker(part: BasePart)
 	if button and button:IsA("GuiButton") then
 		bindUpgradeButton(button :: GuiButton)
 	else
-		warn(string.format("[UpgradeButtonDebug][Client] ImageButton_升级按钮 not found under clicker=%s", part:GetFullName()))
+		debugUpgradeButton(string.format("ImageButton_升级按钮 not found under clicker=%s", part:GetFullName()))
 	end
 end
 
@@ -333,8 +340,8 @@ for _ in pairs(boundButtons) do
 	boundButtonCount += 1
 end
 
-warn(string.format(
-	"[UpgradeButtonDebug][Client] initial scan clickers=%d upgradeButtons=%d boundButtons=%d",
+debugUpgradeButton(string.format(
+	"initial scan clickers=%d upgradeButtons=%d boundButtons=%d",
 	initialClickerCount,
 	initialUpgradeButtonCount,
 	boundButtonCount
@@ -342,7 +349,7 @@ warn(string.format(
 
 workspace.DescendantAdded:Connect(function(descendant)
 	if descendant.Name == "ImageButton_升级按钮" and descendant:IsA("GuiButton") then
-		warn(string.format("[UpgradeButtonDebug][Client] dynamic button added=%s", descendant:GetFullName()))
+		debugUpgradeButton(string.format("dynamic button added=%s", descendant:GetFullName()))
 		bindUpgradeButton(descendant :: GuiButton)
 	end
 end)

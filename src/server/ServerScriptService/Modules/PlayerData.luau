@@ -9,6 +9,12 @@ local DataDirtyService = require(script.Parent:WaitForChild("DataDirtyService"))
 
 export type PlayerStats = {
 	Gold: number,
+	-- 抽奖次数：可由后续玩法/奖励发放；每次“次数抽奖”消耗 1 次。
+	GachaDrawCount: number,
+	-- 每日在线奖励：记录当天累计在线秒数与已领取到第几个节点。
+	OnlineRewardDateKey: string,
+	OnlineRewardSeconds: number,
+	OnlineRewardClaimedIndex: number,
 	RebirthCount: number,
 	SpeedLevel: number,
 	AttackLevel: number,
@@ -34,6 +40,10 @@ export type PlayerStats = {
 
 export type PersistedPlayerData = {
 	Gold: number,
+	GachaDrawCount: number?,
+	OnlineRewardDateKey: string?,
+	OnlineRewardSeconds: number?,
+	OnlineRewardClaimedIndex: number?,
 	RebirthCount: number?,
 	SpeedLevel: number,
 	AttackLevel: number,
@@ -50,6 +60,20 @@ local PlayerData = {}
 
 local data: {[number]: PlayerStats} = {}
 
+local DEBUG_REBIRTH = false
+local STARTING_GACHA_DRAW_COUNT = 5
+
+local function getUtcDateKey(unixTime: number?): string
+	local t = os.date("!*t", unixTime or os.time())
+	return string.format("%04d%02d%02d", t.year, t.month, t.day)
+end
+
+local function debugPrint(enabled: boolean, message: string)
+	if enabled then
+		print(message)
+	end
+end
+
 local function hasOwnedLevel(list: {number}, level: number): boolean
 	for _, v in ipairs(list) do
 		if v == level then
@@ -65,7 +89,11 @@ local function getOrCreate(player: Player): PlayerStats
 		return stats
 	end
 	stats = {
-		Gold = (type(Config.PLAYER_START_GOLD) == "number" and math.floor(Config.PLAYER_START_GOLD) or 0),
+		Gold = 0,
+		GachaDrawCount = STARTING_GACHA_DRAW_COUNT,
+		OnlineRewardDateKey = getUtcDateKey(),
+		OnlineRewardSeconds = 0,
+		OnlineRewardClaimedIndex = 0,
 		RebirthCount = 0,
 		SpeedLevel = 0,
 		AttackLevel = 0,
@@ -110,7 +138,7 @@ function PlayerData.AddGold(player: Player, amount: number): number
 	local added = math.floor(amount * multiplier)
 	stats.Gold += added
 
-	warn(string.format(
+	debugPrint(DEBUG_REBIRTH, string.format(
 		"[RebirthGoldDebug] source=PlayerData.AddGold player=%s base=%d rebirth=%d multiplier=x%d added=%d gold=%d->%d",
 		player.Name,
 		amount,
@@ -162,7 +190,7 @@ function PlayerData.PerformGoldRebirth(player: Player): boolean
 	resetRebirthUpgradeableStats(stats)
 	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
 	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
-	warn(string.format(
+	debugPrint(DEBUG_REBIRTH, string.format(
 		"[RebirthDebug] GoldRebirth player=%s rebirth=%d multiplier=x%d nextCost=%d gold=%d",
 		player.Name,
 		stats.RebirthCount,
@@ -182,7 +210,7 @@ function PlayerData.PerformRobuxRebirth(player: Player): boolean
 	resetRebirthUpgradeableStats(stats)
 	local multiplier = math.max(1, math.floor(tonumber(Config.GetRebirthCashMultiplier(stats.RebirthCount)) or 1))
 	local nextCost = Config.GetRebirthCost(stats.RebirthCount)
-	warn(string.format(
+	debugPrint(DEBUG_REBIRTH, string.format(
 		"[RebirthDebug] RobuxRebirth player=%s rebirth=%d multiplier=x%d nextCost=%d gold=%d",
 		player.Name,
 		stats.RebirthCount,
@@ -215,6 +243,91 @@ function PlayerData.TrySpendGold(player: Player, amount: number): boolean
 	PlayerData.Sync(player)
 	DataDirtyService.MarkDirty(player)
 	return true
+end
+
+function PlayerData.GetGachaDrawCount(player: Player): number
+	local stats = getOrCreate(player)
+	stats.GachaDrawCount = math.max(0, math.floor(tonumber(stats.GachaDrawCount) or 0))
+	return stats.GachaDrawCount
+end
+
+function PlayerData.AddGachaDrawCount(player: Player, amount: number): number
+	local stats = getOrCreate(player)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount == 0 then
+		return PlayerData.GetGachaDrawCount(player)
+	end
+
+	stats.GachaDrawCount = math.max(0, PlayerData.GetGachaDrawCount(player) + amount)
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player)
+	return stats.GachaDrawCount
+end
+
+function PlayerData.TrySpendGachaDrawCount(player: Player, amount: number): boolean
+	local stats = getOrCreate(player)
+	amount = math.max(1, math.floor(tonumber(amount) or 1))
+	stats.GachaDrawCount = PlayerData.GetGachaDrawCount(player)
+	if stats.GachaDrawCount < amount then
+		return false
+	end
+
+	stats.GachaDrawCount -= amount
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player)
+	return true
+end
+
+function PlayerData.EnsureOnlineRewardDate(player: Player, dateKey: string?): boolean
+	local stats = getOrCreate(player)
+	local safeDateKey = if type(dateKey) == "string" and dateKey ~= "" then dateKey else getUtcDateKey()
+	local changed = false
+
+	if stats.OnlineRewardDateKey ~= safeDateKey then
+		stats.OnlineRewardDateKey = safeDateKey
+		stats.OnlineRewardSeconds = 0
+		stats.OnlineRewardClaimedIndex = 0
+		changed = true
+	else
+		stats.OnlineRewardSeconds = math.max(0, math.floor(tonumber(stats.OnlineRewardSeconds) or 0))
+		stats.OnlineRewardClaimedIndex = math.max(0, math.floor(tonumber(stats.OnlineRewardClaimedIndex) or 0))
+	end
+
+	PlayerData.Sync(player)
+	if changed then
+		DataDirtyService.MarkDirty(player, 5)
+	end
+	return changed
+end
+
+function PlayerData.AddOnlineRewardSeconds(player: Player, seconds: number, dateKey: string?): number
+	local stats = getOrCreate(player)
+	PlayerData.EnsureOnlineRewardDate(player, dateKey)
+	local addSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	if addSeconds > 0 then
+		stats.OnlineRewardSeconds = math.max(0, math.floor(tonumber(stats.OnlineRewardSeconds) or 0)) + addSeconds
+		PlayerData.Sync(player)
+	end
+	return stats.OnlineRewardSeconds
+end
+
+function PlayerData.GetOnlineRewardSeconds(player: Player): number
+	local stats = getOrCreate(player)
+	stats.OnlineRewardSeconds = math.max(0, math.floor(tonumber(stats.OnlineRewardSeconds) or 0))
+	return stats.OnlineRewardSeconds
+end
+
+function PlayerData.GetOnlineRewardClaimedIndex(player: Player): number
+	local stats = getOrCreate(player)
+	stats.OnlineRewardClaimedIndex = math.max(0, math.floor(tonumber(stats.OnlineRewardClaimedIndex) or 0))
+	return stats.OnlineRewardClaimedIndex
+end
+
+function PlayerData.SetOnlineRewardClaimedIndex(player: Player, claimedIndex: number)
+	local stats = getOrCreate(player)
+	stats.OnlineRewardClaimedIndex = math.max(0, math.floor(tonumber(claimedIndex) or 0))
+	PlayerData.Sync(player)
+	DataDirtyService.MarkDirty(player, 5)
 end
 
 function PlayerData.GetHomeLevel(player: Player): number
@@ -371,6 +484,10 @@ local function syncLeaderstatsAndAttributes(player: Player)
 	end
 
 	player:SetAttribute("Gold", stats.Gold)
+	player:SetAttribute("GachaDrawCount", PlayerData.GetGachaDrawCount(player))
+	player:SetAttribute("OnlineRewardDateKey", stats.OnlineRewardDateKey)
+	player:SetAttribute("OnlineRewardSeconds", math.max(0, math.floor(tonumber(stats.OnlineRewardSeconds) or 0)))
+	player:SetAttribute("OnlineRewardClaimedIndex", math.max(0, math.floor(tonumber(stats.OnlineRewardClaimedIndex) or 0)))
 	player:SetAttribute("RebirthCount", stats.RebirthCount)
 	player:SetAttribute("RebirthMultiplier", Config.GetRebirthCashMultiplier(stats.RebirthCount))
 	player:SetAttribute("NextRebirthCost", Config.GetRebirthCost(stats.RebirthCount))
@@ -418,6 +535,10 @@ function PlayerData.Export(player: Player): PersistedPlayerData
 	local stats = getOrCreate(player)
 	return {
 		Gold = math.floor(stats.Gold),
+		GachaDrawCount = math.floor(PlayerData.GetGachaDrawCount(player)),
+		OnlineRewardDateKey = stats.OnlineRewardDateKey,
+		OnlineRewardSeconds = math.max(0, math.floor(tonumber(stats.OnlineRewardSeconds) or 0)),
+		OnlineRewardClaimedIndex = math.max(0, math.floor(tonumber(stats.OnlineRewardClaimedIndex) or 0)),
 		RebirthCount = math.floor(stats.RebirthCount),
 		SpeedLevel = math.floor(stats.SpeedLevel),
 		AttackLevel = math.floor(stats.AttackLevel),
@@ -455,6 +576,16 @@ function PlayerData.ApplyLoaded(player: Player, loaded: PersistedPlayerData)
 	local stats = getOrCreate(player)
 
 	stats.Gold = math.max(0, math.floor(tonumber(loaded.Gold) or stats.Gold))
+	local loadedGachaDrawCount = (loaded :: any).GachaDrawCount
+	if loadedGachaDrawCount == nil then
+		stats.GachaDrawCount = STARTING_GACHA_DRAW_COUNT
+	else
+		stats.GachaDrawCount = math.max(0, math.floor(tonumber(loadedGachaDrawCount) or 0))
+	end
+
+	stats.OnlineRewardDateKey = if type((loaded :: any).OnlineRewardDateKey) == "string" then (loaded :: any).OnlineRewardDateKey else getUtcDateKey()
+	stats.OnlineRewardSeconds = math.max(0, math.floor(tonumber((loaded :: any).OnlineRewardSeconds) or 0))
+	stats.OnlineRewardClaimedIndex = math.max(0, math.floor(tonumber((loaded :: any).OnlineRewardClaimedIndex) or 0))
 	stats.RebirthCount = math.max(0, math.floor(tonumber((loaded :: any).RebirthCount) or stats.RebirthCount))
 	stats.SpeedLevel = math.max(0, math.floor(tonumber(loaded.SpeedLevel) or stats.SpeedLevel))
 	stats.AttackLevel = math.max(0, math.floor(tonumber(loaded.AttackLevel) or stats.AttackLevel))
@@ -485,7 +616,12 @@ function PlayerData.ResetData(player: Player)
 	local stats = data[player.UserId]
 	if not stats then return end
 	
-	stats.Gold = 10
+	stats.Gold = 0
+	-- Delete/清除数据后视为新玩家，重新给 5 次抽奖机会。
+	stats.GachaDrawCount = STARTING_GACHA_DRAW_COUNT
+	stats.OnlineRewardDateKey = getUtcDateKey()
+	stats.OnlineRewardSeconds = 0
+	stats.OnlineRewardClaimedIndex = 0
 	stats.RebirthCount = 0
 	stats.SpeedLevel = 0
 	stats.AttackLevel = 0

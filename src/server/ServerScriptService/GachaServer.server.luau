@@ -26,6 +26,69 @@ local PRODUCT_ID_5_PULL = 3580661228
 local PRODUCT_ID_REBIRTH = Config.REBIRTH_PRODUCT_ID
 local COST_1_PULL_GOLD = 1000000
 
+local ONLINE_REWARD_MINUTES = { 1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120 }
+local ONLINE_REWARD_SECONDS = {}
+for index, minutes in ipairs(ONLINE_REWARD_MINUTES) do
+	ONLINE_REWARD_SECONDS[index] = minutes * 60
+end
+
+local function getUtcDateKey(): string
+	local t = os.date("!*t", os.time())
+	return string.format("%04d%02d%02d", t.year, t.month, t.day)
+end
+
+local function syncOnlineRewardCountdown(player: Player)
+	local claimedIndex = PlayerData.GetOnlineRewardClaimedIndex(player)
+	local onlineSeconds = PlayerData.GetOnlineRewardSeconds(player)
+	local nextIndex = claimedIndex + 1
+	local nextSeconds = ONLINE_REWARD_SECONDS[nextIndex]
+
+	if not nextSeconds then
+		player:SetAttribute("OnlineRewardAllClaimed", true)
+		player:SetAttribute("OnlineRewardSecondsUntilNext", 0)
+		player:SetAttribute("OnlineRewardNextRewardMinutes", 0)
+		return
+	end
+
+	player:SetAttribute("OnlineRewardAllClaimed", false)
+	player:SetAttribute("OnlineRewardSecondsUntilNext", math.max(0, nextSeconds - onlineSeconds))
+	player:SetAttribute("OnlineRewardNextRewardMinutes", ONLINE_REWARD_MINUTES[nextIndex])
+end
+
+local function runOnlineRewardLoop(player: Player)
+	task.spawn(function()
+		while player.Parent and player:GetAttribute("__DataLoaded") ~= true do
+			task.wait(0.2)
+		end
+		if not player.Parent then
+			return
+		end
+
+		PlayerData.EnsureOnlineRewardDate(player, getUtcDateKey())
+		syncOnlineRewardCountdown(player)
+
+		while player.Parent do
+			task.wait(1)
+			if not player.Parent then
+				break
+			end
+
+			local dateKey = getUtcDateKey()
+			PlayerData.AddOnlineRewardSeconds(player, 1, dateKey)
+
+			local onlineSeconds = PlayerData.GetOnlineRewardSeconds(player)
+			local claimedIndex = PlayerData.GetOnlineRewardClaimedIndex(player)
+			while claimedIndex < #ONLINE_REWARD_SECONDS and onlineSeconds >= ONLINE_REWARD_SECONDS[claimedIndex + 1] do
+				claimedIndex += 1
+				PlayerData.SetOnlineRewardClaimedIndex(player, claimedIndex)
+				PlayerData.AddGachaDrawCount(player, 1)
+			end
+
+			syncOnlineRewardCountdown(player)
+		end
+	end)
+end
+
 
 -- [修改原因] 核心算法：怪物等级越高，抽中概率越低 (指数级衰减权重)
 local function getRandomMonsterLevel()
@@ -52,6 +115,11 @@ end
 
 -- [修改原因] 新增一个表来记录每个玩家是否开启了快速模式
 local playerFastModeCache = {}
+
+Players.PlayerAdded:Connect(runOnlineRewardLoop)
+for _, player in ipairs(Players:GetPlayers()) do
+	runOnlineRewardLoop(player)
+end
 
 -- [修改原因] 执行抽奖、发奖与结果广播
 local function performGacha(player: Player, times: number)
@@ -109,6 +177,18 @@ requestEvent.OnServerEvent:Connect(function(player, action, extraData)
 		else
 			local toastEvent = remotes:FindFirstChild("PushClientToast")
 			if toastEvent then toastEvent:FireClient(player, "Not enough gold") end
+		end
+	elseif action == "Count1" then
+		-- 次数抽奖：后续其它玩法只需要调用 PlayerData.AddGachaDrawCount(player, n) 发放次数。
+		local drawsBefore = PlayerData.GetGachaDrawCount(player)
+		print("[GachaServer] Count1 requested", player.Name, "drawsBefore=", drawsBefore)
+		if PlayerData.TrySpendGachaDrawCount(player, 1) then
+			print("[GachaServer] Count1 accepted", player.Name, "drawsAfter=", PlayerData.GetGachaDrawCount(player))
+			performGacha(player, 1)
+		else
+			warn("[GachaServer] Count1 rejected: not enough draws", player.Name, "draws=", drawsBefore)
+			local toastEvent = remotes:FindFirstChild("PushClientToast")
+			if toastEvent then toastEvent:FireClient(player, "Not enough gacha draws") end
 		end
 	end
 end)

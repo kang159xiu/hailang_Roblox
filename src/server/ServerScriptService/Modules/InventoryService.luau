@@ -120,26 +120,6 @@ local function newItemId(): string
 	return string.format("%d_%d", os.time(), math.random(1000, 9999))
 end
 
-local function getMonsterImageId(monsterLevel: number): string?
-	local imageMap = Config.MONSTER_IMAGE_ID_BY_LEVEL
-	if type(imageMap) ~= "table" then
-		return nil
-	end
-
-	local imageId = imageMap[monsterLevel]
-	if type(imageId) == "string" and imageId ~= "" and imageId ~= "rbxassetid://0" then
-		return imageId
-	end
-	return nil
-end
-
-local function applyMonsterToolIcon(tool: Tool, monsterLevel: number)
-	local imageId = getMonsterImageId(monsterLevel)
-	if imageId then
-		tool.TextureId = imageId
-	end
-end
-
 local function sanitizeModel(model: Instance): BasePart?
 	local root = nil
 	if model:IsA("Model") then
@@ -394,7 +374,6 @@ local function createMonsterToolFromData(monsterLevel: number, value: number, go
 	tool:SetAttribute("MonsterLevel", monsterLevel)
 	tool:SetAttribute("Value", value)
 	tool:SetAttribute("GoldPerSec", goldPerSec)
-	applyMonsterToolIcon(tool, monsterLevel)
 
 	if not baked then
 		applyMonsterAppearanceToTool(tool, monsterLevel)
@@ -413,7 +392,6 @@ local function applyMonsterDataToTool(tool: Tool, item: MonsterItem)
 	tool:SetAttribute("BaseGoldPerSec", normalized.BaseGoldPerSec or normalized.GoldPerSec)
 	tool:SetAttribute("SourceZoneLevel", normalized.SourceZoneLevel or 1)
 	tool:SetAttribute("FromGacha", true)
-	applyMonsterToolIcon(tool, normalized.MonsterLevel)
 end
 
 local function monsterItemMatches(a: MonsterItem, b: MonsterItem): boolean

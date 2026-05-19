@@ -16,10 +16,10 @@ local Config = require(ReplicatedStorage:WaitForChild("GameModules"):WaitForChil
 local GuardianService = {}
 
 local DIRECT_CHASE_DISTANCE = 12
-local CATCH_DISTANCE = 5
+local GUARDIAN_CATCH_RADIUS = 5
 local ZONE_TRACK_MARGIN = 3
-local PATH_RECALC_INTERVAL = 0.8
-local PATH_RECALC_TARGET_MOVE_DISTANCE = 8
+local PATH_RECALC_INTERVAL = 0.2 --守护者重新寻路时间
+local PATH_RECALC_TARGET_MOVE_DISTANCE = 3  --守护者寻寻路目标移动距离
 local GUARDIAN_ACCEL_START_SPEED = 20 --初始速度
 local GUARDIAN_ACCEL_DURATION = 3 --守护者加速时间
 
@@ -33,13 +33,13 @@ local GUARDIAN_CONFIG: { [number]: GuardianData } = {}
 -- 专属动画配置表：可以在这里为每一级守护者单独配置动画 ID
 local CUSTOM_ANIMATIONS = {
 	[1] = { Idle = "rbxassetid://81551578379988", Track = "rbxassetid://132222392379713", Attack = "" },
-	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://78735945899751", Attack = "" },
-	[3] = { Idle = "rbxassetid://114979548917103", Track = "rbxassetid://97381162200240", Attack = "" },
-	[4] = { Idle = "rbxassetid://112545660735763", Track = "rbxassetid://107357919201909", Attack = "" },
-	[5] = { Idle = "rbxassetid://100537385040728", Track = "rbxassetid://96222636503887", Attack = "" },
-	[6] = { Idle = "rbxassetid://92084664894159", Track = "rbxassetid://97627296401053", Attack = "" },
-	[7] = { Idle = "rbxassetid://86144328246135", Track = "rbxassetid://135043731853331", Attack = "" },
-	[8] = { Idle = "rbxassetid://89574551671070", Track = "rbxassetid://123374707041935", Attack = "" },
+	[2] = { Idle = "rbxassetid://75291175844780", Track = "rbxassetid://135043731853331", Attack = "" },
+	[3] = { Idle = "rbxassetid://114979548917103", Track = "rbxassetid://123374707041935", Attack = "" },
+	[4] = { Idle = "rbxassetid://112545660735763", Track = "rbxassetid://96222636503887", Attack = "" },
+	[5] = { Idle = "rbxassetid://100537385040728", Track = "rbxassetid://78735945899751", Attack = "" },
+	[6] = { Idle = "rbxassetid://92084664894159", Track = "rbxassetid://97381162200240", Attack = "" },
+	[7] = { Idle = "rbxassetid://86144328246135", Track = "rbxassetid://97627296401053", Attack = "" },
+	[8] = { Idle = "rbxassetid://89574551671070", Track = "rbxassetid://107357919201909", Attack = "" },
 	[9] = { Idle = "rbxassetid://113172908675912", Track = "rbxassetid://117253206075071", Attack = "" },
 	[10] = { Idle = "rbxassetid://115990250502932", Track = "rbxassetid://109359462253664", Attack = "" },
 	-- 你可以继续往下复制，最高写到 [30]
@@ -50,16 +50,36 @@ local function getGuardianSpeedByZoneLevel(zoneLevel: number): number
 	return (speedMap and speedMap[zoneLevel]) or speedMap[1] or 16
 end
 
+local EMPTY_ANIMATION_CONFIG: AnimationConfig = { Idle = "", Track = "", Attack = "" }
+local FALLBACK_ANIMATION_CONFIG: AnimationConfig = CUSTOM_ANIMATIONS[10] or CUSTOM_ANIMATIONS[1] or EMPTY_ANIMATION_CONFIG
+
+local function cloneAnimationConfig(config: AnimationConfig): AnimationConfig
+	return {
+		Idle = config.Idle or "",
+		Track = config.Track or "",
+		Attack = config.Attack or "",
+	}
+end
+
+local function getAnimationConfigByLevel(level: number): AnimationConfig
+	local customAnim = CUSTOM_ANIMATIONS[level]
+	if customAnim then
+		return cloneAnimationConfig(customAnim)
+	end
+
+	-- 11~30 级目前没有单独动画配置，不能直接给空表；否则这些等级会完全没有动作。
+	-- 先复用已有最高等级（优先 10 级，其次 1 级）作为兜底，后续补齐专属动画 ID 后会自动使用对应等级配置。
+	warn(string.format("[GuardianService] 守护者等级 %d 未配置专属动画，临时使用已有等级动画兜底。", level))
+	return cloneAnimationConfig(FALLBACK_ANIMATION_CONFIG)
+end
+
 -- 自动初始化 1~30 级的配置
 for level = 1, 30 do
-	-- 如果上面的表中配置了该等级的动画，就使用自定义配置；否则自动生成空的兜底配置
-	local customAnim = CUSTOM_ANIMATIONS[level] or { Idle = "", Track = "", Attack = "" }
-
 	GUARDIAN_CONFIG[level] = {
 		ModelName = "守护者形象" .. tostring(level),
 		-- 速度统一改为只从 Config.GUARDIAN_SPEED_BY_ZONE_LEVEL 读取
 		Speed = getGuardianSpeedByZoneLevel(level),
-		Animations = customAnim
+		Animations = getAnimationConfigByLevel(level)
 	}
 end
 
@@ -68,12 +88,29 @@ end
 local activeGuardians = {}
 local personalGuardians = {}
 local guardiansFolder: Folder
-local guardianTemplateFolder = ReplicatedStorage:WaitForChild("GuardianModel")
+local guardianTemplateFolder: Instance?
+local guardianTemplateMissingWarned = false
+local guardianTemplateReadyConnection: RBXScriptConnection?
+local guardianTemplateChildConnection: RBXScriptConnection?
+
+local punishPlayer: (guardian: any, player: Player, playerHRP: BasePart) -> ()
 
 
 -- 3. 辅助功能函数
 
 local function getGuardianTemplate(modelName: string): Model?
+	if not guardianTemplateFolder or not guardianTemplateFolder.Parent then
+		guardianTemplateFolder = ReplicatedStorage:FindFirstChild("GuardianModel")
+	end
+
+	if not guardianTemplateFolder then
+		if not guardianTemplateMissingWarned then
+			guardianTemplateMissingWarned = true
+			warn("[GuardianService] ReplicatedStorage.GuardianModel 暂不存在，守护者会延后生成；不会再无限等待卡住游戏。")
+		end
+		return nil
+	end
+
 	-- 尝试查找当前等级对应的特定形象
 	local template = guardianTemplateFolder:FindFirstChild(modelName)
 
@@ -82,28 +119,61 @@ local function getGuardianTemplate(modelName: string): Model?
 		template = guardianTemplateFolder:FindFirstChild("守护者形象1")
 	end
 
-	return (template and template:IsA("Model")) and template or nil
+	if template and template:IsA("Model") then
+		return template
+	end
+
+	warn(string.format("[GuardianService] GuardianModel 下找不到可用模型：%s，也没有 守护者形象1 兜底。", modelName))
+	return nil
 end
 
 local function loadAnimations(animator: Animator, config: AnimationConfig)
 	local tracks = {}
-	local function loadTrack(id: string): AnimationTrack?
-		if not id or id == "" then return nil end
+	local function loadTrack(trackName: string, id: string): AnimationTrack?
+		if not id or id == "" then
+			if trackName ~= "Attack" then
+				warn(string.format("[GuardianService] 守护者缺少 %s 动画 ID，将在播放时尝试使用其他动作兜底。", trackName))
+			end
+			return nil
+		end
 		local anim = Instance.new("Animation")
 		anim.AnimationId = id
-		local success, track = pcall(function() return animator:LoadAnimation(anim) end)
-		return success and track or nil
+		local success, trackOrErr = pcall(function() return animator:LoadAnimation(anim) end)
+		if not success then
+			warn(string.format("[GuardianService] 加载守护者动画失败：%s = %s，错误：%s", trackName, id, tostring(trackOrErr)))
+			return nil
+		end
+
+		local track = trackOrErr :: AnimationTrack
+		if trackName == "Track" then
+			track.Priority = Enum.AnimationPriority.Movement
+		elseif trackName == "Attack" then
+			track.Priority = Enum.AnimationPriority.Action
+		else
+			track.Priority = Enum.AnimationPriority.Idle
+		end
+		return track
 	end
-	tracks.Idle = loadTrack(config.Idle)
-	tracks.Track = loadTrack(config.Track)
-	tracks.Attack = loadTrack(config.Attack)
+	-- 按当前玩法要求，守护者所有状态都只使用追踪跑动动画。
+	-- Idle / Attack 动画不再加载，避免配置缺失或状态切换导致动作不一致。
+	tracks.Idle = nil
+	tracks.Track = loadTrack("Track", config.Track)
+	tracks.Attack = nil
 	return tracks
 end
 
 local function playAnim(guardian, _animName: string)
-	-- 守护者不再根据状态切换待机/攻击动作：始终播放 Track（奔跑）动作。
-	-- 这样公共守护者待机、专属守护者追击/返回、攻击惩罚阶段都会保持同一个奔跑动画，避免动作来回切换。
+	-- 当前需求：守护者待机、追踪、攻击、返回都一直播放 Track（追踪跑动）动画。
+	-- 不再切换 Idle / Attack，避免动作不全或状态切换时动画断掉。
 	local forcedAnimName = "Track"
+	if not guardian.AnimTracks or not guardian.AnimTracks[forcedAnimName] then
+		if guardian.Model and guardian.Model:GetAttribute("TrackAnimationMissingWarned") ~= true then
+			guardian.Model:SetAttribute("TrackAnimationMissingWarned", true)
+			warn(string.format("[GuardianService] %s 没有加载到 Track 跑步动画，请检查动画 ID 权限/模型 Animator/动画配置。", guardian.Model.Name))
+		end
+		return
+	end
+
 	for name, track in pairs(guardian.AnimTracks) do
 		if track then
 			if name == forcedAnimName then
@@ -316,10 +386,81 @@ local function playerHasActivePersonalGuardian(player: Player): boolean
 		and g.TargetPlayer == player
 end
 
+local function getGuardianActualHeight(guardian): number
+	local rootPart = guardian.RootPart
+	local rootHeight = if rootPart and rootPart:IsA("BasePart") then rootPart.Size.Y else 0
+	local modelHeight = 0
+
+	if guardian.Model and guardian.Model:IsA("Model") then
+		local success, _, boundingSize = pcall(function()
+			return guardian.Model:GetBoundingBox()
+		end)
+		if success and typeof(boundingSize) == "Vector3" then
+			modelHeight = boundingSize.Y
+		end
+	end
+
+	return math.max(rootHeight, modelHeight, 1)
+end
+
+local function isTargetWithinGuardianCatchRange(guardian, targetHrp: BasePart): boolean
+	local rootPart = guardian.RootPart
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	local offset = targetHrp.Position - rootPart.Position
+	local horizontalDistance = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	if horizontalDistance > GUARDIAN_CATCH_RADIUS then
+		return false
+	end
+
+	-- 恢复原来的水平范围抓取规则，但不再无视高度：
+	-- 玩家中心点必须落在守护者实际模型高度覆盖范围内，避免不同楼层/高低差过大时被抓。
+	local guardianHalfHeight = getGuardianActualHeight(guardian) * 0.5
+	local playerHalfHeight = math.max(targetHrp.Size.Y * 0.5, 1)
+	return math.abs(offset.Y) <= (guardianHalfHeight + playerHalfHeight)
+end
+
+-- 真实触碰仍可作为额外触发；主要抓取规则已恢复为“水平范围 + 守护者实际高度限制”。
+local function tryPunishTouchedTarget(guardian, player: Player, hit: Instance)
+	if guardian.State ~= "Track" then
+		return
+	end
+	if guardian.TargetPlayer ~= player then
+		return
+	end
+	if not hit:IsA("BasePart") then
+		return
+	end
+
+	local char = player.Character
+	if not char or not hit:IsDescendantOf(char) then
+		return
+	end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return
+	end
+
+	if not isTargetWithinGuardianCatchRange(guardian, hrp) then
+		return
+	end
+
+	-- 再确认当前仍是 RootPart 与玩家身体的实际接触，过滤掉过期/间接触发。
+	for _, touchingPart in ipairs(guardian.RootPart:GetTouchingParts()) do
+		if touchingPart:IsDescendantOf(char) then
+			punishPlayer(guardian, player, hrp)
+			return
+		end
+	end
+end
 
 
--- 4. 惩罚逻辑：掉落怪物、击飞并翻滚
-local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
+
+-- 4. 惩罚逻辑：掉落怪物、击飞玩家
+punishPlayer = function(guardian, player: Player, playerHRP: BasePart)
 	if guardian.State ~= "Track" then return end
 	guardian.State = "Attack"
 	guardian.TargetPlayer = nil
@@ -345,19 +486,11 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 		)
 	end
 
-	-- 2. 物理表现：击飞 + 短暂平躺无序翻滚
+	-- 2. 物理表现：允许玩家被明显击飞/短暂倒地，CharacterService/客户端会在约 0.1 秒后尝试站起。
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 
-	if humanoid then
-		-- Humanoid 默认会自动站立/扶正，单纯调整 AssemblyAngularVelocity 会被抵消。
-		-- 这里短暂交给物理模拟，让玩家能平躺并无序翻滚；随后自动恢复控制。
-		humanoid.AutoRotate = false
-		humanoid.PlatformStand = true
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	end
-
-	-- 强制离地，解除摩擦力。
+	-- 抬高一点再给速度，避免贴地摩擦吞掉竖直击飞。
 	playerHRP.CFrame = playerHRP.CFrame + Vector3.new(0, 2, 0)
 
 	-- 计算击飞方向。
@@ -365,20 +498,12 @@ local function punishPlayer(guardian, player: Player, playerHRP: BasePart)
 	local horizontalDir = Vector3.new(diff.X, 0, diff.Z)
 	horizontalDir = horizontalDir.Magnitude > 0.1 and horizontalDir.Unit or Vector3.new(0, 0, 1)
 
-	-- 先把角色横过来，避免击飞后仍保持站立姿态。
 	playerHRP.CFrame = CFrame.lookAt(playerHRP.Position, playerHRP.Position + horizontalDir)
-		* CFrame.Angles(math.rad(90), 0, math.rad(math.random(0, 360)))
 
 	local pushPower = 100
 	playerHRP.AssemblyLinearVelocity = (horizontalDir * pushPower) + Vector3.new(0, pushPower, 0)
 
-	-- 无序翻滚角速度。数值越大翻滚越剧烈。
-	local spin = 25
-	playerHRP.AssemblyAngularVelocity = Vector3.new(
-		math.random(-spin, spin),
-		math.random(-spin, spin),
-		math.random(-spin, spin)
-	)
+	playerHRP.AssemblyAngularVelocity = Vector3.new(math.random(-25, 25), math.random(-25, 25), math.random(-25, 25))
 
 	if humanoid then
 		local punishedCharacter = character
@@ -528,16 +653,63 @@ local function spawnGuardianForZone(zonePart: BasePart, zoneLevel: number, zoneK
 	g.RootPart.Touched:Connect(function(hit)
 		local g = activeGuardians[zoneKey]
 		-- 增加 g 存在判断，防止异步触发时 g 已经被清理。
-		if g and g.State == "Track" and g.TargetPlayer then
-			local char = g.TargetPlayer.Character
-			if char and hit:IsDescendantOf(char) then
-				local hrp = char:FindFirstChild("HumanoidRootPart")
-				if hrp then punishPlayer(g, g.TargetPlayer, hrp) end
-			end
+		if g and g.TargetPlayer then
+			tryPunishTouchedTarget(g, g.TargetPlayer, hit)
 		end
 	end)
 
 	playAnim(activeGuardians[zoneKey], "Idle")
+end
+
+local function spawnMissingGuardiansForAllZones()
+	local zones = ZoneService.GetPickupZones()
+	for _, z in ipairs(zones) do
+		local zoneKey = z.Part:GetFullName()
+		if not activeGuardians[zoneKey] then
+			spawnGuardianForZone(z.Part, z.Level, zoneKey)
+		end
+	end
+end
+
+local function bindGuardianTemplateFolder(folder: Instance)
+	guardianTemplateFolder = folder
+	guardianTemplateMissingWarned = false
+
+	if guardianTemplateReadyConnection then
+		guardianTemplateReadyConnection:Disconnect()
+		guardianTemplateReadyConnection = nil
+	end
+	if guardianTemplateChildConnection then
+		guardianTemplateChildConnection:Disconnect()
+		guardianTemplateChildConnection = nil
+	end
+
+	-- 如果 GuardianModel 文件夹先出现、具体模型后出现，也要补生成公共守护者。
+	guardianTemplateChildConnection = folder.ChildAdded:Connect(function(child)
+		if child:IsA("Model") then
+			task.defer(spawnMissingGuardiansForAllZones)
+		end
+	end)
+
+	spawnMissingGuardiansForAllZones()
+end
+
+local function watchGuardianTemplateFolder()
+	local existingFolder = ReplicatedStorage:FindFirstChild("GuardianModel")
+	if existingFolder then
+		bindGuardianTemplateFolder(existingFolder)
+		return
+	end
+
+	if guardianTemplateReadyConnection then
+		return
+	end
+
+	guardianTemplateReadyConnection = ReplicatedStorage.ChildAdded:Connect(function(child)
+		if child.Name == "GuardianModel" then
+			bindGuardianTemplateFolder(child)
+		end
+	end)
 end
 
 local function getPersonalGuardianKey(player: Player, zoneKey: string): string
@@ -576,12 +748,8 @@ local function ensurePersonalGuardian(player: Player, zonePart: BasePart, zoneLe
 
 		g.RootPart.Touched:Connect(function(hit)
 			local current = personalGuardians[personalKey]
-			if current and current.State == "Track" and current.TargetPlayer then
-				local char = current.TargetPlayer.Character
-				if char and hit:IsDescendantOf(char) then
-					local hrp = char:FindFirstChild("HumanoidRootPart")
-					if hrp then punishPlayer(current, current.TargetPlayer, hrp) end
-				end
+			if current and current.TargetPlayer then
+				tryPunishTouchedTarget(current, current.TargetPlayer, hit)
 			end
 		end)
 		playAnim(g, "Idle")
@@ -659,7 +827,7 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 		local flatTargetOffset = Vector3.new(targetOffset.X, 0, targetOffset.Z)
 		local targetDistance = flatTargetOffset.Magnitude
 
-		if targetDistance <= CATCH_DISTANCE then
+		if isTargetWithinGuardianCatchRange(g, targetHrp) then
 			punishPlayer(g, g.TargetPlayer, targetHrp)
 			return
 		end
@@ -681,7 +849,10 @@ local function updateTrackingGuardian(g, key, dt: number, now: number, shouldDes
 			else
 				g.Waypoints = {}
 				g.CurrentWaypointIdx = 1
+				moveGuardianTowards(g, targetHrp.Position, dt, currentSpeed)
+				return
 			end
+
 		end
 
 		if targetDistance <= DIRECT_CHASE_DISTANCE then
@@ -893,10 +1064,12 @@ function GuardianService.Init()
 	guardiansFolder = workspace:FindFirstChild("Guardians") or Instance.new("Folder", workspace)
 	guardiansFolder.Name = "Guardians"
 
-	local zones = ZoneService.GetPickupZones()
-	for _, z in ipairs(zones) do
-		spawnGuardianForZone(z.Part, z.Level, z.Part:GetFullName())
+	guardianTemplateFolder = ReplicatedStorage:FindFirstChild("GuardianModel")
+	if not guardianTemplateFolder then
+		warn("[GuardianService] 初始化时未找到 ReplicatedStorage.GuardianModel；守护者暂不生成，但不会阻塞玩家进入游戏。")
 	end
+
+	watchGuardianTemplateFolder()
 
 	RunService.Heartbeat:Connect(onHeartbeat)
 

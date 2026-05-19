@@ -27,11 +27,6 @@ local function getWeaponName(level: number): string
 	return (name ~= nil and name ~= "") and name or string.format("Weapon %d", level)
 end
 
-local function getWeaponImageId(level: number): string?
-	local img = Config.WEAPON_IMAGE_ID_BY_LEVEL and Config.WEAPON_IMAGE_ID_BY_LEVEL[level]
-	return (img ~= nil and img ~= "") and img or nil
-end
-
 local function getTemplateTool(): Tool?
 	-- 统一从模板 Tool 读取“武器握持基准”。
 	-- 优先使用 Workspace.weaponModle：
@@ -88,11 +83,6 @@ local function ensureToolMeta(tool: Tool, weaponLevel: number)
 	tool:SetAttribute("IsWeaponTool", true)
 	tool:SetAttribute("WeaponLevel", weaponLevel)
 	tool.CanBeDropped = false
-
-	local img = getWeaponImageId(weaponLevel)
-	if img then
-		tool.TextureId = img
-	end
 end
 
 
